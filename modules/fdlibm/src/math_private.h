@@ -649,6 +649,8 @@ rnint(__double_t x)
 #ifdef DEBUG
 #if defined(__amd64__) || defined(__i386__)
 #define	breakpoint()	asm("int $3")
+#elif defined(__wasi__)
+#define breakpoint()    __builtin_trap()
 #else
 #include <signal.h>
 
