@@ -96,7 +96,7 @@ MFBT_API bool GenerateRandomBytesFromOS(void* aBuffer, size_t aLength) {
 
 #elif defined(USE_ARC4RANDOM)  // defined(XP_WIN)
 
-  arc4random_buf(aBuffer, aLength);
+  random_get(aBuffer, aLength);
   return true;
 
 #elif defined(XP_UNIX)  // defined(USE_ARC4RANDOM)
