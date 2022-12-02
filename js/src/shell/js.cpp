@@ -619,6 +619,10 @@ bool shell::enableSourcePragmas = true;
 bool shell::enableAsyncStacks = false;
 bool shell::enableAsyncStackCaptureDebuggeeOnly = false;
 bool shell::enableStreams = false;
+bool shell::enableReadableByteStreams = false;
+bool shell::enableBYOBStreamReaders = false;
+bool shell::enableWritableStreams = false;
+bool shell::enableReadableStreamPipeTo = false;
 bool shell::enableWeakRefs = false;
 bool shell::enableToSource = false;
 bool shell::enablePropertyErrorMessageFix = false;
@@ -3886,6 +3890,10 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
       .setSharedMemoryAndAtomicsEnabled(enableSharedMemory)
       .setCoopAndCoepEnabled(false)
       .setStreamsEnabled(enableStreams)
+      .setReadableByteStreamsEnabled(enableReadableByteStreams)
+      .setBYOBStreamReadersEnabled(enableBYOBStreamReaders)
+      .setWritableStreamsEnabled(enableWritableStreams)
+      .setReadableStreamPipeToEnabled(enableReadableStreamPipeTo)
       .setWeakRefsEnabled(enableWeakRefs
                               ? JS::WeakRefSpecifier::EnabledWithCleanupSome
                               : JS::WeakRefSpecifier::Disabled)
@@ -6626,6 +6634,20 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
     }
     if (v.isBoolean()) {
       immutablePrototype = v.toBoolean();
+    }
+
+    if (!JS_GetProperty(cx, opts, "enableWritableStreams", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      creationOptions.setWritableStreamsEnabled(v.toBoolean());
+    }
+
+    if (!JS_GetProperty(cx, opts, "enableReadableStreamPipeTo", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      creationOptions.setReadableStreamPipeToEnabled(v.toBoolean());
     }
 
     if (!JS_GetProperty(cx, opts, "systemPrincipal", &v)) {
@@ -12060,7 +12082,10 @@ bool SetContextWasmOptions(JSContext* cx, const OptionParser& op) {
   enableWasmVerbose = op.getBoolOption("wasm-verbose");
   enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
   enableStreams = !op.getBoolOption("no-streams");
-
+  enableReadableByteStreams = op.getBoolOption("enable-readable-byte-streams");
+  enableBYOBStreamReaders = op.getBoolOption("enable-byob-stream-readers");
+  enableWritableStreams = op.getBoolOption("enable-writable-streams");
+  enableReadableStreamPipeTo = op.getBoolOption("enable-readablestream-pipeto");
 
   JS::ContextOptionsRef(cx)
       .setAsmJS(enableAsmJS)
