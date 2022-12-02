@@ -7110,6 +7110,16 @@ static bool IsAsmJSCompilerAvailable(JSContext* cx) {
 
 static bool EstablishPreconditions(JSContext* cx,
                                    frontend::ParserBase& parser) {
+  if (!IsAsmJSCompilerAvailable(cx)) {
+    if (cx->realm() && cx->realm()->debuggerObservesAsmJS()) {
+      return TypeFailureWarning(
+          parser, "Asm.js optimizer disabled because debugger is active");
+    }
+    return TypeFailureWarning(parser,
+                              "Asm.js optimizer disabled because the compiler "
+                              "is disabled or unavailable");
+  }
+
   switch (parser.options().asmJSOption) {
     case AsmJSOption::DisabledByAsmJSPref:
       return TypeFailureWarning(
