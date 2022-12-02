@@ -441,6 +441,7 @@ if CONFIG["MOZ_JS_STREAMS"]:
     UNIFIED_SOURCES += [
         "builtin/Stream.cpp",
         "builtin/streams/MiscellaneousOperations.cpp",
+        "builtin/streams/PipeToState.cpp",
         "builtin/streams/PullIntoDescriptor.cpp",
         "builtin/streams/QueueingStrategies.cpp",
         "builtin/streams/QueueWithSizes.cpp",
@@ -454,6 +455,12 @@ if CONFIG["MOZ_JS_STREAMS"]:
         "builtin/streams/ReadableStreamReader.cpp",
         "builtin/streams/StreamAPI.cpp",
         "builtin/streams/TeeState.cpp",
+        "builtin/streams/WritableStream.cpp",
+        "builtin/streams/WritableStreamDefaultController.cpp",
+        "builtin/streams/WritableStreamDefaultControllerOperations.cpp",
+        "builtin/streams/WritableStreamDefaultWriter.cpp",
+        "builtin/streams/WritableStreamOperations.cpp",
+        "builtin/streams/WritableStreamWriterOperations.cpp",
     ]
 
 # builtin/RegExp.cpp cannot be built in unified mode because it causes huge
