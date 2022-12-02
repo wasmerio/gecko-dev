@@ -71,7 +71,7 @@ void FrontendContext::setStackQuota(JS::NativeStackSize stackSize) {
   }
 #endif  // !__wasi__
 
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(__wasi__)
   setNativeStackLimitThread();
 #endif
 }
@@ -221,13 +221,17 @@ bool FrontendContext::convertToRuntimeError(
 static size_t GetTid() {
 #  if defined(_WIN32)
   return size_t(GetCurrentThreadId());
-#  else
+#  elif defined(__wasi__)
+  // empty
+# else
   return size_t(pthread_self());
 #  endif
 }
 
 void FrontendContext::setNativeStackLimitThread() {
+#ifndef __wasi__
   stackLimitThreadId_.emplace(GetTid());
+#endif
 }
 
 void FrontendContext::assertNativeStackLimitThread() {
