@@ -605,6 +605,7 @@ bool shell::enableTestWasmAwaitTier2 = false;
 bool shell::enableSourcePragmas = true;
 bool shell::enableAsyncStacks = false;
 bool shell::enableAsyncStackCaptureDebuggeeOnly = false;
+bool shell::enableStreams = false;
 bool shell::enableWeakRefs = false;
 bool shell::enableToSource = false;
 bool shell::enablePropertyErrorMessageFix = false;
@@ -3887,6 +3888,7 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(enableSharedMemory)
       .setCoopAndCoepEnabled(false)
+      .setStreamsEnabled(enableStreams)
       .setWeakRefsEnabled(enableWeakRefs
                               ? JS::WeakRefSpecifier::EnabledWithCleanupSome
                               : JS::WeakRefSpecifier::Disabled)
@@ -10673,6 +10675,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableAsyncStacks = !op.getBoolOption("no-async-stacks");
   enableAsyncStackCaptureDebuggeeOnly =
       op.getBoolOption("async-stacks-capture-debuggee-only");
+  enableStreams = !op.getBoolOption("no-streams");
   enableWeakRefs = !op.getBoolOption("disable-weak-refs");
   enableToSource = !op.getBoolOption("disable-tosource");
   enablePropertyErrorMessageFix =
@@ -11652,6 +11655,9 @@ int main(int argc, char** argv) {
       !op.addBoolOption('\0', "less-debug-code",
                         "Emit less machine code for "
                         "checking assertions under DEBUG.") ||
+      !op.addBoolOption('\0', "enable-streams",
+                        "Enable WHATWG Streams (default)") ||
+      !op.addBoolOption('\0', "no-streams", "Disable WHATWG Streams") ||
       !op.addBoolOption('\0', "disable-weak-refs", "Disable weak references") ||
       !op.addBoolOption('\0', "disable-tosource", "Disable toSource/uneval") ||
       !op.addBoolOption('\0', "disable-property-error-message-fix",
