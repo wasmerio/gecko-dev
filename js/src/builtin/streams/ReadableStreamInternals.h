@@ -47,6 +47,9 @@ class ReadableStream;
 
 extern uint32_t ReadableStreamGetNumReadRequests(ReadableStream* stream);
 
+[[nodiscard]] extern bool ReadableStreamHasBYOBReader(
+    JSContext* cx, JS::Handle<ReadableStream*> unwrappedStream, bool* result);
+
 [[nodiscard]] extern bool ReadableStreamHasDefaultReader(
     JSContext* cx, JS::Handle<ReadableStream*> unwrappedStream, bool* result);
 

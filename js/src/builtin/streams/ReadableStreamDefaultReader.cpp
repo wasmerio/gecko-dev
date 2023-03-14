@@ -8,7 +8,9 @@
 
 #include "builtin/streams/ClassSpecMacro.h"  // JS_STREAMS_CLASS_SPEC
 #include "builtin/streams/MiscellaneousOperations.h"  // js::ReturnPromiseRejectedWithPendingError
-#include "builtin/streams/ReadableStream.h"  // js::ReadableStream
+#include "builtin/streams/ReadableStream.h"            // js::ReadableStream
+#include "builtin/streams/ReadableStreamController.h"  // js::ReadableStreamController
+#include "builtin/streams/ReadableStreamInternals.h"  // js::ReadableStream{Cancel,CreateReadResult}
 #include "builtin/streams/ReadableStreamReader.h"  // js::ForAuthorCodeBool, js::ReadableStream{,Default}Reader
 #include "js/CallArgs.h"              // JS::CallArgs{,FromVp}
 #include "js/Class.h"                 // JSClass, JS_NULL_CLASS_OPS
@@ -17,9 +19,18 @@
 #include "js/RootingAPI.h"            // JS::Handle, JS::Rooted
 #include "vm/PromiseObject.h"         // js::PromiseObject
 
+#include "builtin/streams/ReadableStreamReader-inl.h"  // js::UnwrapStreamFromReader
+
 #include "vm/Compartment-inl.h"   // js::UnwrapAndTypeCheckThis
 #include "vm/JSObject-inl.h"      // js::NewObjectWithClassProto
-#include "vm/NativeObject-inl.h"  // js::ThrowIfNotConstructing
+#include "vm/NativeObject-inl.h"  // js::ThrowIfNotConstructin
+
+using JS::Handle;
+using JS::Rooted;
+using JS::Value;
+
+using js::PromiseObject;
+using js::ReadableStreamController;
 
 using JS::CallArgs;
 using JS::CallArgsFromVp;
@@ -36,6 +47,7 @@ using js::ReadableStream;
 using js::ReadableStreamDefaultReader;
 using js::ReadableStreamReader;
 using js::UnwrapAndTypeCheckThis;
+using js::UnwrapStreamFromReader;
 
 /*** 3.6. Class ReadableStreamDefaultReader *********************************/
 
@@ -246,6 +258,68 @@ static bool ReadableStreamDefaultReader_releaseLock(JSContext* cx,
 
   args.rval().setUndefined();
   return true;
+}
+
+/**
+ * Streams spec, 3.8.7.
+ *      ReadableStreamDefaultReaderRead ( reader [, forAuthorCode ] )
+ */
+[[nodiscard]] PromiseObject* js::ReadableStreamDefaultReaderRead(
+    JSContext* cx, Handle<ReadableStreamReader*> unwrappedReader) {
+  // Step 1: If forAuthorCode was not passed, set it to false (implicit).
+
+  // Step 2: Let stream be reader.[[ownerReadableStream]].
+  // Step 3: Assert: stream is not undefined.
+  Rooted<ReadableStream*> unwrappedStream(
+      cx, UnwrapStreamFromReader(cx, unwrappedReader));
+  if (!unwrappedStream) {
+    return nullptr;
+  }
+
+  // Step 4: Set stream.[[disturbed]] to true.
+  unwrappedStream->setDisturbed();
+
+  // Step 5: If stream.[[state]] is "closed", return a promise resolved with
+  //         ! ReadableStreamCreateReadResult(undefined, true, forAuthorCode).
+  if (unwrappedStream->closed()) {
+    PlainObject* iterResult = ReadableStreamCreateReadResult(
+        cx, UndefinedHandleValue, true, unwrappedReader->forAuthorCode());
+    if (!iterResult) {
+      return nullptr;
+    }
+
+    Rooted<Value> iterResultVal(cx, JS::ObjectValue(*iterResult));
+    return PromiseObject::unforgeableResolveWithNonPromise(cx, iterResultVal);
+  }
+
+  // Step 6: If stream.[[state]] is "errored", return a promise rejected
+  //         with stream.[[storedError]].
+  if (unwrappedStream->errored()) {
+    Rooted<Value> storedError(cx, unwrappedStream->storedError());
+    if (!cx->compartment()->wrap(cx, &storedError)) {
+      return nullptr;
+    }
+    return PromiseObject::unforgeableReject(cx, storedError);
+  }
+
+  // Step 7: Assert: stream.[[state]] is "readable".
+  MOZ_ASSERT(unwrappedStream->readable());
+
+  // Step 8: Return ! stream.[[readableStreamController]].[[PullSteps]]().
+  Rooted<ReadableStreamController*> unwrappedController(
+      cx, unwrappedStream->controller());
+
+  if (unwrappedController->is<ReadableStreamDefaultController>()) {
+    Rooted<ReadableStreamDefaultController*> unwrappedDefaultController(
+        cx, &unwrappedController->as<ReadableStreamDefaultController>());
+    return ReadableStreamDefaultControllerPullSteps(cx,
+                                                    unwrappedDefaultController);
+  } else {
+    MOZ_ASSERT(unwrappedController->is<ReadableByteStreamController>());
+    Rooted<ReadableByteStreamController*> unwrappedByteController(
+        cx, &unwrappedController->as<ReadableByteStreamController>());
+    return ReadableByteStreamControllerPullSteps(cx, unwrappedByteController);
+  }
 }
 
 static const JSFunctionSpec ReadableStreamDefaultReader_methods[] = {

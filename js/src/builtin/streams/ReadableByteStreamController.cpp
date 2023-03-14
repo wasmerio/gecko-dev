@@ -4,230 +4,98 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "builtin/Stream.h"
+/* Class ReadableByteStreamController. */
 
-#include "js/Stream.h"
+#include "mozilla/Assertions.h"  // MOZ_ASSERT{,_IF}
 
-#include <stdint.h>  // int32_t
+#include "jsfriendapi.h"  // js::AssertSameCompartment
 
 #include "builtin/streams/ClassSpecMacro.h"           // JS_STREAMS_CLASS_SPEC
-#include "builtin/streams/MiscellaneousOperations.h"  // js::CreateAlgorithmFromUnderlyingMethod, js::InvokeOrNoop, js::IsMaybeWrapped, js::PromiseCall, js::PromiseRejectedWithPendingError
+#include "builtin/streams/MiscellaneousOperations.h"  // js::IsMaybeWrapped
 #include "builtin/streams/PullIntoDescriptor.h"       // js::PullIntoDescriptor
-#include "builtin/streams/QueueWithSizes.h"  // js::{EnqueueValueWithSize,ResetQueue}
+#include "builtin/streams/QueueWithSizes.h"  // js::{DequeueValue,ResetQueue}
+#include "builtin/streams/ReadableByteStreamControllerOperations.h"  // js::ReadableStreamController{CallPullIfNeeded,ClearAlgorithms,Error,GetDesiredSizeUnchecked}, js::ReadableByteStreamController{Close,Enqueue}
 #include "builtin/streams/ReadableStream.h"  // js::ReadableStream, js::SetUpExternalReadableByteStreamController
-#include "builtin/streams/ReadableStreamController.h"  // js::ReadableStream{,Default}Controller, js::ReadableStreamDefaultControllerPullSteps, js::ReadableStreamControllerStart{,Failed}Handler
-#include "builtin/streams/ReadableStreamDefaultControllerOperations.h"  // js::ReadableStreamControllerClearAlgorithms
-#include "builtin/streams/ReadableStreamInternals.h"  // js::ReadableStream{AddReadOrReadIntoRequest,CloseInternal,CreateReadResult,ErrorInternal,FulfillReadOrReadIntoRequest,GetNumReadRequests,HasDefaultReader}
-#include "builtin/streams/ReadableStreamReader.h"  // js::ReadableStream{,Default}Reader, js::CreateReadableStreamDefaultReader, js::ReadableStreamReaderGeneric{Cancel,Initialize,Release}, js::ReadableStreamDefaultReaderRead
-#include "js/ArrayBuffer.h"                        // JS::NewArrayBuffer
-#include "js/experimental/TypedData.h"  // JS_GetArrayBufferViewData, JS_NewUint8Array{,WithBuffer}
-#include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
+#include "builtin/streams/ReadableStreamBYOBRequest.h"  // js::ReadableStreamBYOBRequest
+#include "builtin/streams/ReadableStreamController.h"  // js::ReadableStream{,Default}Controller, js::ReadableByteStreamController, js::CheckReadableStreamControllerCanCloseOrEnqueue, js::ReadableStreamControllerCancelSteps, js::ReadableByteStreamControllerPullSteps, js::ReadableStreamControllerStart{,Failed}Handler
+#include "builtin/streams/ReadableStreamInternals.h"  // js::ReadableStream{AddReadOrReadIntoRequest,CloseInternal,CreateReadResult}
+#include "builtin/streams/ReadableStreamOperations.h"  // js::ReadableStreamTee_Cancel
+#include "builtin/streams/ReadableStreamReader.h"  // js::ReadableStream{,Default}Reader
+#include "builtin/streams/StreamController.h"  // js::StreamController
+#include "builtin/streams/TeeState.h"          // js::TeeState
+#include "js/ArrayBuffer.h"                    // JS::NewArrayBuffer
+#include "js/Class.h"                          // js::ClassSpec
+#include "js/ErrorReport.h"                    // JS_ReportErrorNumberASCII
+#include "js/friend/ErrorMessages.h"           // js::GetErrorMessage, JSMSG_*
 #include "js/PropertySpec.h"
+#include "js/Stream.h"
 #include "vm/Interpreter.h"
 #include "vm/JSContext.h"
 #include "vm/PlainObject.h"  // js::PlainObject
 #include "vm/PromiseObject.h"  // js::PromiseObject, js::PromiseResolvedWithUndefined
 #include "vm/SelfHosting.h"
 
-#include "builtin/HandlerFunction-inl.h"  // js::NewHandler
-#include "builtin/streams/ReadableStreamReader-inl.h"  // js::Unwrap{ReaderFromStream{,NoThrow},StreamFromReader}
-#include "vm/Compartment-inl.h"
-#include "vm/List-inl.h"  // js::ListObject, js::StoreNewListInFixedSlot
-#include "vm/NativeObject-inl.h"
+#include "builtin/HandlerFunction-inl.h"  // js::TargetFromHandler
+#include "builtin/streams/MiscellaneousOperations-inl.h"  // js::PromiseCall
+#include "builtin/streams/ReadableStreamReader-inl.h"  // js::UnwrapReaderFromStream
+#include "vm/Compartment-inl.h"  // JS::Compartment::wrap, js::UnwrapAnd{DowncastObject,TypeCheckThis}
+#include "vm/JSContext-inl.h"  // JSContext::check
+#include "vm/JSObject-inl.h"   // js::NewBuiltinClassInstance
+#include "vm/List-inl.h"       // js::ListObject, js::StoreNewListInFixedSlot
+#include "vm/Realm-inl.h"      // js::AutoRealm
+
+using js::ClassSpec;
+using js::PromiseObject;
+using js::ReadableByteStreamController;
+using js::ReadableByteStreamControllerEnqueue;
+using js::ReadableStream;
+using js::ReadableStreamController;
+using js::ReadableStreamControllerCallPullIfNeeded;
+using js::ReadableStreamControllerClearAlgorithms;
+using js::ReadableStreamControllerError;
+using js::ReadableStreamControllerGetDesiredSizeUnchecked;
+using js::TargetFromHandler;
+using js::UnwrapAndTypeCheckThis;
+
+using JS::CallArgs;
+using JS::CallArgsFromVp;
+using JS::Handle;
+using JS::ObjectValue;
+using JS::Rooted;
+using JS::Value;
 
 using namespace js;
 
-#if 0  // disable user-defined byte streams
-
-class ByteStreamChunk : public NativeObject
-{
-  private:
-    enum Slots {
-        Slot_Buffer = 0,
-        Slot_ByteOffset,
-        Slot_ByteLength,
-        SlotCount
-    };
-
-  public:
-    static const JSClass class_;
-
-    ArrayBufferObject* buffer() {
-        return &getFixedSlot(Slot_Buffer).toObject().as<ArrayBufferObject>();
-    }
-    uint32_t byteOffset() { return getFixedSlot(Slot_ByteOffset).toInt32(); }
-    void SetByteOffset(uint32_t offset) {
-        setFixedSlot(Slot_ByteOffset, Int32Value(offset));
-    }
-    uint32_t byteLength() { return getFixedSlot(Slot_ByteLength).toInt32(); }
-    void SetByteLength(uint32_t length) {
-        setFixedSlot(Slot_ByteLength, Int32Value(length));
-    }
-
-    static ByteStreamChunk* create(JSContext* cx, HandleObject buffer, uint32_t byteOffset,
-                                   uint32_t byteLength)
-    {
-        Rooted<ByteStreamChunk*> chunk(cx, NewBuiltinClassInstance<ByteStreamChunk>(cx));
-        if (!chunk) {
-            return nullptr;
-        }
-
-        chunk->setFixedSlot(Slot_Buffer, ObjectValue(*buffer));
-        chunk->setFixedSlot(Slot_ByteOffset, Int32Value(byteOffset));
-        chunk->setFixedSlot(Slot_ByteLength, Int32Value(byteLength));
-        return chunk;
-    }
-};
-
-const JSClass ByteStreamChunk::class_ = {
-    "ByteStreamChunk",
-    JSCLASS_HAS_RESERVED_SLOTS(SlotCount)
-};
-
-#endif  // user-defined byte streams
-
-/*** 3.3. ReadableStreamAsyncIteratorPrototype ******************************/
-
-// Not implemented.
-
-/*** 3.7. Class ReadableStreamBYOBReader ************************************/
-
-// Not implemented.
-
-/*** 3.11. Class ReadableByteStreamController *******************************/
-
-#if 0  // disable user-defined byte streams
-
 /**
- * Streams spec, 3.10.3
- *      new ReadableByteStreamController ( stream, underlyingSource,
- *                                         highWaterMark )
- * Steps 3 - 16.
- *
- * Note: All arguments must be same-compartment with cx. ReadableStream
- * controllers are always created in the same compartment as the stream.
- */
-[[nodiscard]] static ReadableByteStreamController*
-CreateReadableByteStreamController(JSContext* cx,
-                                   Handle<ReadableStream*> stream,
-                                   HandleValue underlyingByteSource,
-                                   HandleValue highWaterMarkVal)
-{
-    cx->check(stream, underlyingByteSource, highWaterMarkVal);
-
-    Rooted<ReadableByteStreamController*> controller(cx,
-        NewBuiltinClassInstance<ReadableByteStreamController>(cx));
-    if (!controller) {
-        return nullptr;
-    }
-
-    // Step 3: Set this.[[controlledReadableStream]] to stream.
-    controller->setStream(stream);
-
-    // Step 4: Set this.[[underlyingByteSource]] to underlyingByteSource.
-    controller->setUnderlyingSource(underlyingByteSource);
-
-    // Step 5: Set this.[[pullAgain]], and this.[[pulling]] to false.
-    controller->setFlags(0);
-
-    // Step 6: Perform ! ReadableByteStreamControllerClearPendingPullIntos(this).
-    if (!ReadableByteStreamControllerClearPendingPullIntos(cx, controller)) {
-        return nullptr;
-    }
-
-    // Step 7: Perform ! ResetQueue(this).
-    if (!ResetQueue(cx, controller)) {
-        return nullptr;
-    }
-
-    // Step 8: Set this.[[started]] and this.[[closeRequested]] to false.
-    // These should be false by default, unchanged since step 5.
-    MOZ_ASSERT(controller->flags() == 0);
-
-    // Step 9: Set this.[[strategyHWM]] to
-    //         ? ValidateAndNormalizeHighWaterMark(highWaterMark).
-    double highWaterMark;
-    if (!ValidateAndNormalizeHighWaterMark(cx, highWaterMarkVal, &highWaterMark)) {
-        return nullptr;
-    }
-    controller->setStrategyHWM(highWaterMark);
-
-    // Step 10: Let autoAllocateChunkSize be
-    //          ? GetV(underlyingByteSource, "autoAllocateChunkSize").
-    RootedValue autoAllocateChunkSize(cx);
-    if (!GetProperty(cx, underlyingByteSource, cx->names().autoAllocateChunkSize,
-                     &autoAllocateChunkSize))
-    {
-        return nullptr;
-    }
-
-    // Step 11: If autoAllocateChunkSize is not undefined,
-    if (!autoAllocateChunkSize.isUndefined()) {
-        // Step a: If ! IsInteger(autoAllocateChunkSize) is false, or if
-        //         autoAllocateChunkSize ≤ 0, throw a RangeError exception.
-        if (!IsInteger(autoAllocateChunkSize) || autoAllocateChunkSize.toNumber() <= 0) {
-            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                      JSMSG_READABLEBYTESTREAMCONTROLLER_BAD_CHUNKSIZE);
-            return nullptr;
-        }
-    }
-
-    // Step 12: Set this.[[autoAllocateChunkSize]] to autoAllocateChunkSize.
-    controller->setAutoAllocateChunkSize(autoAllocateChunkSize);
-
-    // Step 13: Set this.[[pendingPullIntos]] to a new empty List.
-    if (!StoreNewListInFixedSlot(cx, controller,
-                                 ReadableByteStreamController::Slot_PendingPullIntos)) {
-        return nullptr;
-    }
-
-    // Step 14: Let controller be this (implicit).
-
-    // Step 15: Let startResult be
-    //          ? InvokeOrNoop(underlyingSource, "start", « this »).
-    RootedValue startResult(cx);
-    RootedValue controllerVal(cx, ObjectValue(*controller));
-    if (!InvokeOrNoop(cx, underlyingByteSource, cx->names().start, controllerVal, &startResult)) {
-        return nullptr;
-    }
-
-    // Step 16: Let startPromise be a promise resolved with startResult:
-    RootedObject startPromise(cx, PromiseObject::unforgeableResolve(cx, startResult));
-    if (!startPromise) {
-        return nullptr;
-    }
-
-    RootedObject onStartFulfilled(cx, NewHandler(cx, ReadableStreamControllerStartHandler, controller));
-    if (!onStartFulfilled) {
-        return nullptr;
-    }
-
-    RootedObject onStartRejected(cx, NewHandler(cx, ControllerStartFailedHandler, controller));
-    if (!onStartRejected) {
-        return nullptr;
-    }
-
-    if (!JS::AddPromiseReactions(cx, startPromise, onStartFulfilled, onStartRejected)) {
-        return nullptr;
-    }
-
-    return controller;
-}
-
-#endif  // user-defined byte streams
-
-/**
- * Streams spec, 3.11.3.
- * new ReadableByteStreamController ( stream, underlyingByteSource,
- *                                    highWaterMark )
+ * Streams spec, 3.9.3.
+ * new ReadableByteStreamController( stream, underlyingSource, size,
+ *                                      highWaterMark )
  */
 bool ReadableByteStreamController::constructor(JSContext* cx, unsigned argc,
                                                Value* vp) {
-  // Step 1: Throw a TypeError exception.
+  // Step 1: Throw a TypeError.
   JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                             JSMSG_BOGUS_CONSTRUCTOR,
                             "ReadableByteStreamController");
   return false;
+}
+
+const JSClass ByteStreamChunk::class_ = {"ByteStreamChunk",
+                                         JSCLASS_HAS_RESERVED_SLOTS(SlotCount)};
+
+ByteStreamChunk* ByteStreamChunk::create(JSContext* cx, HandleObject buffer,
+                                         uint32_t byteOffset,
+                                         uint32_t byteLength) {
+  Rooted<ByteStreamChunk*> chunk(cx,
+                                 NewBuiltinClassInstance<ByteStreamChunk>(cx));
+  if (!chunk) {
+    return nullptr;
+  }
+
+  chunk->setFixedSlot(Slot_Buffer, ObjectValue(*buffer));
+  chunk->setFixedSlot(Slot_ByteOffset, Int32Value(byteOffset));
+  chunk->setFixedSlot(Slot_ByteLength, Int32Value(byteLength));
+  return chunk;
 }
 
 // Disconnect the source from a controller without calling finalize() on it,
@@ -304,7 +172,7 @@ class MOZ_RAII AutoClearUnderlyingSource {
 
   // Step 11: Set controller.[[autoAllocateChunkSize]] to
   //          autoAllocateChunkSize (implicit).
-  MOZ_ASSERT(controller->autoAllocateChunkSize().isUndefined());
+  MOZ_ASSERT(controller->autoAllocateChunkSize());
 
   // Step 12: Set this.[[pendingPullIntos]] to a new empty List.
   if (!StoreNewListInFixedSlot(
@@ -346,12 +214,6 @@ class MOZ_RAII AutoClearUnderlyingSource {
   return true;
 }
 
-static const JSPropertySpec ReadableByteStreamController_properties[] = {
-    JS_PS_END};
-
-static const JSFunctionSpec ReadableByteStreamController_methods[] = {
-    JS_FS_END};
-
 static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
                                                  JSObject* obj) {
   ReadableByteStreamController& controller =
@@ -369,62 +231,35 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
   controller.externalSource()->finalize();
 }
 
-static const JSClassOps ReadableByteStreamControllerClassOps = {
-    nullptr,                               // addProperty
-    nullptr,                               // delProperty
-    nullptr,                               // enumerate
-    nullptr,                               // newEnumerate
-    nullptr,                               // resolve
-    nullptr,                               // mayResolve
-    ReadableByteStreamControllerFinalize,  // finalize
-    nullptr,                               // call
-    nullptr,                               // construct
-    nullptr,                               // trace
-};
-
-JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
-                      ClassSpec::DontDefineConstructor,
-                      JSCLASS_BACKGROUND_FINALIZE,
-                      &ReadableByteStreamControllerClassOps);
-
 // Streams spec, 3.11.5.1. [[CancelSteps]] ()
 // Unified with 3.9.5.1 above.
 
-[[nodiscard]] static bool ReadableByteStreamControllerHandleQueueDrain(
-    JSContext* cx, Handle<ReadableStreamController*> unwrappedController);
-
 /**
- * Streams spec, 3.11.5.2. [[PullSteps]] ( forAuthorCode )
+ * https://streams.spec.whatwg.org/#rbs-controller-private-pull
  */
-[[nodiscard]] static PromiseObject* ReadableByteStreamControllerPullSteps(
+[[nodiscard]] extern PromiseObject* js::ReadableByteStreamControllerPullSteps(
     JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController) {
-  // Step 1: Let stream be this.[[controlledReadableByteStream]].
+  // Let stream be this.[[stream]].
   Rooted<ReadableStream*> unwrappedStream(cx, unwrappedController->stream());
 
-  // Step 2: Assert: ! ReadableStreamHasDefaultReader(stream) is true.
-#ifdef DEBUG
+  // Assert: ! ReadableStreamHasDefaultReader(stream) is true.
   bool result;
   if (!ReadableStreamHasDefaultReader(cx, unwrappedStream, &result)) {
     return nullptr;
   }
   MOZ_ASSERT(result);
-#endif
 
   RootedValue val(cx);
-  // Step 3: If this.[[queueTotalSize]] > 0,
+  // If this.[[queueTotalSize]] > 0,
   double queueTotalSize = unwrappedController->queueTotalSize();
+
   if (queueTotalSize > 0) {
-    // Step 3.a: Assert: ! ReadableStreamGetNumReadRequests(_stream_) is 0.
+    // Assert: ! ReadableStreamGetNumReadRequests(stream) is 0.
     MOZ_ASSERT(ReadableStreamGetNumReadRequests(unwrappedStream) == 0);
 
     RootedObject view(cx);
 
-    MOZ_RELEASE_ASSERT(unwrappedStream->mode() ==
-                       JS::ReadableStreamMode::ExternalSource);
-#if 0   // disable user-defined byte streams
-        if (unwrappedStream->mode() == JS::ReadableStreamMode::ExternalSource)
-#endif  // user-defined byte streams
-    {
+    if (unwrappedStream->mode() == JS::ReadableStreamMode::ExternalSource) {
       JS::ReadableStreamUnderlyingSource* source =
           unwrappedController->externalSource();
 
@@ -441,41 +276,38 @@ JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
       }
 
       queueTotalSize = queueTotalSize - bytesWritten;
+    } else {
+      // Step 3.b: Let entry be the first element of this.[[queue]].
+      // Step 3.c: Remove entry from this.[[queue]], shifting all other
+      //           elements downward (so that the second becomes the
+      //           first, and so on).
+      Rooted<ListObject*> unwrappedQueue(cx, unwrappedController->queue());
+      Rooted<ByteStreamChunk*> unwrappedEntry(
+          cx, UnwrapAndDowncastObject<ByteStreamChunk>(
+                  cx, &unwrappedQueue->popFirstAs<JSObject>(cx)));
+      if (!unwrappedEntry) {
+        return nullptr;
+      }
+
+      queueTotalSize = queueTotalSize - unwrappedEntry->byteLength();
+
+      // Step 3.f: Let view be ! Construct(%Uint8Array%,
+      //                                   « entry.[[buffer]],
+      //                                     entry.[[byteOffset]],
+      //                                     entry.[[byteLength]] »).
+      // (reordered)
+      RootedObject buffer(cx, unwrappedEntry->buffer());
+      if (!cx->compartment()->wrap(cx, &buffer)) {
+        return nullptr;
+      }
+
+      uint32_t byteOffset = unwrappedEntry->byteOffset();
+      view = JS_NewUint8ArrayWithBuffer(cx, buffer, byteOffset,
+                                        unwrappedEntry->byteLength());
+      if (!view) {
+        return nullptr;
+      }
     }
-
-#if 0   // disable user-defined byte streams
-        else {
-            // Step 3.b: Let entry be the first element of this.[[queue]].
-            // Step 3.c: Remove entry from this.[[queue]], shifting all other
-            //           elements downward (so that the second becomes the
-            //           first, and so on).
-            Rooted<ListObject*> unwrappedQueue(cx, unwrappedController->queue());
-            Rooted<ByteStreamChunk*> unwrappedEntry(cx,
-                UnwrapAndDowncastObject<ByteStreamChunk>(
-                    cx, &unwrappedQueue->popFirstAs<JSObject>(cx)));
-            if (!unwrappedEntry) {
-                return nullptr;
-            }
-
-            queueTotalSize = queueTotalSize - unwrappedEntry->byteLength();
-
-            // Step 3.f: Let view be ! Construct(%Uint8Array%,
-            //                                   « entry.[[buffer]],
-            //                                     entry.[[byteOffset]],
-            //                                     entry.[[byteLength]] »).
-            // (reordered)
-            RootedObject buffer(cx, unwrappedEntry->buffer());
-            if (!cx->compartment()->wrap(cx, &buffer)) {
-                return nullptr;
-            }
-
-            uint32_t byteOffset = unwrappedEntry->byteOffset();
-            view = JS_NewUint8ArrayWithBuffer(cx, buffer, byteOffset, unwrappedEntry->byteLength());
-            if (!view) {
-                return nullptr;
-            }
-        }
-#endif  // user-defined byte streams
 
     // Step 3.d: Set this.[[queueTotalSize]] to
     //           this.[[queueTotalSize]] − entry.[[byteLength]].
@@ -508,12 +340,10 @@ JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
     return PromiseObject::unforgeableResolveWithNonPromise(cx, val);
   }
 
-  // Step 4: Let autoAllocateChunkSize be this.[[autoAllocateChunkSize]].
-  val = unwrappedController->autoAllocateChunkSize();
-
   // Step 5: If autoAllocateChunkSize is not undefined,
-  if (!val.isUndefined()) {
-    double autoAllocateChunkSize = val.toNumber();
+  if (unwrappedController->autoAllocateChunkSize().isSome()) {
+    uint64_t autoAllocateChunkSize =
+        unwrappedController->autoAllocateChunkSize().value();
 
     // Step 5.a: Let buffer be
     //           Construct(%ArrayBuffer%, « autoAllocateChunkSize »).
@@ -535,9 +365,10 @@ JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
     //                   [[elementSize]]: 1,
     //                   [[ctor]]: %Uint8Array%,
     //                   [[readerType]]: `"default"`}.
+    RootedObject uint8Array(cx, &cx->global()->getConstructor(JSProto_Uint8Array));
     RootedObject pullIntoDescriptor(
         cx, PullIntoDescriptor::create(cx, buffer, 0, autoAllocateChunkSize, 0,
-                                       1, nullptr, ReaderType::Default));
+                                       1, uint8Array, ReaderType::Default));
     if (!pullIntoDescriptor) {
       return PromiseRejectedWithPendingError(cx);
     }
@@ -569,27 +400,6 @@ JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
   return promise;
 }
 
-/**
- * Unified implementation of ReadableStream controllers' [[PullSteps]] internal
- * methods.
- * Streams spec, 3.9.5.2. [[PullSteps]] ( forAuthorCode )
- * and
- * Streams spec, 3.11.5.2. [[PullSteps]] ( forAuthorCode )
- */
-[[nodiscard]] PromiseObject* js::ReadableStreamControllerPullSteps(
-    JSContext* cx, Handle<ReadableStreamController*> unwrappedController) {
-  if (unwrappedController->is<ReadableStreamDefaultController>()) {
-    Rooted<ReadableStreamDefaultController*> unwrappedDefaultController(
-        cx, &unwrappedController->as<ReadableStreamDefaultController>());
-    return ReadableStreamDefaultControllerPullSteps(cx,
-                                                    unwrappedDefaultController);
-  }
-
-  Rooted<ReadableByteStreamController*> unwrappedByteController(
-      cx, &unwrappedController->as<ReadableByteStreamController>());
-  return ReadableByteStreamControllerPullSteps(cx, unwrappedByteController);
-}
-
 /*** 3.13. Readable stream BYOB controller abstract operations **************/
 
 // Streams spec, 3.13.1. IsReadableStreamBYOBRequest ( x )
@@ -601,9 +411,6 @@ JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
 // Streams spec, 3.13.3.
 //      ReadableByteStreamControllerCallPullIfNeeded ( controller )
 // Unified with 3.9.2 above.
-
-[[nodiscard]] static bool ReadableByteStreamControllerInvalidateBYOBRequest(
-    JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController);
 
 /**
  * Streams spec, 3.13.5.
@@ -704,10 +511,9 @@ JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
  * Streams spec, 3.13.15.
  *      ReadableByteStreamControllerHandleQueueDrain ( controller )
  */
-[[nodiscard]] static bool ReadableByteStreamControllerHandleQueueDrain(
-    JSContext* cx, Handle<ReadableStreamController*> unwrappedController) {
-  MOZ_ASSERT(unwrappedController->is<ReadableByteStreamController>());
 
+extern bool js::ReadableByteStreamControllerHandleQueueDrain(
+    JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController) {
   // Step 1: Assert: controller.[[controlledReadableStream]].[[state]]
   //                 is "readable".
   Rooted<ReadableStream*> unwrappedStream(cx, unwrappedController->stream());
@@ -741,7 +547,7 @@ enum BYOBRequestSlots {
  * Streams spec 3.13.16.
  *      ReadableByteStreamControllerInvalidateBYOBRequest ( controller )
  */
-[[nodiscard]] static bool ReadableByteStreamControllerInvalidateBYOBRequest(
+[[nodiscard]] bool js::ReadableByteStreamControllerInvalidateBYOBRequest(
     JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController) {
   // Step 1: If controller.[[byobRequest]] is undefined, return.
   RootedValue unwrappedBYOBRequestVal(cx, unwrappedController->byobRequest());
@@ -761,11 +567,11 @@ enum BYOBRequestSlots {
   unwrappedBYOBRequest->setFixedSlot(BYOBRequestSlot_Controller,
                                      UndefinedValue());
 
-  // Step 3: Set controller.[[byobRequest]].[[view]] to undefined.
+  // // Step 3: Set controller.[[byobRequest]].[[view]] to undefined.
   unwrappedBYOBRequest->setFixedSlot(BYOBRequestSlot_View, UndefinedValue());
 
-  // Step 4: Set controller.[[byobRequest]] to undefined.
-  unwrappedController->clearBYOBRequest();
+  // // Step 4: Set controller.[[byobRequest]] to undefined.
+  unwrappedController->clearByobRequest();
 
   return true;
 }
@@ -773,3 +579,219 @@ enum BYOBRequestSlots {
 // Streams spec, 3.13.25.
 //      ReadableByteStreamControllerShouldCallPull ( controller )
 // Unified with 3.10.3 above.
+
+// https://streams.spec.whatwg.org/#abstract-opdef-readablebytestreamcontrollergetbyobrequest
+[[nodiscard]] static bool ReadableByteStreamController_byobRequest(
+    JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  Rooted<ReadableByteStreamController*> unwrappedController(
+      cx, UnwrapAndTypeCheckThis<ReadableByteStreamController>(
+              cx, args, "get byobRequest"));
+  if (!unwrappedController) {
+    return false;
+  }
+
+  Rooted<ListObject*> unwrappedPendingPullIntos(
+      cx, unwrappedController->pendingPullIntos());
+
+  if (!unwrappedController->hasByobRequest() &&
+      unwrappedPendingPullIntos->length() > 0) {
+    // Let firstDescriptor be controller.[[pendingPullIntos]][0].
+    Rooted<PullIntoDescriptor*> firstDescriptor(
+        cx, UnwrapAndDowncastObject<PullIntoDescriptor>(
+                cx, &unwrappedPendingPullIntos->get(0).toObject()));
+
+    // Let view be ! Construct(%Uint8Array%, « firstDescriptor’s buffer,
+    // firstDescriptor’s byte offset + firstDescriptor’s bytes filled,
+    // firstDescriptor’s byte length − firstDescriptor’s bytes filled »).
+    RootedObject buffer(cx, firstDescriptor->buffer());
+    if (!cx->compartment()->wrap(cx, &buffer)) {
+      return false;
+    }
+
+    uint32_t byteOffset =
+        firstDescriptor->byteOffset() + firstDescriptor->bytesFilled();
+    uint32_t byteLength =
+        firstDescriptor->byteLength() - firstDescriptor->bytesFilled();
+
+    RootedObject viewObj(
+        cx, JS_NewUint8ArrayWithBuffer(cx, buffer, byteOffset, byteLength));
+    if (!viewObj) {
+      return false;
+    }
+
+    // Let byobRequest be a new ReadableStreamBYOBRequest.
+    Rooted<ReadableStreamBYOBRequest*> byobRequest(
+        cx, NewBuiltinClassInstance<ReadableStreamBYOBRequest>(cx));
+
+    if (!byobRequest) {
+      return false;
+    }
+
+    // Set byobRequest.[[controller]] to controller.
+    byobRequest->setController(unwrappedController);
+
+    // Set byobRequest.[[view]] to view.
+    RootedValue view(cx);
+    view.setObject(*viewObj);
+    byobRequest->setView(view);
+
+    // Set controller.[[byobRequest]] to byobRequest.
+    unwrappedController->setByobRequest(byobRequest);
+  }
+
+  args.rval().set(unwrappedController->byobRequest());
+  return true;
+}
+
+/**
+ * Streams spec, 3.9.4.1. get desiredSize
+ */
+static bool ReadableByteStreamController_desiredSize(JSContext* cx,
+                                                     unsigned argc, Value* vp) {
+  // Step 1: If ! IsReadableByteStreamController(this) is false, throw a
+  //         TypeError exception.
+  CallArgs args = CallArgsFromVp(argc, vp);
+  Rooted<ReadableByteStreamController*> unwrappedController(
+      cx, UnwrapAndTypeCheckThis<ReadableByteStreamController>(
+              cx, args, "get desiredSize"));
+  if (!unwrappedController) {
+    return false;
+  }
+
+  // 3.10.8. ReadableByteStreamControllerGetDesiredSize, steps 1-4.
+  // 3.10.8. Step 1: Let stream be controller.[[controlledReadableStream]].
+  ReadableStream* unwrappedStream = unwrappedController->stream();
+
+  // 3.10.8. Step 2: Let state be stream.[[state]].
+  // 3.10.8. Step 3: If state is "errored", return null.
+  if (unwrappedStream->errored()) {
+    args.rval().setNull();
+    return true;
+  }
+
+  // 3.10.8. Step 4: If state is "closed", return 0.
+  if (unwrappedStream->closed()) {
+    args.rval().setInt32(0);
+    return true;
+  }
+
+  // Step 2: Return ! ReadableByteStreamControllerGetDesiredSize(this).
+  args.rval().setNumber(
+      ReadableStreamControllerGetDesiredSizeUnchecked(unwrappedController));
+  return true;
+}
+
+/**
+ * Streams spec, 3.9.4.2 close()
+ */
+static bool ReadableByteStreamController_close(JSContext* cx, unsigned argc,
+                                               Value* vp) {
+  // Step 1: If ! IsReadableByteStreamController(this) is false, throw a
+  //         TypeError exception.
+  CallArgs args = CallArgsFromVp(argc, vp);
+  Rooted<ReadableByteStreamController*> unwrappedController(
+      cx,
+      UnwrapAndTypeCheckThis<ReadableByteStreamController>(cx, args, "close"));
+  if (!unwrappedController) {
+    return false;
+  }
+
+  // Step 2: If ! ReadableByteStreamControllerCanCloseOrEnqueue(this) is
+  //         false, throw a TypeError exception.
+  if (!js::CheckReadableStreamControllerCanCloseOrEnqueue(
+          cx, unwrappedController, "close")) {
+    return false;
+  }
+
+  // Step 3: Perform ! ReadableByteStreamControllerClose(this).
+  if (!ReadableByteStreamControllerClose(cx, unwrappedController)) {
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+/**
+ * Streams spec, 3.9.4.3. enqueue ( chunk )
+ */
+static bool ReadableByteStreamController_enqueue(JSContext* cx, unsigned argc,
+                                                 Value* vp) {
+  // Step 1: If ! IsReadableByteStreamController(this) is false, throw a
+  //         TypeError exception.
+  CallArgs args = CallArgsFromVp(argc, vp);
+  Rooted<ReadableByteStreamController*> unwrappedController(
+      cx, UnwrapAndTypeCheckThis<ReadableByteStreamController>(cx, args,
+                                                               "enqueue"));
+  if (!unwrappedController) {
+    return false;
+  }
+
+  // Step 2: If ! ReadableByteStreamControllerCanCloseOrEnqueue(this) is
+  //         false, throw a TypeError exception.
+  if (!js::CheckReadableStreamControllerCanCloseOrEnqueue(
+          cx, unwrappedController, "enqueue")) {
+    return false;
+  }
+
+  // Step 3: Return ! ReadableByteStreamControllerEnqueue(this, chunk).
+  if (!ReadableByteStreamControllerEnqueue(cx, unwrappedController,
+                                           args.get(0))) {
+    return false;
+  }
+  args.rval().setUndefined();
+  return true;
+}
+
+/**
+ * Streams spec, 3.9.4.4. error ( e )
+ */
+static bool ReadableByteStreamController_error(JSContext* cx, unsigned argc,
+                                               Value* vp) {
+  // Step 1: If ! IsReadableByteStreamController(this) is false, throw a
+  //         TypeError exception.
+  CallArgs args = CallArgsFromVp(argc, vp);
+  Rooted<ReadableByteStreamController*> unwrappedController(
+      cx, UnwrapAndTypeCheckThis<ReadableByteStreamController>(cx, args,
+                                                               "enqueue"));
+  if (!unwrappedController) {
+    return false;
+  }
+
+  // Step 2: Perform ! ReadableByteStreamControllerError(this, e).
+  if (!ReadableStreamControllerError(cx, unwrappedController, args.get(0))) {
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+static const JSPropertySpec ReadableByteStreamController_properties[] = {
+    JS_PSG("byobRequest", ReadableByteStreamController_byobRequest, 0),
+    JS_PSG("desiredSize", ReadableByteStreamController_desiredSize, 0),
+    JS_PS_END};
+
+static const JSFunctionSpec ReadableByteStreamController_methods[] = {
+    JS_FN("close", ReadableByteStreamController_close, 0, 0),
+    JS_FN("enqueue", ReadableByteStreamController_enqueue, 1, 0),
+    JS_FN("error", ReadableByteStreamController_error, 1, 0), JS_FS_END};
+
+static const JSClassOps ReadableByteStreamControllerClassOps = {
+    nullptr,                               // addProperty
+    nullptr,                               // delProperty
+    nullptr,                               // enumerate
+    nullptr,                               // newEnumerate
+    nullptr,                               // resolve
+    nullptr,                               // mayResolve
+    ReadableByteStreamControllerFinalize,  // finalize
+    nullptr,                               // call
+    nullptr,                               // construct
+    nullptr,                               // trace
+};
+
+JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
+                      ClassSpec::DontDefineConstructor,
+                      JSCLASS_BACKGROUND_FINALIZE,
+                      &ReadableByteStreamControllerClassOps);

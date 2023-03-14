@@ -30,6 +30,54 @@ using JS::MutableHandle;
 using JS::ToNumber;
 using JS::Value;
 
+// https://streams.spec.whatwg.org/#transfer-array-buffer
+// As some parts of the specifcation want to use the abrupt completion value,
+// this function may leave a pending exception if it returns nullptr.
+[[nodiscard]] JSObject* js::TransferArrayBuffer(JSContext* cx, JS::Handle<JSObject*> buffer) {
+  MOZ_ASSERT(JS::IsArrayBufferObject(buffer));
+
+  // Step 1.
+  MOZ_ASSERT(!JS::IsDetachedArrayBufferObject(buffer));
+
+  // Step 3 (Reordered)
+  size_t bufferLength = JS::GetArrayBufferByteLength(buffer);
+
+  // Step 2 (Reordered)
+  void* bufferData = JS::StealArrayBufferContents(cx, buffer);
+
+  // Step 4.
+  if (!JS::DetachArrayBuffer(cx, buffer)) {
+    return nullptr;
+  }
+
+  // Step 5.
+  return JS::NewArrayBufferWithContents(cx, bufferLength, bufferData);
+}
+
+// https://streams.spec.whatwg.org/#can-transfer-array-buffer
+[[nodiscard]] bool js::CanTransferArrayBuffer(JSContext* cx, JS::Handle<JSObject*> buffer) {
+  // Step 1. Assert: Type(O) is Object. (Implicit in types)
+  // Step 2. Assert: O has an [[ArrayBufferData]] internal slot.
+  MOZ_ASSERT(JS::IsArrayBufferObject(buffer));
+
+  // Step 3. If ! IsDetachedBuffer(O) is true, return false.
+  if (JS::IsDetachedArrayBufferObject(buffer)) {
+    return false;
+  }
+
+  // Step 4. If SameValue(O.[[ArrayBufferDetachKey]], undefined) is false,
+  // return false.
+  // Step 5. Return true.
+  // Note: WASM memories are the only buffers that would qualify
+  // as having an undefined [[ArrayBufferDetachKey]],
+  bool hasDefinedArrayBufferDetachKey = false;
+  if (!JS::HasDefinedArrayBufferDetachKey(cx, buffer,
+                                          &hasDefinedArrayBufferDetachKey)) {
+    return false;
+  }
+  return !hasDefinedArrayBufferDetachKey;
+}
+
 [[nodiscard]] js::PromiseObject* js::PromiseRejectedWithPendingError(
     JSContext* cx) {
   Rooted<Value> exn(cx);
@@ -137,10 +185,17 @@ using JS::Value;
 }
 
 /**
- * Streams spec, 6.3.7. ValidateAndNormalizeHighWaterMark ( highWaterMark )
+ * Streams spec, 6.3.7. ValidateAndNormalizeHighWaterMark ( highWaterMark,
+ * defaultHighWaterMark )
  */
 [[nodiscard]] bool js::ValidateAndNormalizeHighWaterMark(
-    JSContext* cx, Handle<Value> highWaterMarkVal, double* highWaterMark) {
+    JSContext* cx, Handle<Value> highWaterMarkVal, double* highWaterMark,
+    double defaultHighWaterMark) {
+  if (highWaterMarkVal.isUndefined()) {
+    *highWaterMark = defaultHighWaterMark;
+    return true;
+  }
+
   // Step 1: Set highWaterMark to ? ToNumber(highWaterMark).
   if (!ToNumber(cx, highWaterMarkVal, highWaterMark)) {
     return false;

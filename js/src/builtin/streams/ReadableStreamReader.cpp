@@ -12,7 +12,6 @@
 
 #include "jsfriendapi.h"  // JS_ReportErrorNumberASCII
 
-#include "builtin/Stream.h"  // js::ReadableStreamController, js::ReadableStreamControllerPullSteps
 #include "builtin/streams/ReadableStream.h"            // js::ReadableStream
 #include "builtin/streams/ReadableStreamController.h"  // js::ReadableStreamController
 #include "builtin/streams/ReadableStreamInternals.h"  // js::ReadableStream{Cancel,CreateReadResult}
@@ -221,55 +220,4 @@ using js::UnwrapStreamFromReader;
   unwrappedReader->clearStream();
 
   return true;
-}
-
-/**
- * Streams spec, 3.8.7.
- *      ReadableStreamDefaultReaderRead ( reader [, forAuthorCode ] )
- */
-[[nodiscard]] PromiseObject* js::ReadableStreamDefaultReaderRead(
-    JSContext* cx, Handle<ReadableStreamDefaultReader*> unwrappedReader) {
-  // Step 1: If forAuthorCode was not passed, set it to false (implicit).
-
-  // Step 2: Let stream be reader.[[ownerReadableStream]].
-  // Step 3: Assert: stream is not undefined.
-  Rooted<ReadableStream*> unwrappedStream(
-      cx, UnwrapStreamFromReader(cx, unwrappedReader));
-  if (!unwrappedStream) {
-    return nullptr;
-  }
-
-  // Step 4: Set stream.[[disturbed]] to true.
-  unwrappedStream->setDisturbed();
-
-  // Step 5: If stream.[[state]] is "closed", return a promise resolved with
-  //         ! ReadableStreamCreateReadResult(undefined, true, forAuthorCode).
-  if (unwrappedStream->closed()) {
-    PlainObject* iterResult = ReadableStreamCreateReadResult(
-        cx, UndefinedHandleValue, true, unwrappedReader->forAuthorCode());
-    if (!iterResult) {
-      return nullptr;
-    }
-
-    Rooted<Value> iterResultVal(cx, JS::ObjectValue(*iterResult));
-    return PromiseObject::unforgeableResolveWithNonPromise(cx, iterResultVal);
-  }
-
-  // Step 6: If stream.[[state]] is "errored", return a promise rejected
-  //         with stream.[[storedError]].
-  if (unwrappedStream->errored()) {
-    Rooted<Value> storedError(cx, unwrappedStream->storedError());
-    if (!cx->compartment()->wrap(cx, &storedError)) {
-      return nullptr;
-    }
-    return PromiseObject::unforgeableReject(cx, storedError);
-  }
-
-  // Step 7: Assert: stream.[[state]] is "readable".
-  MOZ_ASSERT(unwrappedStream->readable());
-
-  // Step 8: Return ! stream.[[readableStreamController]].[[PullSteps]]().
-  Rooted<ReadableStreamController*> unwrappedController(
-      cx, unwrappedStream->controller());
-  return ReadableStreamControllerPullSteps(cx, unwrappedController);
 }

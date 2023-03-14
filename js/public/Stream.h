@@ -276,11 +276,23 @@ extern JS_PUBLIC_API void ReadableStreamReleaseCCObject(JSObject* stream);
 extern JS_PUBLIC_API bool IsReadableStream(JSObject* obj);
 
 /**
+ * Returns true if the given object is a ReadableStreamBYOBReader object
+ * or an unwrappable wrapper for one, false otherwise.
+ */
+extern JS_PUBLIC_API bool IsReadableStreamBYOBReader(JSObject* obj);
+
+/**
  * Returns true if the given object is a ReadableStreamDefaultReader or
  * ReadableStreamBYOBReader object or an unwrappable wrapper for one, false
  * otherwise.
  */
 extern JS_PUBLIC_API bool IsReadableStreamReader(JSObject* obj);
+
+/**
+ * Returns true if the given object is a ReadableStreamBYOBReader object
+ * or an unwrappable wrapper for one, false otherwise.
+ */
+extern JS_PUBLIC_API bool IsReadableStreamBYOBReader(JSObject* obj);
 
 /**
  * Returns true if the given object is a ReadableStreamDefaultReader object
@@ -544,6 +556,19 @@ extern JS_PUBLIC_API bool ReadableStreamReaderCancel(JSContext* cx,
  */
 extern JS_PUBLIC_API bool ReadableStreamReaderReleaseLock(JSContext* cx,
                                                           HandleObject reader);
+
+/**
+ * C++ equivalent of the `reader.read()` method on byob readers
+ * (<https://streams.spec.whatwg.org/#default-reader-read>).
+ *
+ * The result is a new Promise object, or null on OOM.
+ *
+ * `reader` must be the result of calling `JS::ReadableStreamGetReader` with
+ * `ReadableStreamReaderMode::Default` mode, or an unwrappable wrapper for such
+ * a reader.
+ */
+extern JS_PUBLIC_API JSObject* ReadableStreamBYOBReaderRead(
+    JSContext* cx, HandleObject reader, HandleObject view);
 
 /**
  * C++ equivalent of the `reader.read()` method on default readers

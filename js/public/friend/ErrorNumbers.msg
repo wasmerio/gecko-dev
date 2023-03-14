@@ -774,7 +774,10 @@ MSG_DEF(JSMSG_READABLESTREAM_NOT_DEFAULT_CONTROLLER,     1, JSEXN_TYPEERR, "{0} 
 MSG_DEF(JSMSG_READABLESTREAM_CONTROLLER_SET,             0, JSEXN_TYPEERR, "The ReadableStream already has a controller defined.")
 MSG_DEF(JSMSG_READABLESTREAMREADER_NOT_OWNED,            1, JSEXN_TYPEERR, "The ReadableStream reader method '{0}' may only be called on a reader owned by a stream.")
 MSG_DEF(JSMSG_READABLESTREAMREADER_NOT_EMPTY,            1, JSEXN_TYPEERR, "The ReadableStream reader method '{0}' may not be called on a reader with read requests.")
-MSG_DEF(JSMSG_READABLESTREAMBYOBREADER_READ_EMPTY_VIEW,  0, JSEXN_TYPEERR, "ReadableStreamBYOBReader.read() was passed an empty TypedArrayBuffer view.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREADER_READ_NOT_BUFFER,  0, JSEXN_TYPEERR, "ReadableStreamBYOBReader.read() wasn't passed a Buffer, TypedArrayBuffer or view.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREADER_READ_EMPTY_VIEW,  0, JSEXN_TYPEERR, "ReadableStreamBYOBReader.read() was passed an empty zero-len buffer.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREADER_READ_DETACHED,    0, JSEXN_TYPEERR, "ReadableStreamBYOBReader.read() was passed a detached buffer.")
+
 MSG_DEF(JSMSG_READABLESTREAMREADER_RELEASED,             0, JSEXN_TYPEERR, "The ReadableStream reader was released.")
 MSG_DEF(JSMSG_READABLESTREAMCONTROLLER_CLOSED,           1, JSEXN_TYPEERR, "'{0}' called on a stream already closing.")
 MSG_DEF(JSMSG_READABLESTREAMCONTROLLER_NOT_READABLE,     1, JSEXN_TYPEERR, "'{0}' may only be called on a stream in the 'readable' state.")
@@ -783,6 +786,9 @@ MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_BAD_CHUNK,    1, JSEXN_TYPEERR, "{0} 
 MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_CLOSE_PENDING_PULL, 0, JSEXN_TYPEERR, "The ReadableByteStreamController cannot be closed while the buffer is being filled.")
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_NO_CONTROLLER,   1, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method '{0}' called on a request with no controller.")
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_CLOSED,  0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' called with non-zero number of bytes with a closed controller.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_DETACHED,0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' called for a detached buffer.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_ZERO     ,0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' wrote zero bytes.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_EXCEED  ,0, JSEXN_RANGEERR, "ReadableStreamBYOBRequest method 'respond' byte size exceeded buffer length.")
 MSG_DEF(JSMSG_READABLESTREAM_METHOD_NOT_IMPLEMENTED,     1, JSEXN_TYPEERR, "ReadableStream method {0} not yet implemented")
 MSG_DEF(JSMSG_READABLESTREAM_PIPETO_BAD_SIGNAL,          0, JSEXN_TYPEERR, "signal must be either undefined or an AbortSignal")
 
@@ -802,6 +808,8 @@ MSG_DEF(JSMSG_READABLESTREAM_NYI,                        0, JSEXN_ERR,     "full
 MSG_DEF(JSMSG_STREAM_MISSING_HIGHWATERMARK,              0, JSEXN_TYPEERR,  "'highWaterMark' must not be undefined.")
 MSG_DEF(JSMSG_STREAM_INVALID_HIGHWATERMARK,              0, JSEXN_RANGEERR, "'highWaterMark' must be a non-negative, non-NaN number.")
 MSG_DEF(JSMSG_STREAM_CONSUME_ERROR,                      0, JSEXN_TYPEERR,  "error consuming stream body")
+MSG_DEF(JSMSG_STREAM_AUTOALLOCATECHUNKSIZE_ZERO,         0, JSEXN_TYPEERR,  "'autoAllocateChunkSize' must not be 0.")
+MSG_DEF(JSMSG_READABLESTREAM_BYOB_SIZE,                  0, JSEXN_TYPEERR, "size unsupported for byob streams")
 
 // (wasm) Response-related
 MSG_DEF(JSMSG_WASM_ERROR_CONSUMING_RESPONSE,             0, JSEXN_TYPEERR,  "WebAssembly: There was an error consuming the Response")

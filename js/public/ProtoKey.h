@@ -111,6 +111,10 @@
   REAL(GeneratorFunction, CLASP(GeneratorFunction))                            \
   REAL(AsyncGeneratorFunction, CLASP(AsyncGeneratorFunction))                  \
   IF_JS_STREAMS(REAL(ReadableStream, &js::ReadableStream::class_))             \
+  IF_JS_STREAMS(REAL(ReadableStreamBYOBReader,                                 \
+                    &js::ReadableStreamBYOBReader::class_))                    \
+  IF_JS_STREAMS(REAL(ReadableStreamBYOBRequest,                                \
+                    &js::ReadableStreamBYOBRequest::class_))                   \
   IF_JS_STREAMS(REAL(ReadableStreamDefaultReader,                              \
                      &js::ReadableStreamDefaultReader::class_))                \
   IF_JS_STREAMS(REAL(ReadableStreamDefaultController,                          \
