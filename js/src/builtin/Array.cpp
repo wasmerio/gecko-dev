@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <iterator>
 
 #include "jsfriendapi.h"
@@ -4513,6 +4514,144 @@ bool js::array_includes(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+// https://tc39.es/ecma262/#sec-array.prototype.map
+static bool array_map(JSContext *cx, unsigned argc, Value *vp)
+{
+  CallArgs args = CallArgsFromVp(argc, vp);
+  if (!args.requireAtLeast(cx, "Array.prototype.map", 1)) {
+    return false;
+  }
+
+  // 1. Let O be ? ToObject(this value).
+  JS::RootedObject O(cx, JS::ToObject(cx, args.thisv()));
+  if (!O) {
+    return false;
+  }
+  // 2. Let len be ? LengthOfArrayLike(O).
+  uint64_t len;
+  if (!GetLengthPropertyInlined(cx, O, &len)) {
+    return false;
+  }
+
+  // 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+  auto arg0 = args.get(0);
+  if (!arg0.isObject() || !JS::IsCallable(&arg0.toObject())) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_NOT_FUNCTION);
+    return false;
+  }
+  JS::RootedObject callbackfn(cx, &arg0.toObject());
+  if (!callbackfn) {
+    return false;
+  }
+  JS::RootedValue thisv(cx, args.length() >= 2 ? args[1] : JS::UndefinedValue());
+
+  // 4. Let A be ? ArraySpeciesCreate(O, len).
+  RootedObject A(cx);
+  // 5. Let k be 0.
+  uint32_t k = 0;
+
+  // 6. Repeat, while k < len,
+  FixedInvokeArgs<3> callbackfnargs(cx);
+  callbackfnargs[2].setObject(*O);
+  JS::RootedValue kValue(cx);
+  JS::RootedValue mappedValue(cx);
+  if (IsArraySpecies(cx, O)) {
+    std::cout << "IsArraySpecies true" << std::endl;
+
+    A = NewDenseFullyAllocatedArray(cx, len);
+    if (!A) {
+      return false;
+    }
+
+    if (CanOptimizeForDenseStorage<ArrayAccess::Read>(O, len)) {
+      std::cout << "CanOptimizeForDenseStorage true" << std::endl;
+      MOZ_ASSERT(len <= UINT32_MAX);
+
+      NativeObject* nobj = &O->as<NativeObject>();
+
+      for (uint32_t k = 0; k < len; k++) {
+        // i. Let kValue be ? Get(O, Pk).
+        kValue = nobj->getDenseElement(k);
+        // ii. Let mappedValue be ? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »).
+        callbackfnargs[0].set(kValue);
+        callbackfnargs[1].setNumber(k);
+        if (!JS::Call(cx, thisv, callbackfn, callbackfnargs, &mappedValue)) {
+          return false;
+        }
+        // iii. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue).
+        if (!SetArrayElement(cx, A, k, mappedValue)) {
+          return false;
+        }
+        // d. Set k to k + 1.
+      }
+    } else {
+      std::cout << "CanOptimizeForDenseStorage false" << std::endl;
+      bool kPresent;
+      while (k < len) {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        // b. Let kPresent be ? HasProperty(O, Pk).
+        if (!CheckForInterrupt(cx) ||
+            !HasAndGetElement(cx, O, k, &kPresent, &kValue)) {
+          return false;
+        }
+
+        // c. If kPresent is true, then
+        if (!kPresent) {
+          // i. Let kValue be ? Get(O, Pk).
+          // ii. Let mappedValue be ? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »).
+          callbackfnargs[0].set(kValue);
+          callbackfnargs[1].setNumber(k);
+          if (!JS::Call(cx, thisv, callbackfn, callbackfnargs, &mappedValue)) {
+            return false;
+          }
+          // iii. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue).
+          if (!SetArrayElement(cx, A, k, mappedValue)) {
+            return false;
+          }
+        }
+
+        // d. Set k to k + 1.
+        k++;
+      }
+    }
+  } else {
+    std::cout << "IsArraySpecies false" << std::endl;
+    if (!ArraySpeciesCreate(cx, O, len, &A)) {
+      return false;
+    }
+    bool kPresent;
+      while (k < len) {
+        // a. Let Pk be ! ToString(𝔽(k)).
+        // b. Let kPresent be ? HasProperty(O, Pk).
+        if (!CheckForInterrupt(cx) ||
+            !HasAndGetElement(cx, O, k, &kPresent, &kValue)) {
+          return false;
+        }
+
+        // c. If kPresent is true, then
+        if (!kPresent) {
+          // i. Let kValue be ? Get(O, Pk).
+          // ii. Let mappedValue be ? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »).
+          callbackfnargs[0].set(kValue);
+          callbackfnargs[1].setNumber(k);
+          if (!JS::Call(cx, thisv, callbackfn, callbackfnargs, &mappedValue)) {
+            return false;
+          }
+          // iii. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue).
+          if (!SetArrayElement(cx, A, k, mappedValue)) {
+            return false;
+          }
+        }
+
+        // d. Set k to k + 1.
+        k++;
+      }
+  }
+  // 7. Return A.
+  args.rval().setObject(*A);
+  return true;
+}
+
 static const JSFunctionSpec array_methods[] = {
     JS_FN(js_toSource_str, array_toSource, 0, 0),
     JS_SELF_HOSTED_FN(js_toString_str, "ArrayToString", 0, 0),
@@ -4535,7 +4674,7 @@ static const JSFunctionSpec array_methods[] = {
     JS_FN("lastIndexOf", array_lastIndexOf, 1, 0),
     JS_FN("indexOf", array_indexOf, 1, 0),
     JS_SELF_HOSTED_FN("forEach", "ArrayForEach", 1, 0),
-    JS_SELF_HOSTED_FN("map", "ArrayMap", 1, 0),
+    JS_FN("map", array_map, 1, 0),
     JS_SELF_HOSTED_FN("filter", "ArrayFilter", 1, 0),
 #ifdef NIGHTLY_BUILD
     JS_SELF_HOSTED_FN("group", "ArrayGroup", 1, 0),
