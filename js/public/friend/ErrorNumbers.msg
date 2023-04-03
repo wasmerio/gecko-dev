@@ -783,6 +783,7 @@ MSG_DEF(JSMSG_READABLESTREAMCONTROLLER_CLOSED,           1, JSEXN_TYPEERR, "'{0}
 MSG_DEF(JSMSG_READABLESTREAMCONTROLLER_NOT_READABLE,     1, JSEXN_TYPEERR, "'{0}' may only be called on a stream in the 'readable' state.")
 MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_BAD_CHUNKSIZE,0, JSEXN_RANGEERR, "ReadableByteStreamController requires a positive integer or undefined for 'autoAllocateChunkSize'.")
 MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_BAD_CHUNK,    1, JSEXN_TYPEERR, "{0} passed a bad chunk.")
+MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_DETACHED,     1, JSEXN_TYPEERR, "ReadableByteStreamController.{0}() provided a detached buffer.")
 MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_CLOSE_PENDING_PULL, 0, JSEXN_TYPEERR, "The ReadableByteStreamController cannot be closed while the buffer is being filled.")
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_NO_CONTROLLER,   1, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method '{0}' called on a request with no controller.")
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_CLOSED,  0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' called with non-zero number of bytes with a closed controller.")
