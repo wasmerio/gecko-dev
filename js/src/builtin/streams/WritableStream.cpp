@@ -75,6 +75,7 @@ bool WritableStream::constructor(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     underlyingSink.set(emptyObj);
+    underlyingSinkVal.setObject(*underlyingSink);
   } else {
     underlyingSink.set(&underlyingSinkVal.toObject());
   }
