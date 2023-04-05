@@ -73,6 +73,11 @@ ReadableByteStreamControllerShiftPendingPullInto(
     JSContext* cx,
     JS::Handle<ReadableByteStreamController*> unwrappedController);
 
+[[nodiscard]] extern bool ReadableByteStreamControllerRespondWithNewView(
+    JSContext* cx,
+    JS::Handle<ReadableByteStreamController*> unwrappedController,
+    JS::Handle<JSObject*> view);
+
 [[nodiscard]] extern JS::Handle<JSObject*>
 ReadableByteStreamControllerConvertPullIntoDescriptor(
     JSContext* cx, JS::Handle<PullIntoDescriptor*> pullIntoDescriptor);

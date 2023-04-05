@@ -35,9 +35,7 @@ class PullIntoDescriptor : public NativeObject {
  public:
   static const JSClass class_;
 
-  JSObject* buffer() {
-    return &getFixedSlot(Slot_buffer).toObject();
-  }
+  JSObject* buffer() { return &getFixedSlot(Slot_buffer).toObject(); }
   void setBuffer(JSObject* buffer) {
     setFixedSlot(Slot_buffer, ObjectValue(*buffer));
   }

@@ -98,6 +98,10 @@ static bool ReadableStreamBYOBRequest_view(JSContext* cx, unsigned argc,
   JS::Rooted<JSObject*> buffer(
       cx, JS_GetArrayBufferViewBuffer(cx, viewObj, &isShared));
 
+  if (!buffer) {
+    return false;
+  }
+
   size_t len = 0;
   uint8_t* data;
   JS::GetArrayBufferLengthAndData(buffer, &len, &isShared, &data);
@@ -107,7 +111,7 @@ static bool ReadableStreamBYOBRequest_view(JSContext* cx, unsigned argc,
   if (buffer->maybeUnwrapAs<js::ArrayBufferObject>()->isDetached()) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_DETACHED);
-    return ReturnPromiseRejectedWithPendingError(cx, args);
+    return false;
   }
 
   Rooted<ReadableByteStreamController*> controller(
@@ -115,7 +119,7 @@ static bool ReadableStreamBYOBRequest_view(JSContext* cx, unsigned argc,
 
   // Assert: this.[[view]].[[ByteLength]] > 0.
   // Assert: this.[[view]].[[ViewedArrayBuffer]].[[ByteLength]] > 0.
-  MOZ_ASSERT(len > 0);
+  // MOZ_ASSERT(len > 0);
 
   Rooted<ListObject*> unwrappedPendingPullIntos(cx,
                                                 controller->pendingPullIntos());
@@ -167,12 +171,8 @@ static bool ReadableStreamBYOBRequest_view(JSContext* cx, unsigned argc,
 
   // Perform ? ReadableByteStreamControllerRespondInternal(controller,
   // bytesWritten).
-  if (!ReadableByteStreamControllerRespondInternal(cx, controller,
-                                                   bytesWritten)) {
-    return false;
-  }
-
-  return true;
+  return ReadableByteStreamControllerRespondInternal(cx, controller,
+                                                     bytesWritten);
 }
 
 // https://streams.spec.whatwg.org/#rs-byob-request-respond-with-new-view
@@ -187,7 +187,37 @@ static bool ReadableStreamBYOBRequest_respondWithNewView(JSContext* cx,
   if (!unwrappedRequest) {
     return false;
   }
-  args.rval().set(unwrappedRequest->view());
+
+  // If this.[[controller]] is undefined, throw a TypeError exception.
+  if (!unwrappedRequest->hasController()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLESTREAMBYOBREQUEST_NO_CONTROLLER,
+                              "respondWithNewView()");
+    return false;
+  }
+
+  Rooted<ReadableByteStreamController*> controller(
+      cx, unwrappedRequest->controller());
+
+  Rooted<JSObject*> view(cx, &args.get(0).toObject());
+
+  // If ! IsDetachedBuffer(view.[[ViewedArrayBuffer]]) is true, throw a
+  // TypeError exception.
+  bool isShared;
+  Rooted<JSObject*> viewedArrayBuffer(
+      cx, JS_GetArrayBufferViewBuffer(cx, view, &isShared));
+
+  if (viewedArrayBuffer->maybeUnwrapAs<js::ArrayBufferObject>()->isDetached()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_DETACHED);
+    return false;
+  }
+
+  // Return ?
+  // ReadableByteStreamControllerRespondWithNewView(this.[[controller]], view).
+  if (!ReadableByteStreamControllerRespondWithNewView(cx, controller, view)) {
+    return false;
+  }
   return true;
 }
 

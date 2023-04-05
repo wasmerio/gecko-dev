@@ -92,7 +92,11 @@ class ReadableStreamReader : public NativeObject {
   }
 
   ListObject* requests() const {
-    return &getFixedSlot(Slot_Requests).toObject().as<ListObject>();
+    Value requests = getFixedSlot(Slot_Requests);
+    if (requests.isUndefined()) {
+      return nullptr;
+    }
+    return &requests.toObject().as<ListObject>();
   }
   void clearRequests() { setFixedSlot(Slot_Requests, JS::UndefinedValue()); }
 

@@ -298,9 +298,9 @@ class ByteStreamChunk : public NativeObject {
 [[nodiscard]] extern bool ReadableByteStreamControllerInvalidateBYOBRequest(
     JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController);
 
-
 [[nodiscard]] extern bool ReadableByteStreamControllerHandleQueueDrain(
-    JSContext* cx, JS::Handle<ReadableByteStreamController*> unwrappedController);
+    JSContext* cx,
+    JS::Handle<ReadableByteStreamController*> unwrappedController);
 
 }  // namespace js
 

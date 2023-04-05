@@ -147,6 +147,44 @@ static bool ReturnUndefined(JSContext* cx, unsigned argc, Value* vp) {
     return nullptr;
   }
 
+  // If reader is not undefined and reader implements ReadableStreamBYOBReader,
+  if (unwrappedStream->hasReader()) {
+    Rooted<ReadableStreamReader*> unwrappedReader(
+        cx, UnwrapReaderFromStream(cx, unwrappedStream));
+    if (!unwrappedReader) {
+      return nullptr;
+    }
+    if (unwrappedReader->is<ReadableStreamBYOBReader>()) {
+      Rooted<ReadableStreamBYOBReader*> byobReader(
+          cx, &unwrappedReader->as<ReadableStreamBYOBReader>());
+
+      // Let readIntoRequests be reader.[[readIntoRequests]].
+      ListObject* readIntoRequests = byobReader->requests();
+
+      // Set reader.[[readIntoRequests]] to an empty list.
+      byobReader->clearRequests();
+
+      // For each readIntoRequest of readIntoRequests,
+      uint32_t len = readIntoRequests->length();
+      Rooted<JSObject*> readRequest(cx);
+      Rooted<JSObject*> resultObj(cx);
+      Rooted<Value> resultVal(cx);
+      for (uint32_t i = 0; i < len; i++) {
+        // Perform readIntoRequest’s close steps, given undefined.
+        readRequest = &readIntoRequests->getAs<JSObject>(i);
+        resultObj = js::ReadableStreamCreateReadResult(
+            cx, UndefinedHandleValue, true, ForAuthorCodeBool::Yes);
+        if (!resultObj) {
+          return nullptr;
+        }
+        resultVal = ObjectValue(*resultObj);
+        if (!ResolvePromise(cx, readRequest, resultVal)) {
+          return nullptr;
+        }
+      }
+    }
+  }
+
   // Step 5: Let sourceCancelPromise be
   //         ! stream.[[readableStreamController]].[[CancelSteps]](reason).
   Rooted<ReadableStreamController*> unwrappedController(
@@ -442,7 +480,11 @@ uint32_t js::ReadableStreamGetNumReadRequests(ReadableStream* stream) {
     return 0;
   }
 
-  return reader->requests()->length();
+  ListObject* requests = reader->requests();
+  if (!requests) {
+    return 0;
+  }
+  return requests->length();
 }
 
 /**

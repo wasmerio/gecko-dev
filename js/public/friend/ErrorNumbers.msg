@@ -788,8 +788,10 @@ MSG_DEF(JSMSG_READABLEBYTESTREAMCONTROLLER_CLOSE_PENDING_PULL, 0, JSEXN_TYPEERR,
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_NO_CONTROLLER,   1, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method '{0}' called on a request with no controller.")
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_CLOSED,  0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' called with non-zero number of bytes with a closed controller.")
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_DETACHED,0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' called for a detached buffer.")
-MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_ZERO     ,0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' wrote zero bytes.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_ZERO    ,0, JSEXN_TYPEERR, "ReadableStreamBYOBRequest method 'respond' wrote zero bytes.")
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_EXCEED  ,0, JSEXN_RANGEERR, "ReadableStreamBYOBRequest method 'respond' byte size exceeded buffer length.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_OFFSET ,0, JSEXN_RANGEERR, "ReadableStreamBYOBRequest method 'respondWithNewView' returned a view with an invalid offset.")
+MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_LEN ,0, JSEXN_RANGEERR, "ReadableStreamBYOBRequest method 'respondWithNewView' returned a view with an invalid length.")
 MSG_DEF(JSMSG_READABLESTREAM_METHOD_NOT_IMPLEMENTED,     1, JSEXN_TYPEERR, "ReadableStream method {0} not yet implemented")
 MSG_DEF(JSMSG_READABLESTREAM_PIPETO_BAD_SIGNAL,          0, JSEXN_TYPEERR, "signal must be either undefined or an AbortSignal")
 

@@ -108,6 +108,7 @@ extern bool js::ReadableByteStreamControllerEnqueueChunkToQueue(
   Rooted<Value> chunkVal(cx);
   chunkVal.setObject(
       *ByteStreamChunk::create(cx, buffer, byteOffset, byteLength));
+
   if (!controller->queue()->append(cx, chunkVal)) {
     return false;
   }
@@ -476,7 +477,8 @@ extern bool js::ReadableByteStreamControllerCommitPullIntoDescriptor(
   MOZ_ASSERT(!stream->errored());
 
   // Assert: pullIntoDescriptor.reader type is not "none".
-  MOZ_ASSERT(pullIntoDescriptor->readerType() != ReaderType::None);
+  ReaderType readerType = pullIntoDescriptor->readerType();
+  MOZ_ASSERT(readerType != ReaderType::None);
 
   // Let done be false.
   bool done = false;
@@ -504,7 +506,7 @@ extern bool js::ReadableByteStreamControllerCommitPullIntoDescriptor(
   filledViewVal.setObject(*filledView.get());
 
   // If pullIntoDescriptor’s reader type is "default",
-  if (pullIntoDescriptor->readerType() == ReaderType::Default) {
+  if (readerType == ReaderType::Default) {
     // Perform ! ReadableStreamFulfillReadRequest(stream, filledView, done).
     if (!ReadableStreamFulfillReadOrReadIntoRequest(cx, stream, filledViewVal,
                                                     done)) {
@@ -513,7 +515,7 @@ extern bool js::ReadableByteStreamControllerCommitPullIntoDescriptor(
   } else {
     // Otherwise,
     // Assert: pullIntoDescriptor’s reader type is "byob".
-    MOZ_ASSERT(pullIntoDescriptor->readerType() == ReaderType::BYOB);
+    MOZ_ASSERT(readerType == ReaderType::BYOB);
 
     // Perform ! ReadableStreamFulfillReadIntoRequest(stream, filledView, done).
     if (!ReadableStreamFulfillReadOrReadIntoRequest(cx, stream, filledViewVal,
@@ -522,6 +524,107 @@ extern bool js::ReadableByteStreamControllerCommitPullIntoDescriptor(
     }
   }
   return true;
+}
+
+/**
+ * https://streams.spec.whatwg.org/#readable-byte-stream-controller-respond-with-new-view
+ */
+extern bool js::ReadableByteStreamControllerRespondWithNewView(
+    JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController,
+    JS::Handle<JSObject*> view) {
+  // Assert: controller.[[pendingPullIntos]] is not empty.
+  MOZ_ASSERT(unwrappedController->pendingPullIntos()->length() > 0);
+
+  // Assert: ! IsDetachedBuffer(view.[[ViewedArrayBuffer]]) is false.
+
+  // Let firstDescriptor be controller.[[pendingPullIntos]][0].
+  Rooted<PullIntoDescriptor*> firstDescriptor(
+      cx, UnwrapAndDowncastObject<PullIntoDescriptor>(
+              cx, &unwrappedController->pendingPullIntos()->get(0).toObject()));
+
+  // Let state be controller.[[stream]].[[state]].
+  // If state is "closed",
+  if (unwrappedController->stream()->closed()) {
+    // If view.[[ByteLength]] is not 0, throw a TypeError exception.
+    if (JS_GetArrayBufferViewByteLength(view) != 0) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_CLOSED);
+      return false;
+    }
+  } else {
+    // Otherwise,
+
+    // Assert: state is "readable".
+    MOZ_ASSERT(unwrappedController->stream()->readable());
+
+    // If view.[[ByteLength]] is 0, throw a TypeError exception.
+    if (JS_GetArrayBufferViewByteLength(view) == 0) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_ZERO);
+      return false;
+    }
+  }
+
+  // Let viewByteLength be view.[[ByteLength]].
+  uint32_t viewByteLength = JS_GetArrayBufferViewByteLength(view);
+
+  // If firstDescriptor’s byte offset + firstDescriptor’ bytes filled is not
+  // view.[[ByteOffset]], throw a RangeError exception.
+  if (firstDescriptor->byteOffset() + firstDescriptor->bytesFilled() !=
+      JS_GetArrayBufferViewByteOffset(view)) {
+    JS_ReportErrorNumberASCII(
+        cx, GetErrorMessage, nullptr,
+        JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_OFFSET);
+    return false;
+  }
+
+  bool isShared;
+  Rooted<JSObject*> viewedArrayBuffer(
+      cx, JS_GetArrayBufferViewBuffer(cx, view, &isShared));
+
+  uint8_t* data;
+  bool is_shared;
+  size_t len = 0;
+
+  JS::GetArrayBufferLengthAndData(viewedArrayBuffer, &len, &is_shared, &data);
+
+  // If firstDescriptor’s buffer byte length is not
+  // view.[[ViewedArrayBuffer]].[[ByteLength]], throw a RangeError exception.
+  if (JS_IsArrayBufferViewObject(firstDescriptor->buffer())) {
+    if (JS_GetArrayBufferViewByteLength(firstDescriptor->buffer()) != len) {
+      JS_ReportErrorNumberASCII(
+          cx, GetErrorMessage, nullptr,
+          JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_LEN);
+      return false;
+    }
+  } else {
+    size_t len2 = 0;
+    JS::GetArrayBufferLengthAndData(viewedArrayBuffer, &len, &is_shared, &data);
+    if (len2 != len) {
+      JS_ReportErrorNumberASCII(
+          cx, GetErrorMessage, nullptr,
+          JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_LEN);
+      return false;
+    }
+  }
+
+  // If firstDescriptor’s bytes filled + view.[[ByteLength]] > firstDescriptor’s
+  // byte length, throw a RangeError exception.
+  if (firstDescriptor->bytesFilled() + viewByteLength >
+      firstDescriptor->byteLength()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_LEN);
+    return false;
+  }
+
+  // Set firstDescriptor’s buffer to ?
+  // TransferArrayBuffer(view.[[ViewedArrayBuffer]]).
+  firstDescriptor->setBuffer(TransferArrayBuffer(cx, viewedArrayBuffer));
+
+  // Perform ? ReadableByteStreamControllerRespondInternal(controller,
+  // viewByteLength).
+  return ReadableByteStreamControllerRespondInternal(cx, unwrappedController,
+                                                     viewByteLength);
 }
 
 /**
@@ -1028,6 +1131,11 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
   if (!StoreNewListInFixedSlot(
           cx, controller,
           ReadableByteStreamController::Slot_PendingPullIntos)) {
+    return false;
+  }
+
+  if (!StoreNewListInFixedSlot(cx, controller,
+                               ReadableByteStreamController::Slot_Queue)) {
     return false;
   }
 
