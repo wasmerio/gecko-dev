@@ -714,12 +714,10 @@ static bool ReadableByteStreamController_close(JSContext* cx, unsigned argc,
 }
 
 /**
- * Streams spec, 3.9.4.3. enqueue ( chunk )
+ * https://streams.spec.whatwg.org/#rbs-controller-enqueue
  */
 static bool ReadableByteStreamController_enqueue(JSContext* cx, unsigned argc,
                                                  Value* vp) {
-  // Step 1: If ! IsReadableByteStreamController(this) is false, throw a
-  //         TypeError exception.
   CallArgs args = CallArgsFromVp(argc, vp);
   Rooted<ReadableByteStreamController*> unwrappedController(
       cx, UnwrapAndTypeCheckThis<ReadableByteStreamController>(cx, args,
@@ -728,17 +726,50 @@ static bool ReadableByteStreamController_enqueue(JSContext* cx, unsigned argc,
     return false;
   }
 
-  // Step 2: If ! ReadableByteStreamControllerCanCloseOrEnqueue(this) is
-  //         false, throw a TypeError exception.
+  if (!args.get(0).isObject()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLEBYTESTREAMCONTROLLER_NO_VIEW,
+                              "enqueue");
+    return false;
+  }
+
+  Rooted<JSObject*> chunkObj(cx, &args.get(0).toObject());
+
+  if (!JS_IsArrayBufferViewObject(chunkObj)) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLEBYTESTREAMCONTROLLER_NO_VIEW,
+                              "enqueue");
+    return false;
+  }
+
+  // If chunk.[[ByteLength]] is 0, throw a TypeError exception.
+  if (JS_GetArrayBufferViewByteLength(chunkObj) == 0) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLEBYTESTREAMCONTROLLER_EMPTY_VIEW);
+    return false;
+  }
+  // If chunk.[[ViewedArrayBuffer]].[[ArrayBufferByteLength]] is 0, throw a
+  // TypeError exception.
+  bool isShared;
+  JS::Rooted<JSObject*> buffer(
+      cx, JS_GetArrayBufferViewBuffer(cx, chunkObj, &isShared));
+  if (!buffer ||
+      buffer->maybeUnwrapAs<js::ArrayBufferObject>()->byteLength() == 0) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLEBYTESTREAMCONTROLLER_EMPTY_VIEW);
+    return false;
+  }
+
+  // If this.[[closeRequested]] is true, throw a TypeError exception.
+  // If this.[[stream]].[[state]] is not "readable", throw a TypeError
+  // exception.
   if (!js::CheckReadableStreamControllerCanCloseOrEnqueue(
           cx, unwrappedController, "enqueue")) {
     return false;
   }
 
-  HandleValue chunk = args.get(0);
-
-  // Step 3: Return ! ReadableByteStreamControllerEnqueue(this, chunk).
-  if (!ReadableByteStreamControllerEnqueue(cx, unwrappedController, chunk)) {
+  // Return ? ReadableByteStreamControllerEnqueue(this, chunk).
+  if (!ReadableByteStreamControllerEnqueue(cx, unwrappedController, chunkObj)) {
     return false;
   }
   args.rval().setUndefined();

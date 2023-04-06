@@ -75,8 +75,20 @@ static bool ReadableStreamBYOBRequest_view(JSContext* cx, unsigned argc,
                                                             unsigned argc,
                                                             Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
+  if (!args.get(0).isNumber() || !(args.get(0).toNumber() >= 0)) {
+    JS_ReportErrorNumberASCII(
+        cx, GetErrorMessage, nullptr,
+        JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_INVALID_WRITTEN_LEN);
+    return false;
+  }
 
-  double bytesWritten = args.get(0).toNumber();
+  uint64_t bytesWritten = args.get(0).toNumber();
+  if (args.get(0).toNumber() - bytesWritten != 0) {
+    JS_ReportErrorNumberASCII(
+        cx, GetErrorMessage, nullptr,
+        JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_INVALID_WRITTEN_LEN);
+    return false;
+  }
 
   Rooted<ReadableStreamBYOBRequest*> unwrappedRequest(
       cx,
@@ -181,6 +193,22 @@ static bool ReadableStreamBYOBRequest_respondWithNewView(JSContext* cx,
                                                          Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
+  if (!args.get(0).isObject()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLEBYTESTREAMCONTROLLER_NO_VIEW,
+                              "respondWithNewView");
+    return false;
+  }
+
+  Rooted<JSObject*> view(cx, &args.get(0).toObject());
+
+  if (!JS_IsArrayBufferViewObject(view)) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_READABLEBYTESTREAMCONTROLLER_NO_VIEW,
+                              "respondWithNewView");
+    return false;
+  }
+
   Rooted<ReadableStreamBYOBRequest*> unwrappedRequest(
       cx, UnwrapAndTypeCheckThis<ReadableStreamBYOBRequest>(
               cx, args, "respondWithNewView"));
@@ -198,8 +226,6 @@ static bool ReadableStreamBYOBRequest_respondWithNewView(JSContext* cx,
 
   Rooted<ReadableByteStreamController*> controller(
       cx, unwrappedRequest->controller());
-
-  Rooted<JSObject*> view(cx, &args.get(0).toObject());
 
   // If ! IsDetachedBuffer(view.[[ViewedArrayBuffer]]) is true, throw a
   // TypeError exception.
@@ -231,5 +257,5 @@ static const JSFunctionSpec ReadableStreamBYOBRequest_methods[] = {
     JS_FS_END};
 
 JS_STREAMS_CLASS_SPEC(ReadableStreamBYOBRequest, 0,
-                      ReadableStreamBYOBRequest::SlotCount,
-                      0, 0, JS_NULL_CLASS_OPS);
+                      ReadableStreamBYOBRequest::SlotCount, 0, 0,
+                      JS_NULL_CLASS_OPS);

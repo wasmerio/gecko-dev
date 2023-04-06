@@ -27,16 +27,16 @@ class ReadableByteStreamController;
 
 [[nodiscard]] extern bool ReadableByteStreamControllerRespondInReadableState(
     JSContext* cx, JS::Handle<ReadableByteStreamController*> controller,
-    double bytesWritten, JS::Handle<PullIntoDescriptor*> firstDescriptor);
+    uint64_t bytesWritten, JS::Handle<PullIntoDescriptor*> firstDescriptor);
 
 [[nodiscard]] extern bool ReadableByteStreamControllerRespondInternal(
     JSContext* cx, JS::Handle<ReadableByteStreamController*> controller,
-    double bytesWritten);
+    uint64_t bytesWritten);
 
 [[nodiscard]] extern bool ReadableByteStreamControllerEnqueue(
     JSContext* cx,
     JS::Handle<ReadableByteStreamController*> unwrappedController,
-    JS::Handle<JS::Value> chunk);
+    JS::Handle<JSObject*> chunk);
 
 [[nodiscard]] extern bool ReadableByteStreamControllerClose(
     JSContext* cx,

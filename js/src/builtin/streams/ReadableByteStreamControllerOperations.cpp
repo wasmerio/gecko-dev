@@ -150,7 +150,7 @@ extern bool js::ReadableByteStreamControllerEnqueueDetachedPullIntoToQueue(
  */
 extern bool js::ReadableByteStreamControllerRespondInReadableState(
     JSContext* cx, JS::Handle<ReadableByteStreamController*> controller,
-    double bytesWritten, JS::Handle<PullIntoDescriptor*> pullIntoDescriptor) {
+    uint64_t bytesWritten, JS::Handle<PullIntoDescriptor*> pullIntoDescriptor) {
   // Assert: pullIntoDescriptor’s bytes filled + bytesWritten ≤
   // pullIntoDescriptor’s byte length.
   MOZ_ASSERT(pullIntoDescriptor->bytesFilled() + bytesWritten <=
@@ -779,7 +779,7 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
  */
 [[nodiscard]] bool js::ReadableByteStreamControllerRespondInternal(
     JSContext* cx, Handle<ReadableByteStreamController*> controller,
-    double bytesWritten) {
+    uint64_t bytesWritten) {
   // Let firstDescriptor be controller.[[pendingPullIntos]][0].
   Rooted<ListObject*> unwrappedPendingPullIntos(cx,
                                                 controller->pendingPullIntos());
@@ -837,7 +837,7 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
  */
 [[nodiscard]] bool js::ReadableByteStreamControllerEnqueue(
     JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController,
-    Handle<Value> chunk) {
+    Handle<JSObject*> chunkObj) {
   // Let stream be controller.[[stream]].
   Rooted<ReadableStream*> unwrappedStream(cx, unwrappedController->stream());
 
@@ -846,8 +846,6 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
   if (unwrappedController->closeRequested() || !unwrappedStream->readable()) {
     return true;
   }
-
-  Rooted<JSObject*> chunkObj(cx, &chunk.toObject());
 
   // Let buffer be chunk.[[ViewedArrayBuffer]].
   bool isShared;
