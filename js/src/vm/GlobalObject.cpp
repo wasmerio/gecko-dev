@@ -187,6 +187,7 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_ReadableStream:
     case JSProto_ReadableStreamBYOBReader:
     case JSProto_ReadableStreamBYOBRequest:
+      return !cx->realm()->createOptions().getReadableByteStreamsEnabled();
     case JSProto_ReadableByteStreamController:
       return !cx->realm()->createOptions().getBYOBStreamReadersEnabled();
     case JSProto_ReadableStreamDefaultReader:
