@@ -304,7 +304,7 @@ static const JSFunctionSpec ReadableStreamDefaultController_methods[] = {
     JS_FN("error", ReadableStreamDefaultController_error, 1, 0), JS_FS_END};
 
 JS_STREAMS_CLASS_SPEC(ReadableStreamDefaultController, 0, SlotCount,
-                      ClassSpec::DontDefineConstructor, 0, JS_NULL_CLASS_OPS);
+                      0, 0, JS_NULL_CLASS_OPS);
 
 /**
  * Unified implementation of ReadableStream controllers' [[CancelSteps]]
