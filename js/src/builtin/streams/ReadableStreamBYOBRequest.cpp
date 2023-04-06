@@ -52,7 +52,7 @@ bool ReadableStreamBYOBRequest::constructor(JSContext* cx, unsigned argc,
   JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                             JSMSG_BOGUS_CONSTRUCTOR,
                             "ReadableStreamBYOBRequest");
-  return true;
+  return false;
 }
 
 // https://streams.spec.whatwg.org/#rs-byob-request-view
