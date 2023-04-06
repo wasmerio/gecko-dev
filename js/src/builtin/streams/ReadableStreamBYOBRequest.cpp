@@ -232,4 +232,4 @@ static const JSFunctionSpec ReadableStreamBYOBRequest_methods[] = {
 
 JS_STREAMS_CLASS_SPEC(ReadableStreamBYOBRequest, 0,
                       ReadableStreamBYOBRequest::SlotCount,
-                      ClassSpec::DontDefineConstructor, 0, JS_NULL_CLASS_OPS);
+                      0, 0, JS_NULL_CLASS_OPS);
