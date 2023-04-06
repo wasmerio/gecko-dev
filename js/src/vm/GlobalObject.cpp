@@ -185,16 +185,16 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
 #endif
 #ifdef MOZ_JS_STREAMS
     case JSProto_ReadableStream:
-    case JSProto_ReadableStreamBYOBReader:
-    case JSProto_ReadableStreamBYOBRequest:
-      return !cx->realm()->creationOptions().getReadableByteStreamsEnabled();
-    case JSProto_ReadableByteStreamController:
-      return !cx->realm()->creationOptions().getBYOBStreamReadersEnabled();
     case JSProto_ReadableStreamDefaultReader:
     case JSProto_ReadableStreamDefaultController:
     case JSProto_ByteLengthQueuingStrategy:
     case JSProto_CountQueuingStrategy:
       return !cx->realm()->creationOptions().getStreamsEnabled();
+    case JSProto_ReadableStreamBYOBReader:
+    case JSProto_ReadableStreamBYOBRequest:
+      return !cx->realm()->creationOptions().getReadableByteStreamsEnabled();
+    case JSProto_ReadableByteStreamController:
+      return !cx->realm()->creationOptions().getBYOBStreamReadersEnabled();
 
     case JSProto_WritableStream:
     case JSProto_WritableStreamDefaultController:
