@@ -792,6 +792,6 @@ static const JSClassOps ReadableByteStreamControllerClassOps = {
 };
 
 JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
-                      ClassSpec::DontDefineConstructor,
+                      0,
                       JSCLASS_BACKGROUND_FINALIZE,
                       &ReadableByteStreamControllerClassOps);
