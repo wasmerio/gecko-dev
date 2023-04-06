@@ -289,12 +289,6 @@ extern JS_PUBLIC_API bool IsReadableStreamBYOBReader(JSObject* obj);
 extern JS_PUBLIC_API bool IsReadableStreamReader(JSObject* obj);
 
 /**
- * Returns true if the given object is a ReadableStreamBYOBReader object
- * or an unwrappable wrapper for one, false otherwise.
- */
-extern JS_PUBLIC_API bool IsReadableStreamBYOBReader(JSObject* obj);
-
-/**
  * Returns true if the given object is a ReadableStreamDefaultReader object
  * or an unwrappable wrapper for one, false otherwise.
  */
