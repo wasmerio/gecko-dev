@@ -334,5 +334,5 @@ static const JSPropertySpec ReadableStreamDefaultReader_properties[] = {
 const JSClass ReadableStreamReader::class_ = {"ReadableStreamReader"};
 
 JS_STREAMS_CLASS_SPEC(ReadableStreamDefaultReader, 1, SlotCount,
-                      js::ClassSpec::DontDefineConstructor, 0,
+                      0, 0,
                       JS_NULL_CLASS_OPS);
