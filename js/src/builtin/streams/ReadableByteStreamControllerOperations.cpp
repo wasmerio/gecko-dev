@@ -449,8 +449,7 @@ extern void js::ReadableByteStreamControllerFillHeadPullIntoDescriptor(
 /**
  * https://streams.spec.whatwg.org/#readable-byte-stream-controller-shift-pending-pull-into
  */
-extern JS::Handle<PullIntoDescriptor*>
-js::ReadableByteStreamControllerShiftPendingPullInto(
+extern PullIntoDescriptor* js::ReadableByteStreamControllerShiftPendingPullInto(
     JSContext* cx,
     JS::Handle<ReadableByteStreamController*> unwrappedController) {
   // Assert: controller.[[byobRequest]] is null.
@@ -461,10 +460,9 @@ js::ReadableByteStreamControllerShiftPendingPullInto(
   // Return descriptor.
   Rooted<ListObject*> unwrappedPendingPullIntos(
       cx, unwrappedController->pendingPullIntos());
-  Rooted<PullIntoDescriptor*> pullIntoDescriptor(
-      cx, UnwrapAndDowncastObject<PullIntoDescriptor>(
-              cx, &unwrappedPendingPullIntos->popFirst(cx).toObject()));
-  return pullIntoDescriptor;
+
+  return UnwrapAndDowncastObject<PullIntoDescriptor>(
+      cx, &unwrappedPendingPullIntos->popFirst(cx).toObject());
 }
 
 /**
@@ -497,7 +495,6 @@ extern bool js::ReadableByteStreamControllerCommitPullIntoDescriptor(
   Rooted<JSObject*> filledView(
       cx, ReadableByteStreamControllerConvertPullIntoDescriptor(
               cx, pullIntoDescriptor));
-
   if (!filledView) {
     return false;
   }
@@ -516,7 +513,6 @@ extern bool js::ReadableByteStreamControllerCommitPullIntoDescriptor(
     // Otherwise,
     // Assert: pullIntoDescriptor’s reader type is "byob".
     MOZ_ASSERT(readerType == ReaderType::BYOB);
-
     // Perform ! ReadableStreamFulfillReadIntoRequest(stream, filledView, done).
     if (!ReadableStreamFulfillReadOrReadIntoRequest(cx, stream, filledViewVal,
                                                     done)) {
@@ -599,7 +595,8 @@ extern bool js::ReadableByteStreamControllerRespondWithNewView(
     }
   } else {
     size_t len2 = 0;
-    JS::GetArrayBufferLengthAndData(firstDescriptor->buffer(), &len2, &is_shared, &data);
+    JS::GetArrayBufferLengthAndData(firstDescriptor->buffer(), &len2,
+                                    &is_shared, &data);
     if (len2 != len) {
       JS_ReportErrorNumberASCII(
           cx, GetErrorMessage, nullptr,
@@ -630,8 +627,7 @@ extern bool js::ReadableByteStreamControllerRespondWithNewView(
 /**
  * https://streams.spec.whatwg.org/#readable-byte-stream-controller-convert-pull-into-descriptor
  */
-extern Handle<JSObject*>
-js::ReadableByteStreamControllerConvertPullIntoDescriptor(
+extern JSObject* js::ReadableByteStreamControllerConvertPullIntoDescriptor(
     JSContext* cx, JS::Handle<PullIntoDescriptor*> pullIntoDescriptor) {
   // Let bytesFilled be pullIntoDescriptor’s bytes filled.
   uint32_t bytesFilled = pullIntoDescriptor->bytesFilled();
@@ -658,8 +654,12 @@ js::ReadableByteStreamControllerConvertPullIntoDescriptor(
   args[2].setDouble(bytesFilled == 0 ? 0 : bytesFilled / elementSize);
 
   Rooted<Value> ctor(cx, pullIntoDescriptor->ctor());
+
+  Rooted<JSString*> str(cx, JS::ToString(cx, ctor));
+  JS::UniqueChars specChars = JS_EncodeStringToUTF8(cx, str);
+
   JS::Rooted<JSObject*> obj(cx);
-  
+
   if (!JS::Construct(cx, ctor, args, &obj)) {
     return nullptr;
   }
@@ -757,8 +757,8 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
     while (ReadableStreamGetNumReadRequests(stream) > 0) {
       // Step 4.1.1. Let pullIntoDescriptor be !
       // ReadableByteStreamControllerShiftPendingPullInto(controller).
-      Handle<PullIntoDescriptor*> pullIntoDescriptor =
-          ReadableByteStreamControllerShiftPendingPullInto(cx, controller);
+      Rooted<PullIntoDescriptor*> pullIntoDescriptor(
+          cx, ReadableByteStreamControllerShiftPendingPullInto(cx, controller));
 
       // Step 4.1.2. Perform !
       // ReadableByteStreamControllerCommitPullIntoDescriptor(stream,

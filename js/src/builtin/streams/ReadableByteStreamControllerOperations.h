@@ -68,8 +68,7 @@ ReadableByteStreamControllerFillPullIntoDescriptorFromQueue(
     JS::Handle<ReadableByteStreamController*> unwrappedController,
     JS::Handle<PullIntoDescriptor*> pullIntoDescriptor, bool* ready);
 
-extern JS::Handle<PullIntoDescriptor*>
-ReadableByteStreamControllerShiftPendingPullInto(
+extern PullIntoDescriptor* ReadableByteStreamControllerShiftPendingPullInto(
     JSContext* cx,
     JS::Handle<ReadableByteStreamController*> unwrappedController);
 
@@ -78,7 +77,7 @@ ReadableByteStreamControllerShiftPendingPullInto(
     JS::Handle<ReadableByteStreamController*> unwrappedController,
     JS::Handle<JSObject*> view);
 
-[[nodiscard]] extern JS::Handle<JSObject*>
+[[nodiscard]] extern JSObject*
 ReadableByteStreamControllerConvertPullIntoDescriptor(
     JSContext* cx, JS::Handle<PullIntoDescriptor*> pullIntoDescriptor);
 

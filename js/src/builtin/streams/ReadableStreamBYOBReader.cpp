@@ -473,9 +473,9 @@ PromiseObject* js::ReadableStreamBYOBReaderRead(
     if (ready) {
       // Let filledView be !
       // ReadableByteStreamControllerConvertPullIntoDescriptor(pullIntoDescriptor).
-      Handle<JSObject*> view =
-          ReadableByteStreamControllerConvertPullIntoDescriptor(
-              cx, pullIntoDescriptor);
+      Rooted<JSObject*> view(
+          cx, ReadableByteStreamControllerConvertPullIntoDescriptor(
+                  cx, pullIntoDescriptor));
 
       // Perform ! ReadableByteStreamControllerHandleQueueDrain(controller).
       if (!ReadableByteStreamControllerHandleQueueDrain(cx,
@@ -552,6 +552,5 @@ static const JSPropertySpec ReadableStreamBYOBReader_properties[] = {
     JS_PSG("closed", ReadableStreamBYOBReader_closed, 0), JS_PS_END};
 
 JS_STREAMS_CLASS_SPEC(ReadableStreamBYOBReader, 1,
-                      ReadableByteStreamController::Slots::SlotCount,
-                      0, 0,
+                      ReadableByteStreamController::Slots::SlotCount, 0, 0,
                       JS_NULL_CLASS_OPS);
