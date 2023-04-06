@@ -553,5 +553,5 @@ static const JSPropertySpec ReadableStreamBYOBReader_properties[] = {
 
 JS_STREAMS_CLASS_SPEC(ReadableStreamBYOBReader, 1,
                       ReadableByteStreamController::Slots::SlotCount,
-                      js::ClassSpec::DontDefineConstructor, 0,
+                      0, 0,
                       JS_NULL_CLASS_OPS);
