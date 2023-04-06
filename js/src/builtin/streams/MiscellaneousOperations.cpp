@@ -33,29 +33,32 @@ using JS::Value;
 // https://streams.spec.whatwg.org/#transfer-array-buffer
 // As some parts of the specifcation want to use the abrupt completion value,
 // this function may leave a pending exception if it returns nullptr.
-[[nodiscard]] JSObject* js::TransferArrayBuffer(JSContext* cx, JS::Handle<JSObject*> buffer) {
-  MOZ_ASSERT(JS::IsArrayBufferObject(buffer));
-
-  // Step 1.
+[[nodiscard]] JSObject* js::TransferArrayBuffer(JSContext* cx,
+                                                JS::Handle<JSObject*> buffer) {
+  // Assert: ! IsDetachedBuffer(O) is false.
   MOZ_ASSERT(!JS::IsDetachedArrayBufferObject(buffer));
 
-  // Step 3 (Reordered)
+  // Let arrayBufferByteLength be O.[[ArrayBufferByteLength]].
+  // (must get length before stealing data)
   size_t bufferLength = JS::GetArrayBufferByteLength(buffer);
 
-  // Step 2 (Reordered)
+  // Let arrayBufferData be O.[[ArrayBufferData]].
   void* bufferData = JS::StealArrayBufferContents(cx, buffer);
 
-  // Step 4.
+  // Perform ? DetachArrayBuffer(O).
   if (!JS::DetachArrayBuffer(cx, buffer)) {
     return nullptr;
   }
 
-  // Step 5.
+  // Return a new ArrayBuffer object, created in the current Realm, whose
+  // [[ArrayBufferData]] internal slot value is arrayBufferData and whose
+  // [[ArrayBufferByteLength]] internal slot value is arrayBufferByteLength.
   return JS::NewArrayBufferWithContents(cx, bufferLength, bufferData);
 }
 
 // https://streams.spec.whatwg.org/#can-transfer-array-buffer
-[[nodiscard]] bool js::CanTransferArrayBuffer(JSContext* cx, JS::Handle<JSObject*> buffer) {
+[[nodiscard]] bool js::CanTransferArrayBuffer(JSContext* cx,
+                                              JS::Handle<JSObject*> buffer) {
   // Step 1. Assert: Type(O) is Object. (Implicit in types)
   // Step 2. Assert: O has an [[ArrayBufferData]] internal slot.
   MOZ_ASSERT(JS::IsArrayBufferObject(buffer));

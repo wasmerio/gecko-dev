@@ -103,6 +103,8 @@ extern bool js::ReadableByteStreamControllerEnqueueClonedChunkToQueue(
 extern bool js::ReadableByteStreamControllerEnqueueChunkToQueue(
     JSContext* cx, JS::Handle<ReadableByteStreamController*> controller,
     JS::Handle<JSObject*> buffer, uint32_t byteOffset, uint32_t byteLength) {
+  MOZ_ASSERT(controller);
+  MOZ_ASSERT(buffer);
   // Append a new readable byte stream queue entry with buffer buffer, byte
   // offset byteOffset, and byte length byteLength to controller.[[queue]].
   Rooted<Value> chunkVal(cx);

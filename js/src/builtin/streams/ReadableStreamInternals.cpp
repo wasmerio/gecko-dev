@@ -76,7 +76,6 @@ using js::ReadableStream;
   if (!unwrappedReader) {
     return nullptr;
   }
-  //  MOZ_ASSERT(unwrappedReader->is<ReadableStreamDefaultReader>());
 
   // Step 2 of 3.5.1: Assert: stream.[[state]] is "readable" or "closed".
   // Step 2 of 3.5.2: Assert: stream.[[state]] is "readable".
@@ -492,6 +491,7 @@ uint32_t js::ReadableStreamGetNumReadRequests(ReadableStream* stream) {
  */
 [[nodiscard]] bool js::ReadableStreamHasBYOBReader(
     JSContext* cx, Handle<ReadableStream*> unwrappedStream, bool* result) {
+  MOZ_ASSERT(unwrappedStream);
   // Step 1: Let reader be stream.[[reader]].
   // Step 2: If reader is undefined, return false.
   if (!unwrappedStream->hasReader()) {

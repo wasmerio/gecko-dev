@@ -86,6 +86,7 @@ const JSClass ByteStreamChunk::class_ = {"ByteStreamChunk",
 ByteStreamChunk* ByteStreamChunk::create(JSContext* cx, HandleObject buffer,
                                          uint32_t byteOffset,
                                          uint32_t byteLength) {
+  MOZ_ASSERT(buffer);
   Rooted<ByteStreamChunk*> chunk(cx,
                                  NewBuiltinClassInstance<ByteStreamChunk>(cx));
   if (!chunk) {
@@ -365,7 +366,8 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
     //                   [[elementSize]]: 1,
     //                   [[ctor]]: %Uint8Array%,
     //                   [[readerType]]: `"default"`}.
-    RootedObject uint8Array(cx, &cx->global()->getConstructor(JSProto_Uint8Array));
+    RootedObject uint8Array(cx,
+                            &cx->global()->getConstructor(JSProto_Uint8Array));
     RootedObject pullIntoDescriptor(
         cx, PullIntoDescriptor::create(cx, buffer, 0, autoAllocateChunkSize, 0,
                                        1, uint8Array, ReaderType::Default));
@@ -594,6 +596,8 @@ enum BYOBRequestSlots {
   Rooted<ListObject*> unwrappedPendingPullIntos(
       cx, unwrappedController->pendingPullIntos());
 
+  // If controller.[[byobRequest]] is null and controller.[[pendingPullIntos]]
+  // is not empty
   if (!unwrappedController->hasByobRequest() &&
       unwrappedPendingPullIntos->length() > 0) {
     // Let firstDescriptor be controller.[[pendingPullIntos]][0].
@@ -645,12 +649,10 @@ enum BYOBRequestSlots {
 }
 
 /**
- * Streams spec, 3.9.4.1. get desiredSize
+ * https://streams.spec.whatwg.org/#readable-byte-stream-controller-get-desired-size
  */
 static bool ReadableByteStreamController_desiredSize(JSContext* cx,
                                                      unsigned argc, Value* vp) {
-  // Step 1: If ! IsReadableByteStreamController(this) is false, throw a
-  //         TypeError exception.
   CallArgs args = CallArgsFromVp(argc, vp);
   Rooted<ReadableByteStreamController*> unwrappedController(
       cx, UnwrapAndTypeCheckThis<ReadableByteStreamController>(
@@ -659,26 +661,24 @@ static bool ReadableByteStreamController_desiredSize(JSContext* cx,
     return false;
   }
 
-  // 3.10.8. ReadableByteStreamControllerGetDesiredSize, steps 1-4.
-  // 3.10.8. Step 1: Let stream be controller.[[controlledReadableStream]].
+  // Let state be controller.[[stream]].[[state]].
   ReadableStream* unwrappedStream = unwrappedController->stream();
 
-  // 3.10.8. Step 2: Let state be stream.[[state]].
-  // 3.10.8. Step 3: If state is "errored", return null.
+  // If state is "errored", return null.
   if (unwrappedStream->errored()) {
     args.rval().setNull();
     return true;
   }
 
-  // 3.10.8. Step 4: If state is "closed", return 0.
+  // If state is "closed", return 0.
   if (unwrappedStream->closed()) {
     args.rval().setInt32(0);
     return true;
   }
 
-  // Step 2: Return ! ReadableByteStreamControllerGetDesiredSize(this).
-  args.rval().setNumber(
-      ReadableStreamControllerGetDesiredSizeUnchecked(unwrappedController));
+  // Return controller.[[strategyHWM]] − controller.[[queueTotalSize]].
+  args.rval().setNumber(unwrappedController->strategyHWM() -
+                        unwrappedController->queueTotalSize());
   return true;
 }
 
@@ -735,9 +735,10 @@ static bool ReadableByteStreamController_enqueue(JSContext* cx, unsigned argc,
     return false;
   }
 
+  HandleValue chunk = args.get(0);
+
   // Step 3: Return ! ReadableByteStreamControllerEnqueue(this, chunk).
-  if (!ReadableByteStreamControllerEnqueue(cx, unwrappedController,
-                                           args.get(0))) {
+  if (!ReadableByteStreamControllerEnqueue(cx, unwrappedController, chunk)) {
     return false;
   }
   args.rval().setUndefined();
@@ -791,7 +792,6 @@ static const JSClassOps ReadableByteStreamControllerClassOps = {
     nullptr,                               // trace
 };
 
-JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount,
-                      0,
+JS_STREAMS_CLASS_SPEC(ReadableByteStreamController, 0, SlotCount, 0,
                       JSCLASS_BACKGROUND_FINALIZE,
                       &ReadableByteStreamControllerClassOps);
