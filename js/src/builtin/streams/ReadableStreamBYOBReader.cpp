@@ -344,7 +344,7 @@ PromiseObject* js::ReadableStreamBYOBReaderRead(
         ctor.set(&cx->global()->getConstructor(JSProto_Int8Array));
         break;
       case JS::Scalar::Type::Uint8:
-        ctor.set(&cx->global()->getConstructor(JSProto_Int8Array));
+        ctor.set(&cx->global()->getConstructor(JSProto_Uint8Array));
         break;
       case JS::Scalar::Type::Int16:
         ctor.set(&cx->global()->getConstructor(JSProto_Int16Array));
