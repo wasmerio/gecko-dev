@@ -22,6 +22,7 @@
 #include "vm/ArrayBufferViewObject.h"  // js::UnwrapArrayBufferView
 #include "vm/Interpreter.h"
 #include "vm/PromiseObject.h"  // js::UnwrapAndTypeCheckThis
+#include "vm/SavedFrame.h"     // js::SavedFrame
 #include "builtin/streams/ReadableStreamReader-inl.h"
 #include "vm/Compartment-inl.h"   // js::UnwrapAndTypeCheckThis
 #include "vm/JSObject-inl.h"      // js::NewObjectWithClassProto
@@ -29,11 +30,14 @@
 
 using JS::CallArgs;
 using JS::Handle;
+using JS::ObjectValue;
 using JS::Rooted;
 using JS::RootedObject;
 using JS::RootedValueArray;
+using JS::UndefinedHandleValue;
 using JS::Value;
 
+using js::ForAuthorCodeBool;
 using js::GetErrorMessage;
 using js::ListObject;
 using js::NewObjectWithClassProto;
@@ -249,13 +253,37 @@ static bool ReadableStreamBYOBReader_read(JSContext* cx, unsigned argc,
   return true;
 }
 
+bool ReadableStreamBYOBReaderErrorReadIntoRequests(
+    JSContext* cx, Handle<ReadableStreamBYOBReader*> reader,
+    Handle<Value> err) {
+  // Let readIntoRequests be reader.[[readIntoRequests]].
+  ListObject* readIntoRequests = reader->requests();
+
+  // Set reader.[[readIntoRequests]] to a new empty list.
+  reader->clearRequests();
+
+  // For each readIntoRequest of readIntoRequests,
+  uint32_t len = readIntoRequests->length();
+  Rooted<JSObject*> readRequest(cx);
+  Rooted<JSObject*> resultObj(cx);
+  Rooted<Value> resultVal(cx);
+  for (uint32_t i = 0; i < len; i++) {
+    // Perform readIntoRequest’s error steps, given e.
+    readRequest = &readIntoRequests->getAs<JSObject>(i);
+    if (!RejectPromise(cx, readRequest, err)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
- * Streams spec, 3.6.4.4. releaseLock ( )
+ * https://streams.spec.whatwg.org/#abstract-opdef-readablestreambyobreaderrelease
  */
 static bool ReadableStreamBYOBReader_releaseLock(JSContext* cx, unsigned argc,
                                                  Value* vp) {
-  // Step 1: If ! IsReadableStreamBYOBReader(this) is false,
-  //         throw a TypeError exception.
+  // If ! IsReadableStreamBYOBReader(this) is false, throw a TypeError
+  // exception.
   CallArgs args = CallArgsFromVp(argc, vp);
   Rooted<ReadableStreamBYOBReader*> reader(
       cx, UnwrapAndTypeCheckThis<ReadableStreamBYOBReader>(cx, args,
@@ -264,26 +292,31 @@ static bool ReadableStreamBYOBReader_releaseLock(JSContext* cx, unsigned argc,
     return false;
   }
 
-  // Step 2: If this.[[ownerReadableStream]] is undefined, return.
+  // If this.[[ownerReadableStream]] is undefined, return.
   if (!reader->hasStream()) {
     args.rval().setUndefined();
     return true;
   }
 
-  // Step 3: If this.[[readRequests]] is not empty, throw a TypeError exception.
-  Value val = reader->getFixedSlot(ReadableStreamReader::Slot_Requests);
-  if (!val.isUndefined()) {
-    ListObject* readRequests = &val.toObject().as<ListObject>();
-    if (readRequests->length() != 0) {
-      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                JSMSG_READABLESTREAMREADER_NOT_EMPTY,
-                                "releaseLock");
-      return false;
-    }
+  // Perform ! ReadableStreamReaderGenericRelease(reader).
+  if (!js::ReadableStreamReaderGenericRelease(cx, reader)) {
+    return false;
   }
 
-  // Step 4: Perform ! ReadableStreamReaderGenericRelease(this).
-  if (!js::ReadableStreamReaderGenericRelease(cx, reader)) {
+  // Let e be a new TypeError exception.
+  JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                            JSMSG_READABLESTREAMREADER_RELEASED);
+  JS::RootedValue e(cx);
+  Rooted<js::SavedFrame*> stack(cx);
+  if (!cx->isExceptionPending() ||
+      !GetAndClearExceptionAndStack(cx, &e, &stack)) {
+    // Uncatchable error. Die immediately without erroring the
+    // stream.
+    return false;
+  }
+
+  // Perform ! ReadableStreamBYOBReaderErrorReadIntoRequests(reader, e).
+  if (!ReadableStreamBYOBReaderErrorReadIntoRequests(cx, reader, e)) {
     return false;
   }
 
