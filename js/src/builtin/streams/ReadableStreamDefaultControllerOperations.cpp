@@ -287,8 +287,10 @@ static bool DefaultControllerPullFailedHandler(JSContext* cx, unsigned argc,
     // ReadableStreamGetNumReadRequests(stream) > 0, return true.
 
     bool hasDefaultReader = false;
-    MOZ_ASSERT(js::ReadableStreamHasDefaultReader(cx, unwrappedStream,
-                                                  &hasDefaultReader));
+    if (!js::ReadableStreamHasDefaultReader(cx, unwrappedStream,
+                                            &hasDefaultReader)) {
+      MOZ_ASSERT(false);
+    }
     if (hasDefaultReader &&
         ReadableStreamGetNumReadRequests(unwrappedStream) > 0) {
       return true;
@@ -297,8 +299,9 @@ static bool DefaultControllerPullFailedHandler(JSContext* cx, unsigned argc,
     // If ! ReadableStreamHasBYOBReader(stream) is true and !
     // ReadableStreamGetNumReadIntoRequests(stream) > 0, return true.
     bool hasBYOBReader = false;
-    MOZ_ASSERT(
-        js::ReadableStreamHasBYOBReader(cx, unwrappedStream, &hasBYOBReader));
+    if (!js::ReadableStreamHasBYOBReader(cx, unwrappedStream, &hasBYOBReader)) {
+      MOZ_ASSERT(false);
+    }
     if (hasBYOBReader &&
         ReadableStreamGetNumReadRequests(unwrappedStream) > 0) {
       return true;

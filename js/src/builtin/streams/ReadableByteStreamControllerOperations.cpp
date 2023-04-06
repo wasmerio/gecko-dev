@@ -599,7 +599,7 @@ extern bool js::ReadableByteStreamControllerRespondWithNewView(
     }
   } else {
     size_t len2 = 0;
-    JS::GetArrayBufferLengthAndData(viewedArrayBuffer, &len, &is_shared, &data);
+    JS::GetArrayBufferLengthAndData(firstDescriptor->buffer(), &len2, &is_shared, &data);
     if (len2 != len) {
       JS_ReportErrorNumberASCII(
           cx, GetErrorMessage, nullptr,
@@ -655,10 +655,11 @@ js::ReadableByteStreamControllerConvertPullIntoDescriptor(
   JS::RootedValueArray<3> args(cx);
   args[0].setObject(*transferredBuffer);
   args[1].setInt32(pullIntoDescriptor->byteOffset());
-  args[2].setDouble(bytesFilled / elementSize);
+  args[2].setDouble(bytesFilled == 0 ? 0 : bytesFilled / elementSize);
 
   Rooted<Value> ctor(cx, pullIntoDescriptor->ctor());
   JS::Rooted<JSObject*> obj(cx);
+  
   if (!JS::Construct(cx, ctor, args, &obj)) {
     return nullptr;
   }
@@ -1222,8 +1223,9 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
   double autoAllocateChunkSize = 0;
   if (!autoAllocateChunkSizeVal.isUndefined()) {
     MOZ_ASSERT(autoAllocateChunkSizeVal.isNumber());
-    MOZ_ASSERT(
-        js::ToInteger(cx, autoAllocateChunkSizeVal, &autoAllocateChunkSize));
+    if (!js::ToInteger(cx, autoAllocateChunkSizeVal, &autoAllocateChunkSize)) {
+      MOZ_ASSERT(false);
+    }
     if (autoAllocateChunkSize == 0) {
       JS_ReportErrorNumberASCII(cx, js::GetErrorMessage, nullptr,
                                 JSMSG_STREAM_AUTOALLOCATECHUNKSIZE_ZERO);
