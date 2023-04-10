@@ -230,6 +230,10 @@ bool ReadableStreamDefaultReader::constructor(JSContext* cx, unsigned argc,
   // Let readRequests be reader.[[readRequests]].
   ListObject* readIntoRequests = reader->requests();
 
+  if (!readIntoRequests) {
+    return true;
+  }
+
   // Set reader.[[readRequests]] to a new empty list.
   reader->clearRequests();
 
