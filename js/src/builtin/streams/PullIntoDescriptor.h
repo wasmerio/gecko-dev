@@ -58,8 +58,12 @@ class PullIntoDescriptor : public NativeObject {
   ReaderType readerType() const {
     int32_t n = getFixedSlot(Slot_ReaderType).toInt32();
     MOZ_ASSERT(n == int32_t(ReaderType::Default) ||
-               n == int32_t(ReaderType::BYOB));
+               n == int32_t(ReaderType::BYOB) ||
+               n == int32_t(ReaderType::None));
     return ReaderType(n);
+  }
+  void setReaderType(ReaderType readerType) {
+    setFixedSlot(Slot_ReaderType, Int32Value(int32_t(readerType)));
   }
 
   static PullIntoDescriptor* create(JSContext* cx,

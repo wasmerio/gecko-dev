@@ -204,19 +204,20 @@ class ReadableByteStreamController : public ReadableStreamController {
   };
 
   bool hasByobRequest() const {
-    return !getFixedSlot(Slot_BYOBRequest).isUndefined();
+    return !getFixedSlot(Slot_BYOBRequest).isNullOrUndefined();
   }
   JS::Value byobRequest() const { return getFixedSlot(Slot_BYOBRequest); }
   void setByobRequest(ReadableStreamBYOBRequest* byobRequest) {
     setFixedSlot(Slot_BYOBRequest, JS::ObjectValue(*byobRequest));
   }
   void clearByobRequest() {
-    setFixedSlot(Slot_BYOBRequest, JS::UndefinedValue());
+    setFixedSlot(Slot_BYOBRequest, JS::NullValue());
   }
   ListObject* pendingPullIntos() const {
     return &getFixedSlot(Slot_PendingPullIntos).toObject().as<ListObject>();
   }
-  void setAutoAllocateChunkSize(double chunkSize) {
+  void setAutoAllocateChunkSize(uint64_t chunkSize) {
+    MOZ_ASSERT(chunkSize > 0);
     setFixedSlot(Slot_AutoAllocateSize, JS::NumberValue(chunkSize));
   }
   void clearAutoAllocateChunkSize() {

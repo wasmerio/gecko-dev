@@ -815,7 +815,7 @@ MSG_DEF(JSMSG_STREAM_MISSING_HIGHWATERMARK,              0, JSEXN_TYPEERR,  "'hi
 MSG_DEF(JSMSG_STREAM_INVALID_HIGHWATERMARK,              0, JSEXN_RANGEERR, "'highWaterMark' must be a non-negative, non-NaN number.")
 MSG_DEF(JSMSG_STREAM_CONSUME_ERROR,                      0, JSEXN_TYPEERR,  "error consuming stream body")
 MSG_DEF(JSMSG_STREAM_AUTOALLOCATECHUNKSIZE_ZERO,         0, JSEXN_TYPEERR,  "'autoAllocateChunkSize' must not be 0.")
-MSG_DEF(JSMSG_READABLESTREAM_BYOB_SIZE,                  0, JSEXN_TYPEERR, "size unsupported for byob streams")
+MSG_DEF(JSMSG_READABLESTREAM_BYOB_SIZE,                  0, JSEXN_RANGEERR, "size unsupported for byob streams")
 
 // (wasm) Response-related
 MSG_DEF(JSMSG_WASM_ERROR_CONSUMING_RESPONSE,             0, JSEXN_TYPEERR,  "WebAssembly: There was an error consuming the Response")

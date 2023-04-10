@@ -253,30 +253,6 @@ static bool ReadableStreamBYOBReader_read(JSContext* cx, unsigned argc,
   return true;
 }
 
-bool ReadableStreamBYOBReaderErrorReadIntoRequests(
-    JSContext* cx, Handle<ReadableStreamBYOBReader*> reader,
-    Handle<Value> err) {
-  // Let readIntoRequests be reader.[[readIntoRequests]].
-  ListObject* readIntoRequests = reader->requests();
-
-  // Set reader.[[readIntoRequests]] to a new empty list.
-  reader->clearRequests();
-
-  // For each readIntoRequest of readIntoRequests,
-  uint32_t len = readIntoRequests->length();
-  Rooted<JSObject*> readRequest(cx);
-  Rooted<JSObject*> resultObj(cx);
-  Rooted<Value> resultVal(cx);
-  for (uint32_t i = 0; i < len; i++) {
-    // Perform readIntoRequest’s error steps, given e.
-    readRequest = &readIntoRequests->getAs<JSObject>(i);
-    if (!RejectPromise(cx, readRequest, err)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 /**
  * https://streams.spec.whatwg.org/#abstract-opdef-readablestreambyobreaderrelease
  */
@@ -316,7 +292,7 @@ static bool ReadableStreamBYOBReader_releaseLock(JSContext* cx, unsigned argc,
   }
 
   // Perform ! ReadableStreamBYOBReaderErrorReadIntoRequests(reader, e).
-  if (!ReadableStreamBYOBReaderErrorReadIntoRequests(cx, reader, e)) {
+  if (!js::ReadableStreamReaderErrorReadOrReadIntoRequests(cx, reader, e)) {
     return false;
   }
 

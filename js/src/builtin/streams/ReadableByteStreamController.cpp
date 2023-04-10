@@ -260,6 +260,7 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
 
     RootedObject view(cx);
 
+    // Internal stream functions
     if (unwrappedStream->mode() == JS::ReadableStreamMode::ExternalSource) {
       JS::ReadableStreamUnderlyingSource* source =
           unwrappedController->externalSource();
@@ -278,6 +279,14 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
 
       queueTotalSize = queueTotalSize - bytesWritten;
     } else {
+      // Assert: ! ReadableStreamGetNumReadRequests(stream) is 0.
+      MOZ_ASSERT(ReadableStreamGetNumReadRequests(unwrappedStream) == 0);
+
+      // Perform ! ReadableByteStreamControllerFillReadRequestFromQueue(this,
+      // readRequest).
+      // (inlined here, per initial implementation)
+      // allows external path above to share end instructions
+
       // Step 3.b: Let entry be the first element of this.[[queue]].
       // Step 3.c: Remove entry from this.[[queue]], shifting all other
       //           elements downward (so that the second becomes the
@@ -341,31 +350,28 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
     return PromiseObject::unforgeableResolveWithNonPromise(cx, val);
   }
 
-  // Step 5: If autoAllocateChunkSize is not undefined,
+  // Let autoAllocateChunkSize be this.[[autoAllocateChunkSize]].
+  // If autoAllocateChunkSize is not undefined,
   if (unwrappedController->autoAllocateChunkSize().isSome()) {
     uint64_t autoAllocateChunkSize =
         unwrappedController->autoAllocateChunkSize().value();
 
-    // Step 5.a: Let buffer be
-    //           Construct(%ArrayBuffer%, « autoAllocateChunkSize »).
+    // Let buffer be Construct(%ArrayBuffer%, « autoAllocateChunkSize »).
     JSObject* bufferObj = JS::NewArrayBuffer(cx, autoAllocateChunkSize);
 
-    // Step 5.b: If buffer is an abrupt completion,
-    //           return a promise rejected with buffer.[[Value]].
+    // If buffer is an abrupt completion,
     if (!bufferObj) {
+      // Perform readRequest’s error steps, given buffer.[[Value]].
+      // Return
       return PromiseRejectedWithPendingError(cx);
     }
 
     RootedArrayBufferObject buffer(cx, &bufferObj->as<ArrayBufferObject>());
 
-    // Step 5.c: Let pullIntoDescriptor be
-    //           Record {[[buffer]]: buffer.[[Value]],
-    //                   [[byteOffset]]: 0,
-    //                   [[byteLength]]: autoAllocateChunkSize,
-    //                   [[bytesFilled]]: 0,
-    //                   [[elementSize]]: 1,
-    //                   [[ctor]]: %Uint8Array%,
-    //                   [[readerType]]: `"default"`}.
+    // Let pullIntoDescriptor be a new pull-into descriptor with buffer
+    // buffer.[[Value]], buffer byte length autoAllocateChunkSize, byte offset
+    // 0, byte length autoAllocateChunkSize, bytes filled 0, element size 1,
+    // view constructor %Uint8Array%, and reader type "default".
     RootedObject uint8Array(cx,
                             &cx->global()->getConstructor(JSProto_Uint8Array));
     RootedObject pullIntoDescriptor(
@@ -375,8 +381,7 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
       return PromiseRejectedWithPendingError(cx);
     }
 
-    // Step 5.d: Append pullIntoDescriptor as the last element of
-    //           this.[[pendingPullIntos]].
+    // Append pullIntoDescriptor to this.[[pendingPullIntos]].
     if (!AppendToListInFixedSlot(
             cx, unwrappedController,
             ReadableByteStreamController::Slot_PendingPullIntos,
@@ -385,20 +390,18 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
     }
   }
 
-  // Step 6: Let promise be ! ReadableStreamAddReadRequest(stream,
-  //                                                       forAuthorCode).
+  // Perform ! ReadableStreamAddReadRequest(stream, readRequest).
   Rooted<PromiseObject*> promise(
       cx, ReadableStreamAddReadOrReadIntoRequest(cx, unwrappedStream));
   if (!promise) {
     return nullptr;
   }
 
-  // Step 7: Perform ! ReadableByteStreamControllerCallPullIfNeeded(this).
+  // Perform ! ReadableByteStreamControllerCallPullIfNeeded(this).
   if (!ReadableStreamControllerCallPullIfNeeded(cx, unwrappedController)) {
     return nullptr;
   }
 
-  // Step 8: Return promise.
   return promise;
 }
 
@@ -415,19 +418,17 @@ static void ReadableByteStreamControllerFinalize(JS::GCContext* gcx,
 // Unified with 3.9.2 above.
 
 /**
- * Streams spec, 3.13.5.
- *      ReadableByteStreamControllerClearPendingPullIntos ( controller )
+ * https://streams.spec.whatwg.org/#readable-byte-stream-controller-clear-pending-pull-intos
  */
 [[nodiscard]] bool js::ReadableByteStreamControllerClearPendingPullIntos(
     JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController) {
-  // Step 1: Perform
-  //         ! ReadableByteStreamControllerInvalidateBYOBRequest(controller).
+  // Perform ! ReadableByteStreamControllerInvalidateBYOBRequest(controller).
   if (!ReadableByteStreamControllerInvalidateBYOBRequest(cx,
                                                          unwrappedController)) {
     return false;
   }
 
-  // Step 2: Set controller.[[pendingPullIntos]] to a new empty List.
+  // Set controller.[[pendingPullIntos]] to a new empty list.
   return StoreNewListInFixedSlot(
       cx, unwrappedController,
       ReadableByteStreamController::Slot_PendingPullIntos);
@@ -539,40 +540,30 @@ extern bool js::ReadableByteStreamControllerHandleQueueDrain(
   return ReadableStreamControllerCallPullIfNeeded(cx, unwrappedController);
 }
 
-enum BYOBRequestSlots {
-  BYOBRequestSlot_Controller,
-  BYOBRequestSlot_View,
-  BYOBRequestSlotCount
-};
-
 /**
- * Streams spec 3.13.16.
- *      ReadableByteStreamControllerInvalidateBYOBRequest ( controller )
+ * https://streams.spec.whatwg.org/#readable-byte-stream-controller-invalidate-byob-request
  */
 [[nodiscard]] bool js::ReadableByteStreamControllerInvalidateBYOBRequest(
     JSContext* cx, Handle<ReadableByteStreamController*> unwrappedController) {
-  // Step 1: If controller.[[byobRequest]] is undefined, return.
+  // If controller.[[byobRequest]] is null, return.
   RootedValue unwrappedBYOBRequestVal(cx, unwrappedController->byobRequest());
-  if (unwrappedBYOBRequestVal.isUndefined()) {
+  if (unwrappedBYOBRequestVal.isNullOrUndefined()) {
     return true;
   }
 
-  Rooted<NativeObject*> unwrappedBYOBRequest(
-      cx, UnwrapAndDowncastValue<NativeObject>(cx, unwrappedBYOBRequestVal));
+  Rooted<ReadableStreamBYOBRequest*> unwrappedBYOBRequest(
+      cx, UnwrapAndDowncastValue<ReadableStreamBYOBRequest>(cx, unwrappedBYOBRequestVal));
   if (!unwrappedBYOBRequest) {
     return false;
   }
 
-  // Step 2: Set controller.[[byobRequest]]
-  //                       .[[associatedReadableByteStreamController]]
-  //         to undefined.
-  unwrappedBYOBRequest->setFixedSlot(BYOBRequestSlot_Controller,
-                                     UndefinedValue());
+  // Set controller.[[byobRequest]].[[controller]] to undefined.
+  unwrappedBYOBRequest->clearController();
 
-  // // Step 3: Set controller.[[byobRequest]].[[view]] to undefined.
-  unwrappedBYOBRequest->setFixedSlot(BYOBRequestSlot_View, UndefinedValue());
+  // Set controller.[[byobRequest]].[[view]] to null.
+  unwrappedBYOBRequest->clearView();
 
-  // // Step 4: Set controller.[[byobRequest]] to undefined.
+  // Set controller.[[byobRequest]] to null.
   unwrappedController->clearByobRequest();
 
   return true;
@@ -582,7 +573,9 @@ enum BYOBRequestSlots {
 //      ReadableByteStreamControllerShouldCallPull ( controller )
 // Unified with 3.10.3 above.
 
-// https://streams.spec.whatwg.org/#abstract-opdef-readablebytestreamcontrollergetbyobrequest
+/**
+ * https://streams.spec.whatwg.org/#abstract-opdef-readablebytestreamcontrollergetbyobrequest
+ */
 [[nodiscard]] static bool ReadableByteStreamController_byobRequest(
     JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);

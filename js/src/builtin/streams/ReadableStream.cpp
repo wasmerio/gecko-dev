@@ -175,7 +175,7 @@ bool ReadableStream::constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
     return false;
   }
   if (equal) {
-    // Throw a RangeError
+    // If strategy["size"] exists, throw a RangeError exception.
     if (!size.isUndefined()) {
       JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                 JSMSG_READABLESTREAM_BYOB_SIZE);

@@ -17,6 +17,7 @@
 #include "js/ErrorReport.h"           // JS_ReportErrorNumberASCII
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/RootingAPI.h"            // JS::Handle, JS::Rooted
+#include "vm/Interpreter.h"
 #include "vm/PromiseObject.h"         // js::PromiseObject
 
 #include "builtin/streams/ReadableStreamReader-inl.h"  // js::UnwrapStreamFromReader
@@ -219,12 +220,39 @@ bool ReadableStreamDefaultReader::constructor(JSContext* cx, unsigned argc,
 }
 
 /**
- * Streams spec, 3.6.4.4. releaseLock ( )
+ * https://streams.spec.whatwg.org/#abstract-opdef-readablestreamdefaultreadererrorreadrequests
+ * AND
+ * https://streams.spec.whatwg.org/#abstract-opdef-readablestreambyobreadererrorreadintorequests
+ */
+[[nodiscard]] bool js::ReadableStreamReaderErrorReadOrReadIntoRequests(
+    JSContext* cx, Handle<ReadableStreamReader*> reader,
+    Handle<Value> err) {
+  // Let readRequests be reader.[[readRequests]].
+  ListObject* readIntoRequests = reader->requests();
+
+  // Set reader.[[readRequests]] to a new empty list.
+  reader->clearRequests();
+
+  // For each readRequest of readRequests,
+  uint32_t len = readIntoRequests->length();
+  Rooted<JSObject*> readRequest(cx);
+  Rooted<JSObject*> resultObj(cx);
+  Rooted<Value> resultVal(cx);
+  for (uint32_t i = 0; i < len; i++) {
+    // Perform readRequest’s error steps, given e.
+    readRequest = &readIntoRequests->getAs<JSObject>(i);
+    if (!RejectPromise(cx, readRequest, err)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * https://streams.spec.whatwg.org/#abstract-opdef-readablestreamdefaultreaderrelease
  */
 static bool ReadableStreamDefaultReader_releaseLock(JSContext* cx,
                                                     unsigned argc, Value* vp) {
-  // Step 1: If ! IsReadableStreamDefaultReader(this) is false,
-  //         throw a TypeError exception.
   CallArgs args = CallArgsFromVp(argc, vp);
   Rooted<ReadableStreamDefaultReader*> reader(
       cx, UnwrapAndTypeCheckThis<ReadableStreamDefaultReader>(cx, args,
@@ -233,28 +261,36 @@ static bool ReadableStreamDefaultReader_releaseLock(JSContext* cx,
     return false;
   }
 
-  // Step 2: If this.[[ownerReadableStream]] is undefined, return.
+  // If this.[[stream]] is undefined, return.
   if (!reader->hasStream()) {
     args.rval().setUndefined();
     return true;
   }
 
-  // Step 3: If this.[[readRequests]] is not empty, throw a TypeError exception.
-  Value val = reader->getFixedSlot(ReadableStreamReader::Slot_Requests);
-  if (!val.isUndefined()) {
-    ListObject* readRequests = &val.toObject().as<ListObject>();
-    if (readRequests->length() != 0) {
-      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                JSMSG_READABLESTREAMREADER_NOT_EMPTY,
-                                "releaseLock");
-      return false;
-    }
-  }
-
-  // Step 4: Perform ! ReadableStreamReaderGenericRelease(this).
+  // Perform ! ReadableStreamDefaultReaderRelease(this).
+  // (inlined)
+  
+  // Perform ! ReadableStreamReaderGenericRelease(reader).
   if (!js::ReadableStreamReaderGenericRelease(cx, reader)) {
     return false;
   }
+
+  // Let e be a new TypeError exception.
+  JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                            JSMSG_READABLESTREAMREADER_RELEASED);
+  JS::RootedValue e(cx);
+  Rooted<js::SavedFrame*> stack(cx);
+  if (!cx->isExceptionPending() ||
+      !GetAndClearExceptionAndStack(cx, &e, &stack)) {
+    // Uncatchable error. Die immediately without erroring the
+    // stream.
+    return false;
+  }
+
+  // Perform ! ReadableStreamDefaultReaderErrorReadRequests(reader, e).
+  if (!ReadableStreamReaderErrorReadOrReadIntoRequests(cx, reader, e)) {
+    return false;
+  }  
 
   args.rval().setUndefined();
   return true;
@@ -333,6 +369,5 @@ static const JSPropertySpec ReadableStreamDefaultReader_properties[] = {
 
 const JSClass ReadableStreamReader::class_ = {"ReadableStreamReader"};
 
-JS_STREAMS_CLASS_SPEC(ReadableStreamDefaultReader, 1, SlotCount,
-                      0, 0,
+JS_STREAMS_CLASS_SPEC(ReadableStreamDefaultReader, 1, SlotCount, 0, 0,
                       JS_NULL_CLASS_OPS);

@@ -112,7 +112,9 @@ class ReadableStream : public NativeObject {
   void setReader(JSObject* reader) {
     setFixedSlot(Slot_Reader, JS::ObjectValue(*reader));
   }
-  void clearReader() { setFixedSlot(Slot_Reader, JS::UndefinedValue()); }
+  void clearReader() {
+    setFixedSlot(Slot_Reader, JS::UndefinedValue());
+  }
 
   JS::Value storedError() const { return getFixedSlot(Slot_StoredError); }
   void setStoredError(JS::Handle<JS::Value> value) {

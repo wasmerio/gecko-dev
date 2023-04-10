@@ -100,6 +100,9 @@ extern bool js::ReadableByteStreamControllerEnqueueClonedChunkToQueue(
   return true;
 }
 
+/**
+ * https://streams.spec.whatwg.org/#readable-byte-stream-controller-enqueue-chunk-to-queue
+ */
 extern bool js::ReadableByteStreamControllerEnqueueChunkToQueue(
     JSContext* cx, JS::Handle<ReadableByteStreamController*> controller,
     JS::Handle<JSObject*> buffer, uint32_t byteOffset, uint32_t byteLength) {
@@ -672,62 +675,57 @@ extern JSObject* js::ReadableByteStreamControllerConvertPullIntoDescriptor(
 }
 
 /**
- * Streams spec, 3.10.3.
- *      ReadableStreamDefaultControllerShouldCallPull ( controller )
+ * https://streams.spec.whatwg.org/#readable-byte-stream-controller-should-call-pull
  */
 [[nodiscard]] bool ReadableByteStreamControllerShouldCallPull(
-    ReadableByteStreamController* unwrappedController) {
-  // Step 1: Let stream be controller.[[controlledReadableStream]]
-  //         (or [[controlledReadableByteStream]]).
-  ReadableStream* unwrappedStream = unwrappedController->stream();
+    JSContext* cx, ReadableByteStreamController* unwrappedController) {
+  // Let stream be controller.[[stream]].
+  Rooted<ReadableStream*> unwrappedStream(cx, unwrappedController->stream());
 
-  // 3.10.3. Step 2:
-  //      If ! ReadableStreamDefaultControllerCanCloseOrEnqueue(controller)
-  //      is false, return false.
-  // This turns out to be the same as 3.13.25 steps 2-3.
-
-  // 3.13.25 Step 2: If stream.[[state]] is not "readable", return false.
+  // If stream.[[state]] is not "readable", return false.
   if (!unwrappedStream->readable()) {
     return false;
   }
 
-  // 3.13.25 Step 3: If controller.[[closeRequested]] is true, return false.
+  // If controller.[[closeRequested]] is true, return false.
   if (unwrappedController->closeRequested()) {
     return false;
   }
 
-  // Step 3 (or 4):
-  //      If controller.[[started]] is false, return false.
+  // If controller.[[started]] is false, return false.
   if (!unwrappedController->started()) {
     return false;
   }
 
-  // 3.10.3.
-  // Step 4: If ! IsReadableStreamLocked(stream) is true and
-  //      ! ReadableStreamGetNumReadRequests(stream) > 0, return true.
-  //
-  // 3.13.25.
-  // Step 5: If ! ReadableStreamHasDefaultReader(stream) is true and
-  //         ! ReadableStreamGetNumReadRequests(stream) > 0, return true.
-  // Step 6: If ! ReadableStreamHasBYOBReader(stream) is true and
-  //         ! ReadableStreamGetNumReadIntoRequests(stream) > 0, return true.
-  //
-  // All of these amount to the same thing in this implementation:
-  if (unwrappedStream->locked() &&
+  // If ! ReadableStreamHasDefaultReader(stream) is true and !
+  // ReadableStreamGetNumReadRequests(stream) > 0, return true.
+  bool hasDefaultReader;
+  if (!ReadableStreamHasDefaultReader(cx, unwrappedStream, &hasDefaultReader)) {
+    abort();
+  }
+  if (hasDefaultReader &&
       ReadableStreamGetNumReadRequests(unwrappedStream) > 0) {
     return true;
   }
 
-  // Step 5 (or 7):
-  //      Let desiredSize be
-  //      ! ReadableStreamDefaultControllerGetDesiredSize(controller).
-  //      (ReadableByteStreamControllerGetDesiredSize in 3.13.25.)
+  // If ! ReadableStreamHasBYOBReader(stream) is true and !
+  // ReadableStreamGetNumReadIntoRequests(stream) > 0, return true.
+  bool hasBYOBReader;
+  if (!ReadableStreamHasBYOBReader(cx, unwrappedStream, &hasBYOBReader)) {
+    abort();
+  }
+  if (hasBYOBReader && ReadableStreamGetNumReadRequests(unwrappedStream) > 0) {
+    return true;
+  }
+
+  // Let desiredSize be !
+  // ReadableByteStreamControllerGetDesiredSize(controller).
   double desiredSize =
       ReadableStreamControllerGetDesiredSizeUnchecked(unwrappedController);
 
-  // Step 6 (or 8): Assert: desiredSize is not null (implicit).
-  // Step 7 (or 9): If desiredSize > 0, return true.
-  // Step 8 (or 10): Return false.
+  // Assert: desiredSize is not null. (implicit).
+  // If desiredSize > 0, return true.
+  // Return false.
   return desiredSize > 0;
 }
 
@@ -936,13 +934,12 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
       // Perform !
       // ReadableByteStreamControllerFillReadRequestFromQueue(controller,
       // readRequest).
+      // (inlined here, as with other call site)
 
       MOZ_ASSERT(unwrappedStream->mode() !=
                  JS::ReadableStreamMode::ExternalSource);
-      // Step 3.b: Let entry be the first element of this.[[queue]].
-      // Step 3.c: Remove entry from this.[[queue]], shifting all other
-      //           elements downward (so that the second becomes the
-      //           first, and so on).
+      // Let entry be controller.[[queue]][0].
+      // Remove entry from controller.[[queue]].
       Rooted<ListObject*> unwrappedQueue(cx, unwrappedController->queue());
       Rooted<ByteStreamChunk*> unwrappedEntry(
           cx, UnwrapAndDowncastObject<ByteStreamChunk>(
@@ -951,18 +948,23 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
         return false;
       }
 
-      queueTotalSize = queueTotalSize - unwrappedEntry->byteLength();
+      // Set controller.[[queueTotalSize]] to controller.[[queueTotalSize]] −
+      // entry’s byte length.
+      unwrappedController->setQueueTotalSize(queueTotalSize -
+                                             unwrappedEntry->byteLength());
 
-      // Step 3.f: Let view be ! Construct(%Uint8Array%,
-      //                                   « entry.[[buffer]],
-      //                                     entry.[[byteOffset]],
-      //                                     entry.[[byteLength]] »).
-      // (reordered)
+      // Perform ! ReadableByteStreamControllerHandleQueueDrain(controller).
+      if (!ReadableByteStreamControllerHandleQueueDrain(cx,
+                                                        unwrappedController)) {
+        return false;
+      }
+
+      // Let view be ! Construct(%Uint8Array%, « entry’s buffer, entry’s byte
+      // offset, entry’s byte length »).
       RootedObject buffer(cx, unwrappedEntry->buffer());
       if (!cx->compartment()->wrap(cx, &buffer)) {
         return false;
       }
-
       uint32_t byteOffset = unwrappedEntry->byteOffset();
       RootedObject view(
           cx, JS_NewUint8ArrayWithBuffer(cx, buffer, byteOffset,
@@ -971,20 +973,7 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
         return false;
       }
 
-      // Step 3.d: Set this.[[queueTotalSize]] to
-      //           this.[[queueTotalSize]] − entry.[[byteLength]].
-      // (reordered)
-      unwrappedController->setQueueTotalSize(queueTotalSize);
-
-      // Step 3.e: Perform ! ReadableByteStreamControllerHandleQueueDrain(this).
-      // (reordered)
-      if (!ReadableByteStreamControllerHandleQueueDrain(cx,
-                                                        unwrappedController)) {
-        return false;
-      }
-
-      // Step 3.g: Return a promise resolved with
-      //           ! ReadableStreamCreateReadResult(view, false, forAuthorCode).
+      // Perform readRequest’s chunk steps, given view.
       RootedValue val(cx);
       val.setObject(*view);
 
@@ -1127,7 +1116,9 @@ extern bool js::ReadableByteStreamControllerRespondInClosedState(
   controller->setPullMethod(pullMethod);
   controller->setCancelMethod(cancelMethod);
 
-  controller->setAutoAllocateChunkSize(autoAllocateChunkSize);
+  if (autoAllocateChunkSize) {
+    controller->setAutoAllocateChunkSize(autoAllocateChunkSize);
+  }
 
   if (!StoreNewListInFixedSlot(
           cx, controller,
