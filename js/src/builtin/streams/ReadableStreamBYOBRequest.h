@@ -48,12 +48,8 @@ class ReadableStreamBYOBRequest : public NativeObject {
   }
 
   JS::Value view() const { return getFixedSlot(Slot_View); }
-  void setView(const JS::Value& view) {
-    setFixedSlot(Slot_View, view);
-  }
-  void clearView() {
-    setFixedSlot(Slot_View, JS::NullValue());
-  }
+  void setView(const JS::Value& view) { setFixedSlot(Slot_View, view); }
+  void clearView() { setFixedSlot(Slot_View, JS::NullValue()); }
 
   static bool constructor(JSContext* cx, unsigned argc, JS::Value* vp);
   static const ClassSpec classSpec_;

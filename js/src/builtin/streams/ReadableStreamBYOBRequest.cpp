@@ -82,14 +82,6 @@ static bool ReadableStreamBYOBRequest_view(JSContext* cx, unsigned argc,
     return false;
   }
 
-  uint64_t bytesWritten = args.get(0).toNumber();
-  if (args.get(0).toNumber() - bytesWritten != 0) {
-    JS_ReportErrorNumberASCII(
-        cx, GetErrorMessage, nullptr,
-        JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_INVALID_WRITTEN_LEN);
-    return false;
-  }
-
   Rooted<ReadableStreamBYOBRequest*> unwrappedRequest(
       cx,
       UnwrapAndTypeCheckThis<ReadableStreamBYOBRequest>(cx, args, "respond"));
@@ -102,6 +94,14 @@ static bool ReadableStreamBYOBRequest_view(JSContext* cx, unsigned argc,
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_READABLESTREAMBYOBREQUEST_NO_CONTROLLER,
                               "respond()");
+    return false;
+  }
+
+  uint64_t bytesWritten = args.get(0).toNumber();
+  if (args.get(0).toNumber() - bytesWritten != 0) {
+    JS_ReportErrorNumberASCII(
+        cx, GetErrorMessage, nullptr,
+        JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_INVALID_WRITTEN_LEN);
     return false;
   }
 

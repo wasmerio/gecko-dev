@@ -18,7 +18,7 @@
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/RootingAPI.h"            // JS::Handle, JS::Rooted
 #include "vm/Interpreter.h"
-#include "vm/PromiseObject.h"         // js::PromiseObject
+#include "vm/PromiseObject.h"  // js::PromiseObject
 
 #include "builtin/streams/ReadableStreamReader-inl.h"  // js::UnwrapStreamFromReader
 
@@ -225,8 +225,7 @@ bool ReadableStreamDefaultReader::constructor(JSContext* cx, unsigned argc,
  * https://streams.spec.whatwg.org/#abstract-opdef-readablestreambyobreadererrorreadintorequests
  */
 [[nodiscard]] bool js::ReadableStreamReaderErrorReadOrReadIntoRequests(
-    JSContext* cx, Handle<ReadableStreamReader*> reader,
-    Handle<Value> err) {
+    JSContext* cx, Handle<ReadableStreamReader*> reader, Handle<Value> err) {
   // Let readRequests be reader.[[readRequests]].
   ListObject* readIntoRequests = reader->requests();
 
@@ -273,7 +272,7 @@ static bool ReadableStreamDefaultReader_releaseLock(JSContext* cx,
 
   // Perform ! ReadableStreamDefaultReaderRelease(this).
   // (inlined)
-  
+
   // Perform ! ReadableStreamReaderGenericRelease(reader).
   if (!js::ReadableStreamReaderGenericRelease(cx, reader)) {
     return false;
@@ -294,7 +293,7 @@ static bool ReadableStreamDefaultReader_releaseLock(JSContext* cx,
   // Perform ! ReadableStreamDefaultReaderErrorReadRequests(reader, e).
   if (!ReadableStreamReaderErrorReadOrReadIntoRequests(cx, reader, e)) {
     return false;
-  }  
+  }
 
   args.rval().setUndefined();
   return true;

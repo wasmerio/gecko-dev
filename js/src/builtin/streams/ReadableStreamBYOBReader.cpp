@@ -156,7 +156,7 @@ static bool ReadableStreamBYOBReader_closed(JSContext* cx, unsigned argc,
 }
 
 /**
- * Streams spec, 3.6.4.2. cancel ( reason )
+ * https://streams.spec.whatwg.org/#rs-cancel
  */
 static bool ReadableStreamBYOBReader_cancel(JSContext* cx, unsigned argc,
                                             Value* vp) {

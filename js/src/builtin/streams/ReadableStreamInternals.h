@@ -27,7 +27,8 @@ class ReadableStream;
     JSContext* cx, JS::Handle<ReadableStream*> unwrappedStream);
 
 [[nodiscard]] extern bool ReadableStreamReaderErrorReadOrReadIntoRequests(
-    JSContext* cx, JS::Handle<ReadableStreamReader*> reader, JS::Handle<Value> err);
+    JSContext* cx, JS::Handle<ReadableStreamReader*> reader,
+    JS::Handle<Value> err);
 
 [[nodiscard]] extern JSObject* ReadableStreamCancel(
     JSContext* cx, JS::Handle<ReadableStream*> unwrappedStream,

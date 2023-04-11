@@ -602,7 +602,7 @@ extern bool js::ReadableByteStreamControllerRespondWithNewView(
     size_t len2 = 0;
     JS::GetArrayBufferLengthAndData(firstDescriptor->buffer(), &len2,
                                     &is_shared, &data);
-    if (len2 != len) {
+    if (len2 != 0 && len2 != len) {
       JS_ReportErrorNumberASCII(
           cx, GetErrorMessage, nullptr,
           JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_LEN);

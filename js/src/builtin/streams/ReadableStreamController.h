@@ -337,7 +337,7 @@ inline void ReadableStreamBYOBRequest::setController(
 }
 
 inline bool ReadableStreamBYOBRequest::hasController() {
-  return !getFixedSlot(Slot_Controller).isUndefined();
+  return !getFixedSlot(Slot_Controller).isNullOrUndefined();
 }
 
 }  // namespace js
