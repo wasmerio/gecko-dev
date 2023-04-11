@@ -797,6 +797,8 @@ MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_OFFSET ,0, JSEXN_RANGEERR, "
 MSG_DEF(JSMSG_READABLESTREAMBYOBREQUEST_RESPOND_BAD_LEN ,0, JSEXN_RANGEERR, "ReadableStreamBYOBRequest method 'respondWithNewView' returned a view with an invalid length.")
 MSG_DEF(JSMSG_READABLESTREAM_METHOD_NOT_IMPLEMENTED,     1, JSEXN_TYPEERR, "ReadableStream method {0} not yet implemented")
 MSG_DEF(JSMSG_READABLESTREAM_PIPETO_BAD_SIGNAL,          0, JSEXN_TYPEERR, "signal must be either undefined or an AbortSignal")
+MSG_DEF(JSMSG_READABLESTREAMTEE_BYOB,                   0, JSEXN_ERR,     "tee() for readable byte streams is not yet implemented")
+MSG_DEF(JSMSG_READABLESTREAMTEE_CLONE,                   0, JSEXN_ERR,     "tee() support for cloneForBranch2=true is not yet implemented")
 
 // WritableStream
 MSG_DEF(JSMSG_READABLESTREAM_UNDERLYINGSINK_TYPE_WRONG,  0, JSEXN_RANGEERR,"'underlyingSink.type' must be undefined.")
