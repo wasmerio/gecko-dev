@@ -125,6 +125,10 @@
   REAL(Iterator, OCLASP(Iterator))                                           \
   REAL(AsyncIterator, OCLASP(AsyncIterator))                                 \
   IF_JS_STREAMS(REAL(ReadableStream, &js::ReadableStream::class_))           \
+  IF_JS_STREAMS(REAL(ReadableStreamBYOBReader,                               \
+                    &js::ReadableStreamBYOBReader::class_))                  \
+  IF_JS_STREAMS(REAL(ReadableStreamBYOBRequest,                              \
+                    &js::ReadableStreamBYOBRequest::class_))                 \
   IF_JS_STREAMS(REAL(ReadableStreamDefaultReader,                            \
                      &js::ReadableStreamDefaultReader::class_))              \
   IF_JS_STREAMS(REAL(ReadableStreamDefaultController,                        \
