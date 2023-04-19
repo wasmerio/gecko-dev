@@ -481,8 +481,7 @@ nsresult EarlyHintPreloader::CancelChannel(nsresult aStatus,
   return NS_OK;
 }
 
-void EarlyHintPreloader::OnParentReady(nsIParentChannel* aParent,
-                                       uint64_t aChannelId) {
+void EarlyHintPreloader::OnParentReady(nsIParentChannel* aParent) {
   AssertIsOnMainThread();
   MOZ_ASSERT(aParent);
   LOG(("EarlyHintPreloader::OnParentReady [this=%p]\n", this));
@@ -493,7 +492,6 @@ void EarlyHintPreloader::OnParentReady(nsIParentChannel* aParent,
   }
 
   mParent = aParent;
-  mChannelId = aChannelId;
 
   if (mTimer) {
     mTimer->Cancel();
@@ -519,16 +517,11 @@ void EarlyHintPreloader::SetParentChannel() {
 // https://searchfox.org/mozilla-central/rev/b4150d1c6fae0c51c522df2d2c939cf5ad331d4c/netwerk/ipc/DocumentLoadListener.cpp#1311
 void EarlyHintPreloader::InvokeStreamListenerFunctions() {
   AssertIsOnMainThread();
+  RefPtr<EarlyHintPreloader> self(this);
 
   LOG((
       "EarlyHintPreloader::InvokeStreamListenerFunctions [this=%p parent=%p]\n",
       this, mParent.get()));
-
-  if (nsCOMPtr<nsIIdentChannel> channel = do_QueryInterface(mChannel)) {
-    MOZ_ASSERT(mChannelId);
-    DebugOnly<nsresult> rv = channel->SetChannelId(mChannelId);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-  }
 
   // If we failed to suspend the channel, then we might have received
   // some messages while the redirected was being handled.

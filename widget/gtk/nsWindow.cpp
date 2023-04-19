@@ -809,6 +809,12 @@ void nsWindow::SetModal(bool aModal) {
 // nsIWidget method, which means IsShown.
 bool nsWindow::IsVisible() const { return mIsShown; }
 
+bool nsWindow::IsMapped() const {
+  // TODO: Enable for X11 when Mozilla testsuite is moved to new
+  // testing environment from Ubuntu 18.04 which is broken.
+  return GdkIsWaylandDisplay() ? mIsMapped : true;
+}
+
 void nsWindow::RegisterTouchWindow() {
   mHandleTouchEvent = true;
   mTouches.Clear();
@@ -2400,13 +2406,15 @@ nsWindow::WaylandPopupGetPositionFromLayout() {
 
   const bool isTopContextMenu = mPopupContextMenu && !mPopupAnchored;
   const bool isRTL = IsPopupDirectionRTL();
-  int8_t popupAlign(popupFrame->GetPopupAlignment());
-  int8_t anchorAlign(popupFrame->GetPopupAnchor());
-  if (isTopContextMenu) {
-    anchorAlign = POPUPALIGNMENT_BOTTOMRIGHT;
-    popupAlign = POPUPALIGNMENT_TOPLEFT;
+  const bool anchored = popupFrame->IsAnchored();
+  int8_t popupAlign = POPUPALIGNMENT_TOPLEFT;
+  int8_t anchorAlign = POPUPALIGNMENT_BOTTOMRIGHT;
+  if (anchored) {
+    // See nsMenuPopupFrame::AdjustPositionForAnchorAlign.
+    popupAlign = popupFrame->GetPopupAlignment();
+    anchorAlign = popupFrame->GetPopupAnchor();
   }
-  if (isRTL) {
+  if (isRTL && (anchored || isTopContextMenu)) {
     popupAlign = -popupAlign;
     anchorAlign = -anchorAlign;
   }
@@ -3377,17 +3385,6 @@ void* nsWindow::GetNativeData(uint32_t aDataType) {
       return mGdkWindow;
     }
 
-    case NS_NATIVE_DISPLAY: {
-#ifdef MOZ_X11
-      GdkDisplay* gdkDisplay = gdk_display_get_default();
-      if (GdkIsX11Display(gdkDisplay)) {
-        return GDK_DISPLAY_XDISPLAY(gdkDisplay);
-      }
-#endif /* MOZ_X11 */
-      // Don't bother to return native display on Wayland as it's for
-      // X11 only NPAPI plugins.
-      return nullptr;
-    }
     case NS_NATIVE_SHELLWIDGET:
       return GetToplevelWidget();
 
@@ -3732,10 +3729,15 @@ void nsWindow::CreateCompositorVsyncDispatcher() {
 #endif
 
 gboolean nsWindow::OnExposeEvent(cairo_t* cr) {
-  // Send any pending resize events so that layout can update.
-  // May run event loop.
-  MaybeDispatchResized();
+  // This might destroy us.
+  NotifyOcclusionState(OcclusionState::VISIBLE);
+  if (mIsDestroyed) {
+    return FALSE;
+  }
 
+  // Send any pending resize events so that layout can update.
+  // May run event loop and destroy us.
+  MaybeDispatchResized();
   if (mIsDestroyed) {
     return FALSE;
   }
@@ -4237,6 +4239,8 @@ static bool IsBogusLeaveNotifyEvent(GdkWindow* aWindow,
     const auto& desktopEnv = GetDesktopEnvironmentIdentifier();
     return desktopEnv.EqualsLiteral("fluxbox") ||   // Bug 1805939 comment 0.
            desktopEnv.EqualsLiteral("blackbox") ||  // Bug 1805939 comment 32.
+           desktopEnv.EqualsLiteral("lg3d") ||      // Bug 1820405.
+           desktopEnv.EqualsLiteral("pekwm") ||     // Bug 1822911.
            StringBeginsWith(desktopEnv, "fvwm"_ns);
   }();
 
@@ -4317,15 +4321,19 @@ Maybe<GdkWindowEdge> nsWindow::CheckResizerEdge(
       // we still want the resizers there, even when tiled.
       return true;
     }
-    if (mDrawInTitlebar) {
-      // If we show top resizers on a (non-PIP) tiled window on GNOME, it
-      // doesn't really work, since the window is "stuck" to the top and
-      // bottom, so don't show them in that case.
-      return !mIsTiled;
+    if (!mDrawInTitlebar) {
+      return false;
     }
-    // If we're not a PIP window nor drawing to the titlebar, we don't need to
-    // add resizers.
-    return false;
+    // On KDE, allow for 1 extra pixel at the top of regular windows when
+    // drawing to the titlebar. This matches the native titlebar behavior on
+    // that environment. See bug 1813554.
+    //
+    // Don't do that on GNOME (see bug 1822764). If we wanted to do this on
+    // GNOME we'd need an extra check for mIsTiled, since the window is "stuck"
+    // to the top and bottom.
+    //
+    // Other DEs are untested.
+    return mDrawInTitlebar && IsKdeDesktopEnvironment();
   }();
 
   if (!canResize) {
@@ -5973,8 +5981,10 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
         size.height);
     gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
   }
-
-  if (mWindowType == WindowType::Dialog) {
+  if (mIsPIPWindow) {
+    LOG("    Is PIP Window\n");
+    gtk_window_set_type_hint(GTK_WINDOW(mShell), GDK_WINDOW_TYPE_HINT_UTILITY);
+  } else if (mWindowType == WindowType::Dialog) {
     mGtkWindowRoleName = "Dialog";
 
     SetDefaultIcon();
@@ -6073,12 +6083,6 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
     SetDefaultIcon();
 
     LOG("nsWindow::Create() Toplevel\n");
-
-    if (mIsPIPWindow) {
-      LOG("    Is PIP Window\n");
-      gtk_window_set_type_hint(GTK_WINDOW(mShell),
-                               GDK_WINDOW_TYPE_HINT_UTILITY);
-    }
 
     // each toplevel window gets its own window group
     GtkWindowGroup* group = gtk_window_group_new();
@@ -8747,6 +8751,8 @@ bool nsWindow::IsAlwaysUndecoratedWindow() const {
     return true;
   }
   if (mWindowType == WindowType::Dialog &&
+      mBorderStyle != BorderStyle::Default &&
+      mBorderStyle != BorderStyle::All &&
       !(mBorderStyle & BorderStyle::Title) &&
       !(mBorderStyle & BorderStyle::ResizeH)) {
     return true;
@@ -9312,9 +9318,8 @@ nsWindow::GtkWindowDecoration nsWindow::GetSystemGtkWindowDecoration() {
     // GTK_CSD forces CSD mode - use also CSD because window manager
     // decorations does not work with CSD.
     // We check GTK_CSD as well as gtk_window_should_use_csd() does.
-    const char* csdOverride = getenv("GTK_CSD");
-    if (csdOverride && *csdOverride == '1') {
-      return GTK_DECORATION_CLIENT;
+    if (const char* csdOverride = getenv("GTK_CSD")) {
+      return *csdOverride == '0' ? GTK_DECORATION_NONE : GTK_DECORATION_CLIENT;
     }
 
     // TODO: Consider switching this to GetDesktopEnvironmentIdentifier().

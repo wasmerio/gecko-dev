@@ -312,6 +312,8 @@ void CanonicalBrowsingContext::ReplacedBy(
   // SetWithoutSyncing can be used if context hasn't been attached.
   Transaction txn;
   txn.SetBrowserId(GetBrowserId());
+  txn.SetIsAppTab(GetIsAppTab());
+  txn.SetHasSiblings(GetHasSiblings());
   txn.SetHistoryID(GetHistoryID());
   txn.SetExplicitActive(GetExplicitActive());
   txn.SetEmbedderColorSchemes(GetEmbedderColorSchemes());
@@ -794,7 +796,7 @@ RefPtr<PrintPromise> CanonicalBrowsingContext::Print(
 
   layout::RemotePrintJobParent* remotePrintJob =
       new layout::RemotePrintJobParent(printSettings);
-  printData.remotePrintJobParent() =
+  printData.remotePrintJob() =
       browserParent->Manager()->SendPRemotePrintJobConstructor(remotePrintJob);
 
   if (listener) {
@@ -1018,7 +1020,7 @@ already_AddRefed<nsDocShellLoadState> CanonicalBrowsingContext::CreateLoadInfo(
 
 void CanonicalBrowsingContext::NotifyOnHistoryReload(
     bool aForceReload, bool& aCanReload,
-    Maybe<RefPtr<nsDocShellLoadState>>& aLoadState,
+    Maybe<NotNull<RefPtr<nsDocShellLoadState>>>& aLoadState,
     Maybe<bool>& aReloadActiveEntry) {
   MOZ_DIAGNOSTIC_ASSERT(!aLoadState);
 
@@ -1032,7 +1034,7 @@ void CanonicalBrowsingContext::NotifyOnHistoryReload(
   }
 
   if (mActiveEntry) {
-    aLoadState.emplace(CreateLoadInfo(mActiveEntry));
+    aLoadState.emplace(WrapMovingNotNull(RefPtr{CreateLoadInfo(mActiveEntry)}));
     aReloadActiveEntry.emplace(true);
     if (aForceReload) {
       shistory->RemoveFrameEntries(mActiveEntry);
@@ -1040,7 +1042,8 @@ void CanonicalBrowsingContext::NotifyOnHistoryReload(
   } else if (!mLoadingEntries.IsEmpty()) {
     const LoadingSessionHistoryEntry& loadingEntry =
         mLoadingEntries.LastElement();
-    aLoadState.emplace(CreateLoadInfo(loadingEntry.mEntry));
+    aLoadState.emplace(
+        WrapMovingNotNull(RefPtr{CreateLoadInfo(loadingEntry.mEntry)}));
     aReloadActiveEntry.emplace(false);
     if (aForceReload) {
       SessionHistoryEntry::LoadingEntry* entry =
@@ -2124,7 +2127,7 @@ CanonicalBrowsingContext::ChangeRemoteness(
     change->mContentParent->WaitForLaunchAsync()->Then(
         GetMainThreadSerialEventTarget(), __func__,
         [change](ContentParent*) { change->ProcessLaunched(); },
-        [change](LaunchError) { change->Cancel(NS_ERROR_FAILURE); });
+        [change]() { change->Cancel(NS_ERROR_FAILURE); });
   } else {
     change->ProcessLaunched();
   }
@@ -2370,13 +2373,13 @@ void CanonicalBrowsingContext::SynchronizeLayoutHistoryState() {
       cp->SendGetLayoutHistoryState(this)->Then(
           GetCurrentSerialEventTarget(), __func__,
           [activeEntry = mActiveEntry](
-              const Tuple<RefPtr<nsILayoutHistoryState>, Maybe<Wireframe>>&
+              const std::tuple<RefPtr<nsILayoutHistoryState>, Maybe<Wireframe>>&
                   aResult) {
-            if (mozilla::Get<0>(aResult)) {
-              activeEntry->SetLayoutHistoryState(mozilla::Get<0>(aResult));
+            if (std::get<0>(aResult)) {
+              activeEntry->SetLayoutHistoryState(std::get<0>(aResult));
             }
-            if (mozilla::Get<1>(aResult)) {
-              activeEntry->SetWireframe(mozilla::Get<1>(aResult));
+            if (std::get<1>(aResult)) {
+              activeEntry->SetWireframe(std::get<1>(aResult));
             }
           },
           []() {});
@@ -2484,7 +2487,8 @@ void CanonicalBrowsingContext::RequestRestoreTabContent(
 
     if (data->CanRestoreInto(aWindow->GetDocumentURI())) {
       if (!aWindow->IsInProcess()) {
-        aWindow->SendRestoreTabContent(data, onTabRestoreComplete,
+        aWindow->SendRestoreTabContent(WrapNotNull(data.get()),
+                                       onTabRestoreComplete,
                                        onTabRestoreComplete);
         return;
       }
@@ -3009,6 +3013,16 @@ void CanonicalBrowsingContext::StopApzAutoscroll(nsViewID aScrollId,
 
   mozilla::layers::ScrollableLayerGuid guid(layersId, aPresShellId, aScrollId);
   widget->StopAsyncAutoscroll(guid);
+}
+
+already_AddRefed<nsISHEntry>
+CanonicalBrowsingContext::GetMostRecentLoadingSessionHistoryEntry() {
+  if (mLoadingEntries.IsEmpty()) {
+    return nullptr;
+  }
+
+  RefPtr<SessionHistoryEntry> entry = mLoadingEntries.LastElement().mEntry;
+  return entry.forget();
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(CanonicalBrowsingContext)

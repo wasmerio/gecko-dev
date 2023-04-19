@@ -1023,17 +1023,28 @@ void Statistics::sendGCTelemetry() {
   runtime->metrics().GC_IS_COMPARTMENTAL(!gc->fullGCRequested);
   runtime->metrics().GC_ZONE_COUNT(zoneStats.zoneCount);
   runtime->metrics().GC_ZONES_COLLECTED(zoneStats.collectedZoneCount);
-  TimeDuration prepareTotal = SumPhase(PhaseKind::PREPARE, phaseTimes);
+
+  TimeDuration prepareTotal = phaseTimes[Phase::PREPARE];
   TimeDuration markTotal = SumPhase(PhaseKind::MARK, phaseTimes);
   TimeDuration markRootsTotal = SumPhase(PhaseKind::MARK_ROOTS, phaseTimes);
-  TimeDuration markWeakTotal = phaseTimes[Phase::SWEEP_MARK_WEAK] +
-                               phaseTimes[Phase::SWEEP_MARK_GRAY_WEAK];
-  TimeDuration markGrayTotal = phaseTimes[Phase::SWEEP_MARK_GRAY] +
-                               phaseTimes[Phase::SWEEP_MARK_GRAY_WEAK];
+
+  // Gray and weak marking time is counted under MARK_WEAK and not MARK_GRAY.
+  TimeDuration markWeakTotal = SumPhase(PhaseKind::MARK_WEAK, phaseTimes);
+  TimeDuration markGrayNotWeak =
+      SumPhase(PhaseKind::MARK_GRAY, phaseTimes) +
+      SumPhase(PhaseKind::MARK_INCOMING_GRAY, phaseTimes);
+  TimeDuration markGrayWeak = SumPhase(PhaseKind::MARK_GRAY_WEAK, phaseTimes);
+  TimeDuration markGrayTotal = markGrayNotWeak + markGrayWeak;
+  TimeDuration markNotGrayOrWeak = markTotal - markGrayNotWeak - markWeakTotal;
+  if (markNotGrayOrWeak < TimeDuration::FromMilliseconds(0)) {
+    markNotGrayOrWeak = TimeDuration();
+  }
+
   size_t markCount = getCount(COUNT_CELLS_MARKED);
+
   runtime->metrics().GC_PREPARE_MS(prepareTotal);
-  runtime->metrics().GC_MARK_MS(markTotal);
-  if (markTotal >= TimeDuration::FromMilliseconds(1)) {
+  runtime->metrics().GC_MARK_MS(markNotGrayOrWeak);
+  if (markTotal >= TimeDuration::FromMicroseconds(1)) {
     double markRate = double(markCount) / t(markTotal);
     runtime->metrics().GC_MARK_RATE_2(uint32_t(markRate));
   }
@@ -1107,15 +1118,18 @@ void Statistics::sendGCTelemetry() {
   // Parallel marking stats.
   if (gc->isParallelMarkingEnabled()) {
     TimeDuration wallTime = SumPhase(PhaseKind::PARALLEL_MARK, phaseTimes);
+    TimeDuration parallelRunTime =
+        sumTotalParallelTime(PhaseKind::PARALLEL_MARK) -
+        sumTotalParallelTime(PhaseKind::PARALLEL_MARK_WAIT);
     TimeDuration parallelMarkTime =
-        sumTotalParallelTime(PhaseKind::PARALLEL_MARK);
+        sumTotalParallelTime(PhaseKind::PARALLEL_MARK_MARK);
     if (wallTime && parallelMarkTime) {
       uint32_t threadCount = gc->markers.length();
       double speedup = parallelMarkTime / wallTime;
-      double utilization = parallelMarkTime / (wallTime * threadCount);
+      double utilization = parallelRunTime / (wallTime * threadCount);
       runtime->metrics().GC_PARALLEL_MARK_SPEEDUP(uint32_t(speedup * 100.0));
       runtime->metrics().GC_PARALLEL_MARK_UTILIZATION(
-          uint32_t(utilization * 100.0));
+          std::clamp<uint32_t>(utilization * 100.0, 0, 100));
       runtime->metrics().GC_PARALLEL_MARK_INTERRUPTIONS(
           getCount(COUNT_PARALLEL_MARK_INTERRUPTIONS));
     }

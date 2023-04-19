@@ -13,7 +13,7 @@
 #include "transport/sigslot.h"
 #include "transport/transportlayer.h"  // For TransportLayer::State
 
-#include "libwebrtcglue/MediaConduitInterface.h"
+#include "libwebrtcglue/MediaConduitControl.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/StateMirroring.h"
@@ -25,6 +25,7 @@
 #include "MediaSegment.h"
 #include "PrincipalChangeObserver.h"
 #include "jsapi/PacketDumper.h"
+#include "PerformanceRecorder.h"
 
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 
@@ -43,10 +44,14 @@ class PeerIdentity;
 class ProcessedMediaTrack;
 class SourceMediaTrack;
 class VideoFrameConverter;
+class MediaSessionConduit;
+class AudioSessionConduit;
+class VideoSessionConduit;
 
 namespace dom {
 class MediaStreamTrack;
 struct RTCRTPContributingSourceStats;
+class RTCStatsTimestampMaker;
 }  // namespace dom
 
 struct MediaPipelineReceiveControlInterface {
@@ -170,7 +175,6 @@ class MediaPipeline : public sigslot::has_slots<> {
   void IncrementRtpPacketsSent(const MediaPacket& aPacket);
   void IncrementRtcpPacketsSent();
   void IncrementRtpPacketsReceived(int aBytes);
-  virtual void OnRtpPacketReceived() {}
   void IncrementRtcpPacketsReceived();
 
   virtual void SendPacket(MediaPacket&& packet);
@@ -367,9 +371,6 @@ class MediaPipelineReceive : public MediaPipeline {
   virtual void SetPrivatePrincipal(PrincipalHandle aHandle) = 0;
 
   void Shutdown() override;
-  void OnRtpPacketReceived() override;
-
-  MediaEventSource<void>& UnmuteEvent() { return mUnmuteEvent; }
 
  protected:
   ~MediaPipelineReceive();
@@ -377,11 +378,7 @@ class MediaPipelineReceive : public MediaPipeline {
   virtual void UpdateListener() = 0;
 
  private:
-  void UpdateMaybeTrackNeedsUnmute();
-
   WatchManager<MediaPipelineReceive> mWatchManager;
-  MediaEventProducer<void> mUnmuteEvent;
-  Atomic<bool> mMaybeTrackNeedsUnmute;
 };
 
 // A specialization of pipeline for reading from the network and

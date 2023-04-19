@@ -5,6 +5,9 @@
 "use strict";
 
 const { openToolboxAndLog, reloadPageAndLog } = require("../head");
+const {
+  createLocation,
+} = require("devtools/client/debugger/src/utils/location");
 
 /*
  * These methods are used for working with debugger state changes in order
@@ -108,8 +111,8 @@ exports.waitForText = waitForText;
 function waitForSymbols(dbg) {
   return waitUntil(() => {
     const state = dbg.store.getState();
-    const source = dbg.selectors.getSelectedSource(state);
-    return dbg.selectors.getSymbols(state, source);
+    const location = dbg.selectors.getSelectedLocation(state);
+    return dbg.selectors.getSymbols(state, location);
   }, "has file metadata");
 }
 
@@ -180,12 +183,12 @@ function selectSource(dbg, url) {
   const line = 1;
   const source = findSource(dbg, url);
   const cx = dbg.selectors.getContext(dbg.getState());
-  dbg.actions.selectLocation(cx, { sourceId: source.id, line });
+  dbg.actions.selectLocation(cx, createLocation({ source, line }));
   return waitForState(
     dbg,
     state => {
-      const source = dbg.selectors.getSelectedSource(state);
-      if (!source) {
+      const location = dbg.selectors.getSelectedLocation(state);
+      if (!location) {
         return false;
       }
       const sourceTextContent = dbg.selectors.getSelectedSourceTextContent(
@@ -197,7 +200,7 @@ function selectSource(dbg, url) {
 
       // wait for symbols -- a flat map of all named variables in a file -- to be calculated.
       // this is a slow process and becomes slower the larger the file is
-      return dbg.selectors.getSymbols(state, source);
+      return dbg.selectors.getSymbols(state, location);
     },
     "selected source"
   );
@@ -257,10 +260,10 @@ exports.reloadDebuggerAndLog = reloadDebuggerAndLog;
 async function addBreakpoint(dbg, line, url) {
   dump(`add breakpoint\n`);
   const source = findSource(dbg, url);
-  const location = {
-    sourceId: source.id,
+  const location = createLocation({
+    source,
     line,
-  };
+  });
 
   await selectSource(dbg, url);
 

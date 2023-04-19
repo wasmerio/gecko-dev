@@ -2,6 +2,8 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 ChromeUtils.defineESModuleGetters(this, {
+  ADLINK_CHECK_TIMEOUT_MS:
+    "resource:///actors/SearchSERPTelemetryChild.sys.mjs",
   FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
   FormHistoryTestUtils:
     "resource://testing-common/FormHistoryTestUtils.sys.mjs",
@@ -13,7 +15,6 @@ ChromeUtils.defineESModuleGetters(this, {
 });
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  ADLINK_CHECK_TIMEOUT_MS: "resource:///actors/SearchSERPTelemetryChild.jsm",
   AddonTestUtils: "resource://testing-common/AddonTestUtils.jsm",
   CustomizableUITestUtils:
     "resource://testing-common/CustomizableUITestUtils.jsm",
@@ -318,5 +319,40 @@ function assertImpressionEvents(expectedEvents) {
     recordedEngagements.length,
     totalExpectedEngagements,
     "Should have equal number of engagements."
+  );
+}
+
+function assertAdImpressionEvents(expectedAdImpressions) {
+  let adImpressions = Glean.serp.adImpression.testGetValue() ?? [];
+  let impressions = Glean.serp.impression.testGetValue() ?? [];
+
+  Assert.equal(impressions.length, 1, "Should have a SERP impression event.");
+  Assert.equal(
+    adImpressions.length,
+    expectedAdImpressions.length,
+    "Should have equal number of ad impression events."
+  );
+
+  expectedAdImpressions = expectedAdImpressions.map(expectedAdImpression => {
+    expectedAdImpression.impression_id = impressions[0].extra.impression_id;
+    return expectedAdImpression;
+  });
+
+  for (let [index, expectedAdImpression] of expectedAdImpressions.entries()) {
+    Assert.deepEqual(
+      adImpressions[index]?.extra,
+      expectedAdImpression,
+      "Should have equal values for an ad impression."
+    );
+  }
+}
+
+async function assertAbandonmentEvent(expectedAbandonment) {
+  let recordedAbandonment = Glean.serp.abandonment.testGetValue() ?? [];
+
+  Assert.equal(
+    recordedAbandonment[0].extra.reason,
+    expectedAbandonment.abandonment.reason,
+    "Should have the correct abandonment reason."
   );
 }

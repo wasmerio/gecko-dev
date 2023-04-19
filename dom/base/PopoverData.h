@@ -38,9 +38,29 @@ class PopoverData {
     mVisibilityState = aVisibilityState;
   }
 
+  nsWeakPtr GetPreviouslyFocusedElement() const {
+    return mPreviouslyFocusedElement;
+  }
+  void SetPreviouslyFocusedElement(nsWeakPtr aPreviouslyFocusedElement) {
+    mPreviouslyFocusedElement = aPreviouslyFocusedElement;
+  }
+
+  bool HasPopoverInvoker() const { return mHasPopoverInvoker; }
+  void SetHasPopoverInvoker(bool aHasPopoverInvoker) {
+    mHasPopoverInvoker = aHasPopoverInvoker;
+  }
+
  private:
   PopoverVisibilityState mVisibilityState = PopoverVisibilityState::Hidden;
   PopoverState mState = PopoverState::None;
+  // Popover and dialog don't share mPreviouslyFocusedElement for there are
+  // chances to lose the previously focused element.
+  // See, https://github.com/whatwg/html/issues/9063
+  nsWeakPtr mPreviouslyFocusedElement = nullptr;
+
+  // https://html.spec.whatwg.org/multipage/popover.html#popover-invoker, also
+  // see https://github.com/whatwg/html/issues/9168.
+  bool mHasPopoverInvoker = false;
 };
 }  // namespace mozilla::dom
 

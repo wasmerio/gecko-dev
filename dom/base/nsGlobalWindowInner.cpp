@@ -167,7 +167,6 @@
 #include "mozilla/dom/TimeoutHandler.h"
 #include "mozilla/dom/TimeoutManager.h"
 #include "mozilla/dom/ToJSValue.h"
-#include "mozilla/dom/U2F.h"
 #include "mozilla/dom/VRDisplay.h"
 #include "mozilla/dom/VRDisplayEvent.h"
 #include "mozilla/dom/VRDisplayEventBinding.h"
@@ -1310,7 +1309,6 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   if (mWindowGlobalChild && !mWindowGlobalChild->IsClosed()) {
     mWindowGlobalChild->Destroy();
   }
-  mWindowGlobalChild = nullptr;
 
   mIntlUtils = nullptr;
 
@@ -1449,7 +1447,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStatusbar)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mScrollbars)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCrypto)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mU2F)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConsole)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPaintWorklet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mExternal)
@@ -1566,7 +1563,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStatusbar)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mScrollbars)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCrypto)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mU2F)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mConsole)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPaintWorklet)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mExternal)
@@ -1628,20 +1624,22 @@ bool nsGlobalWindowInner::IsBlackForCC(bool aTracingNeeded) {
 // nsGlobalWindowInner::nsIScriptGlobalObject
 //*****************************************************************************
 
-bool nsGlobalWindowInner::ShouldResistFingerprinting() const {
+bool nsGlobalWindowInner::ShouldResistFingerprinting(
+    RFPTarget aTarget /* = RFPTarget::Unknown */) const {
   if (mDoc) {
-    return mDoc->ShouldResistFingerprinting();
+    return mDoc->ShouldResistFingerprinting(aTarget);
   }
   return nsContentUtils::ShouldResistFingerprinting(
       "If we do not have a document then we do not have any context"
-      "to make an informed RFP choice, so we fall back to the global pref");
+      "to make an informed RFP choice, so we fall back to the global pref",
+      aTarget);
 }
 
 OriginTrials nsGlobalWindowInner::Trials() const {
   return OriginTrials::FromWindow(this);
 }
 
-FontFaceSet* nsGlobalWindowInner::Fonts() {
+FontFaceSet* nsGlobalWindowInner::GetFonts() {
   if (mDoc) {
     return mDoc->Fonts();
   }
@@ -3378,19 +3376,6 @@ Crypto* nsGlobalWindowInner::GetCrypto(ErrorResult& aError) {
     mCrypto = new Crypto(this);
   }
   return mCrypto;
-}
-
-mozilla::dom::U2F* nsGlobalWindowInner::GetU2f(ErrorResult& aError) {
-  if (!mU2F) {
-    RefPtr<U2F> u2f = new U2F(this);
-    u2f->Init(aError);
-    if (NS_WARN_IF(aError.Failed())) {
-      return nullptr;
-    }
-
-    mU2F = u2f;
-  }
-  return mU2F;
 }
 
 nsIControllers* nsGlobalWindowInner::GetControllers(ErrorResult& aError) {
@@ -7615,7 +7600,7 @@ void nsGlobalWindowInner::FireOnNewGlobalObject() {
 
 #if defined(_WINDOWS_) && !defined(MOZ_WRAPPED_WINDOWS_H)
 #  pragma message( \
-      "wrapper failure reason: " MOZ_WINDOWS_WRAPPER_DISABLED_REASON)
+          "wrapper failure reason: " MOZ_WINDOWS_WRAPPER_DISABLED_REASON)
 #  error "Never include unwrapped windows.h in this file!"
 #endif
 
@@ -7930,6 +7915,7 @@ nsPIDOMWindowInner::nsPIDOMWindowInner(nsPIDOMWindowOuter* aOuterWindow,
       mMayHaveFormSelectEventListener(false),
       mMayHaveMouseEnterLeaveEventListener(false),
       mMayHavePointerEnterLeaveEventListener(false),
+      mMayHaveTransitionEventListener(false),
       mMayHaveBeforeInputEventListenerForTelemetry(false),
       mMutationObserverHasObservedNodeForTelemetry(false),
       mOuterWindow(aOuterWindow),

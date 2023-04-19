@@ -1136,23 +1136,6 @@ export var PlacesDBUtils = {
       },
 
       {
-        histogram: "PLACES_DATABASE_PAGESIZE_B",
-        query: "PRAGMA page_size /* PlacesDBUtils.jsm PAGESIZE_B */",
-      },
-
-      {
-        histogram: "PLACES_DATABASE_SIZE_PER_PAGE_B",
-        query: "PRAGMA page_count",
-        callback(aDbPageCount) {
-          // Note that the database file size would not be meaningful for this
-          // calculation, because the file grows in fixed-size chunks.
-          let dbPageSize = probeValues.PLACES_DATABASE_PAGESIZE_B;
-          let placesPageCount = probeValues.PLACES_PAGES_COUNT;
-          return Math.round((dbPageSize * aDbPageCount) / placesPageCount);
-        },
-      },
-
-      {
         histogram: "PLACES_DATABASE_FAVICONS_FILESIZE_MB",
         async callback() {
           let faviconsDbPath = PathUtils.join(
@@ -1186,6 +1169,13 @@ export var PlacesDBUtils = {
       {
         scalar: "places.pages_need_frecency_recalculation",
         query: "SELECT count(*) FROM moz_places WHERE recalc_frecency = 1",
+      },
+      {
+        scalar: "places.previousday_visits",
+        query: `SELECT COUNT(*) from moz_places
+                      WHERE hidden=0 AND last_visit_date < (strftime('%s', 'now', 'start of day') * 1000000)
+                      AND last_visit_date > (strftime('%s', 'now', 'start of day', '-1 day') * 1000000)
+                      AND last_visit_date IS NOT NULL;`,
       },
     ];
 

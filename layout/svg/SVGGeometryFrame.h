@@ -8,13 +8,11 @@
 #define LAYOUT_SVG_SVGGEOMETRYFRAME_H_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/DisplaySVGItem.h"
 #include "mozilla/ISVGDisplayableFrame.h"
 #include "gfxMatrix.h"
 #include "gfxRect.h"
-#include "nsDisplayList.h"
 #include "nsIFrame.h"
-#include "nsLiteralString.h"
-#include "nsQueryFrame.h"
 
 namespace mozilla {
 
@@ -95,27 +93,18 @@ class SVGGeometryFrame : public nsIFrame, public ISVGDisplayableFrame {
   // SVGGeometryFrame methods
   gfxMatrix GetCanvasTM();
 
-  bool IsInvisible() const;
+  virtual bool IsInvisible() const;
 
  protected:
   // ISVGDisplayableFrame interface:
   void PaintSVG(gfxContext& aContext, const gfxMatrix& aTransform,
-                imgDrawingParams& aImgParams,
-                const nsIntRect* aDirtyRect = nullptr) override;
+                imgDrawingParams& aImgParams) override;
   nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   void ReflowSVG() override;
   void NotifySVGChanged(uint32_t aFlags) override;
   SVGBBox GetBBoxContribution(const Matrix& aToBBoxUserspace,
                               uint32_t aFlags) override;
   bool IsDisplayContainer() override { return false; }
-
-  /**
-   * This function returns a set of bit flags indicating which parts of the
-   * element (fill, stroke, bounds) should intercept pointer events. It takes
-   * into account the type of element and the value of the 'pointer-events'
-   * property on the element.
-   */
-  virtual uint16_t GetHitTestFlags();
 
  private:
   enum { eRenderFill = 1, eRenderStroke = 2 };
@@ -146,23 +135,16 @@ class SVGGeometryFrame : public nsIFrame, public ISVGDisplayableFrame {
 //----------------------------------------------------------------------
 // Display list item:
 
-class DisplaySVGGeometry final : public nsPaintedDisplayItem {
-  using imgDrawingParams = image::imgDrawingParams;
-
+class DisplaySVGGeometry final : public DisplaySVGItem {
  public:
   DisplaySVGGeometry(nsDisplayListBuilder* aBuilder, SVGGeometryFrame* aFrame)
-      : nsPaintedDisplayItem(aBuilder, aFrame) {
+      : DisplaySVGItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(DisplaySVGGeometry);
-    MOZ_ASSERT(aFrame, "Must have a frame!");
   }
 
   MOZ_COUNTED_DTOR_OVERRIDE(DisplaySVGGeometry)
 
   NS_DISPLAY_DECL_NAME("DisplaySVGGeometry", TYPE_SVG_GEOMETRY)
-
-  void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
-               HitTestState* aState, nsTArray<nsIFrame*>* aOutFrames) override;
-  void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
 
   // Whether this part of the SVG should be natively handled by webrender,
   // potentially becoming an "active layer" inside a blob image.

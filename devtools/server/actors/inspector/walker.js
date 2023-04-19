@@ -16,19 +16,22 @@ const {
 
 loader.lazyRequireGetter(
   this,
+  "nodeFilterConstants",
+  "resource://devtools/shared/dom-node-filter-constants.js"
+);
+
+loader.lazyRequireGetter(
+  this,
   [
     "getFrameElement",
     "isAfterPseudoElement",
-    "isAnonymous",
     "isBeforePseudoElement",
     "isDirectShadowHostChild",
     "isMarkerPseudoElement",
-    "isNativeAnonymous",
     "isFrameBlockedByCSP",
     "isFrameWithChildTarget",
     "isShadowHost",
     "isShadowRoot",
-    "isTemplateElement",
     "loadSheet",
   ],
   "resource://devtools/shared/layout/utils.js",
@@ -335,41 +338,17 @@ class WalkerActor extends Actor {
     return "[WalkerActor " + this.actorID + "]";
   }
 
-  getAnonymousDocumentWalker(node, whatToShow, skipTo) {
+  getDocumentWalker(node, skipTo) {
     // Allow native anon content (like <video> controls) if preffed on
     const filter = this.showAllAnonymousContent
       ? allAnonymousContentTreeWalkerFilter
       : standardTreeWalkerFilter;
 
     return new DocumentWalker(node, this.rootWin, {
-      whatToShow,
       filter,
       skipTo,
       showAnonymousContent: true,
     });
-  }
-
-  getNonAnonymousDocumentWalker(node, whatToShow, skipTo) {
-    const nodeFilter = standardTreeWalkerFilter;
-
-    return new DocumentWalker(node, this.rootWin, {
-      whatToShow,
-      nodeFilter,
-      skipTo,
-      showAnonymousContent: false,
-    });
-  }
-
-  /**
-   * Will first try to create a regular anonymous document walker. If it fails, will fall
-   * back on a non-anonymous walker.
-   */
-  getDocumentWalker(node, whatToShow, skipTo) {
-    try {
-      return this.getAnonymousDocumentWalker(node, whatToShow, skipTo);
-    } catch (e) {
-      return this.getNonAnonymousDocumentWalker(node, whatToShow, skipTo);
-    }
   }
 
   destroy() {
@@ -637,10 +616,17 @@ class WalkerActor extends Actor {
     for (let node of nodes) {
       if (!(node instanceof NodeActor)) {
         // If an anonymous node was passed in and we aren't supposed to know
-        // about it, then consult with the document walker as the source of
-        // truth about which elements exist.
-        if (!this.showAllAnonymousContent && isAnonymous(node)) {
-          node = this.getDocumentWalker(node).currentNode;
+        // about it, then use the closest ancestor.
+        if (!this.showAllAnonymousContent) {
+          while (
+            node &&
+            standardTreeWalkerFilter(node) != nodeFilterConstants.FILTER_ACCEPT
+          ) {
+            node = this.rawParentNode(node);
+          }
+          if (!node) {
+            continue;
+          }
         }
 
         node = this._getOrCreateNodeActor(node);
@@ -694,23 +680,11 @@ class WalkerActor extends Actor {
   }
 
   rawParentNode(node) {
-    let parent;
-    try {
-      // If the node is the child of a shadow host, we can not use an anonymous walker to
-      // get the shadow host parent.
-      const walker = isDirectShadowHostChild(node.rawNode)
-        ? this.getNonAnonymousDocumentWalker(node.rawNode)
-        : this.getAnonymousDocumentWalker(node.rawNode);
-      parent = walker.parentNode();
-    } catch (e) {
-      // When getting the parent node for a child of a non-slotted shadow host child,
-      // walker.parentNode() will throw if the walker is anonymous, because non-slotted
-      // shadow host children are not accessible anywhere in the anonymous tree.
-      const walker = this.getNonAnonymousDocumentWalker(node.rawNode);
-      parent = walker.parentNode();
+    const rawNode = node instanceof NodeActor ? node.rawNode : node;
+    if (rawNode == this.rootDoc) {
+      return null;
     }
-
-    return parent;
+    return InspectorUtils.getParentForNode(rawNode, /* anonymous = */ true);
   }
 
   /**
@@ -734,8 +708,8 @@ class WalkerActor extends Actor {
       return undefined;
     }
 
-    const walker = this.getDocumentWalker(rawNode);
-    const firstChild = walker.firstChild();
+    const children = this._rawChildren(rawNode, /* includeAssigned = */ true);
+    const firstChild = children[0];
 
     // Bail out if:
     // - more than one child
@@ -745,8 +719,8 @@ class WalkerActor extends Actor {
     //                    a link to the original node.
     // - we are a flex item -> these are always shown on their own lines so they can be
     //                         selected by the flexbox inspector.
-    const isAssignedSlot =
-      !!firstChild &&
+    const isAssignedToSlot =
+      firstChild &&
       rawNode.nodeName === "SLOT" &&
       isDirectShadowHostChild(firstChild);
 
@@ -754,10 +728,10 @@ class WalkerActor extends Actor {
 
     if (
       !firstChild ||
-      walker.nextSibling() ||
+      children.length > 1 ||
       firstChild.nodeType !== Node.TEXT_NODE ||
       firstChild.nodeValue.length > gValueSummaryLength ||
-      isAssignedSlot ||
+      isAssignedToSlot ||
       isFlexItem
     ) {
       return undefined;
@@ -817,15 +791,11 @@ class WalkerActor extends Actor {
       this._retainedOrphans.delete(node);
     }
 
-    const walker = this.getDocumentWalker(node.rawNode);
-
-    let child = walker.firstChild();
-    while (child) {
+    for (const child of this._rawChildren(node.rawNode)) {
       const childActor = this.getNode(child);
       if (childActor) {
         this.releaseNode(childActor, options);
       }
-      child = walker.nextSibling();
     }
 
     node.destroy();
@@ -883,8 +853,6 @@ class WalkerActor extends Actor {
    *    `center`: If a node is specified, the given node will be as centered
    *       as possible in the list, given how close to the ends of the child
    *       list it is.  Mutually exclusive with `start`.
-   *    `whatToShow`: A bitmask of node types that should be included.  See
-   *       https://developer.mozilla.org/en-US/docs/Web/API/NodeFilter.
    *
    * @returns an object with three items:
    *    hasFirst: true if the first child of the node is included in the list.
@@ -898,6 +866,32 @@ class WalkerActor extends Actor {
       hasLast,
       nodes: nodes.map(n => this._getOrCreateNodeActor(n)),
     };
+  }
+
+  /**
+   * Returns the raw children of the DOM node, with anon content filtered as needed
+   * @param Node rawNode.
+   * @param boolean includeAssigned
+   *   Whether <slot> assigned children should be returned. See
+   *   HTMLSlotElement.assignedNodes().
+   * @returns Array<Node> the list of children.
+   */
+  _rawChildren(rawNode, includeAssigned) {
+    const filter = this.showAllAnonymousContent
+      ? allAnonymousContentTreeWalkerFilter
+      : standardTreeWalkerFilter;
+    const ret = [];
+    const children = InspectorUtils.getChildrenForNode(
+      rawNode,
+      /* anonymous = */ true,
+      includeAssigned
+    );
+    for (const child of children) {
+      if (filter(child) == nodeFilterConstants.FILTER_ACCEPT) {
+        ret.push(child);
+      }
+    }
+    return ret;
   }
 
   /**
@@ -918,230 +912,57 @@ class WalkerActor extends Actor {
    */
   // eslint-disable-next-line complexity
   _getChildren(node, options = {}) {
-    if (isNodeDead(node)) {
-      return { hasFirst: true, hasLast: true, nodes: [] };
-    }
-
-    if (isFrameBlockedByCSP(node.rawNode)) {
+    if (isNodeDead(node) || isFrameBlockedByCSP(node.rawNode)) {
       return { hasFirst: true, hasLast: true, nodes: [] };
     }
 
     if (options.center && options.start) {
       throw Error("Can't specify both 'center' and 'start' options.");
     }
+
     let maxNodes = options.maxNodes || -1;
     if (maxNodes == -1) {
       maxNodes = Number.MAX_VALUE;
     }
 
-    const directShadowHostChild = isDirectShadowHostChild(node.rawNode);
-    const shadowHost = isShadowHost(node.rawNode);
-    const shadowRoot = isShadowRoot(node.rawNode);
-
-    // UA Widgets are internal Firefox widgets such as videocontrols implemented
-    // using shadow DOM. By default, their shadow root should be hidden for web
-    // developers.
-    const isUAWidget =
-      shadowHost && node.rawNode.openOrClosedShadowRoot.isUAWidget();
-    const hideShadowRoot = isUAWidget && !this.showAllAnonymousContent;
-    const showNativeAnonymousChildren =
-      isUAWidget && this.showAllAnonymousContent;
-
-    const templateElement = isTemplateElement(node.rawNode);
-    if (templateElement) {
-      // <template> tags should have a single child pointing to the element's template
-      // content.
-      const documentFragment = node.rawNode.content;
-      const nodes = [documentFragment];
-      return { hasFirst: true, hasLast: true, nodes };
-    }
-
-    // Detect special case of unslotted shadow host children that cannot rely on a
-    // regular anonymous walker.
-    let isUnslottedHostChild = false;
-    if (directShadowHostChild) {
-      try {
-        this.getDocumentWalker(
-          node.rawNode,
-          options.whatToShow,
-          SKIP_TO_SIBLING
-        );
-      } catch (e) {
-        isUnslottedHostChild = true;
-      }
-    }
-
-    const useNonAnonymousWalker =
-      shadowRoot || shadowHost || isUnslottedHostChild;
-
-    // We're going to create a few document walkers with the same filter,
-    // make it easier.
-    const getFilteredWalker = documentWalkerNode => {
-      const { whatToShow } = options;
-
-      // Use SKIP_TO_SIBLING to force the walker to use a sibling of the provided node
-      // in case this one is incompatible with the walker's filter function.
-      const skipTo = SKIP_TO_SIBLING;
-
-      if (useNonAnonymousWalker) {
-        // Do not use an anonymous walker for :
-        // - shadow roots: if the host element has an ::after pseudo element, a walker on
-        //   the last child of the shadow root will jump to the ::after element, which is
-        //   not a child of the shadow root.
-        //   TODO: For this case, should rather use an anonymous walker with a new
-        //         dedicated filter.
-        // - shadow hosts: anonymous children of host elements make up the shadow dom,
-        //   while we want to return the direct children of the shadow host.
-        // - unslotted host child: if a shadow host child is not slotted, it is not part
-        //   of any anonymous tree and cannot be used with anonymous tree walkers.
-        return this.getNonAnonymousDocumentWalker(
-          documentWalkerNode,
-          whatToShow,
-          skipTo
-        );
-      }
-      return this.getDocumentWalker(documentWalkerNode, whatToShow, skipTo);
-    };
-
-    // Need to know the first and last child.
-    const rawNode = node.rawNode;
-    const firstChild = getFilteredWalker(rawNode).firstChild();
-    const lastChild = getFilteredWalker(rawNode).lastChild();
-
-    if (!firstChild && !shadowHost) {
-      // No children, we're done.
-      return { hasFirst: true, hasLast: true, nodes: [] };
-    }
-
-    let nodes = [];
-
-    if (firstChild) {
-      let start;
+    let nodes = this._rawChildren(node.rawNode, /* includeAssigned = */ true);
+    let hasFirst = true;
+    let hasLast = true;
+    if (nodes.length > maxNodes) {
+      let startIndex;
       if (options.center) {
-        start = options.center.rawNode;
-      } else if (options.start) {
-        start = options.start.rawNode;
-      } else {
-        start = firstChild;
-      }
-
-      // If we are using a non anonymous walker, we cannot start on:
-      // - a shadow root
-      // - a native anonymous node
-      if (
-        useNonAnonymousWalker &&
-        (isShadowRoot(start) || isNativeAnonymous(start))
-      ) {
-        start = firstChild;
-      }
-
-      // Start by reading backward from the starting point if we're centering...
-      const backwardWalker = getFilteredWalker(start);
-      if (backwardWalker.currentNode != firstChild && options.center) {
-        backwardWalker.previousSibling();
+        const centerIndex = nodes.indexOf(options.center.rawNode);
         const backwardCount = Math.floor(maxNodes / 2);
-        const backwardNodes = this._readBackward(backwardWalker, backwardCount);
-        nodes = backwardNodes;
+        // If centering would hit the end, just read the last maxNodes nodes.
+        if (centerIndex - backwardCount + maxNodes >= nodes.length) {
+          startIndex = nodes.length - maxNodes;
+        } else {
+          startIndex = Math.max(0, centerIndex - backwardCount);
+        }
+      } else if (options.start) {
+        startIndex = Math.max(0, nodes.indexOf(options.start.rawNode));
+      } else {
+        startIndex = 0;
       }
-
-      // Then read forward by any slack left in the max children...
-      const forwardWalker = getFilteredWalker(start);
-      const forwardCount = maxNodes - nodes.length;
-      nodes = nodes.concat(this._readForward(forwardWalker, forwardCount));
-
-      // If there's any room left, it means we've run all the way to the end.
-      // If we're centering, check if there are more items to read at the front.
-      const remaining = maxNodes - nodes.length;
-      if (options.center && remaining > 0 && nodes[0].rawNode != firstChild) {
-        const firstNodes = this._readBackward(backwardWalker, remaining);
-
-        // Then put it all back together.
-        nodes = firstNodes.concat(nodes);
-      }
-    }
-
-    let hasFirst, hasLast;
-    if (nodes.length) {
-      // Compare first/last with expected nodes before modifying the nodes array in case
-      // this is a shadow host.
-      hasFirst = nodes[0] == firstChild;
-      hasLast = nodes[nodes.length - 1] == lastChild;
-    } else {
-      // If nodes is still an empty array, we are on a host element with a shadow root but
-      // no direct children.
-      hasFirst = hasLast = true;
-    }
-
-    if (shadowHost) {
-      // Use anonymous walkers to fetch ::marker / ::before / ::after pseudo
-      // elements
-      const firstChildWalker = this.getDocumentWalker(node.rawNode);
-      const first = firstChildWalker.firstChild();
-      const hasMarker =
-        first && first.nodeName === "_moz_generated_content_marker";
-      const maybeBeforeNode = hasMarker
-        ? firstChildWalker.nextSibling()
-        : first;
-      const hasBefore =
-        maybeBeforeNode &&
-        maybeBeforeNode.nodeName === "_moz_generated_content_before";
-
-      const lastChildWalker = this.getDocumentWalker(node.rawNode);
-      const last = lastChildWalker.lastChild();
-      const hasAfter = last && last.nodeName === "_moz_generated_content_after";
-
-      nodes = [
-        // #shadow-root
-        ...(hideShadowRoot ? [] : [node.rawNode.openOrClosedShadowRoot]),
-        // ::marker
-        ...(hasMarker ? [first] : []),
-        // ::before
-        ...(hasBefore ? [maybeBeforeNode] : []),
-        // shadow host direct children
-        ...nodes,
-        // native anonymous content for UA widgets
-        ...(showNativeAnonymousChildren
-          ? this.getNativeAnonymousChildren(node.rawNode)
-          : []),
-        // ::after
-        ...(hasAfter ? [last] : []),
-      ];
+      const endIndex = Math.min(startIndex + maxNodes, nodes.length);
+      hasFirst = startIndex == 0;
+      hasLast = endIndex >= nodes.length;
+      nodes = nodes.slice(startIndex, endIndex);
     }
 
     return { hasFirst, hasLast, nodes };
   }
 
-  getNativeAnonymousChildren(rawNode) {
-    // Get an anonymous walker and start on the first child.
-    const walker = this.getDocumentWalker(rawNode);
-    let node = walker.firstChild();
-
-    const nodes = [];
-    while (node) {
-      // We only want native anonymous content here.
-      if (isNativeAnonymous(node)) {
-        nodes.push(node);
-      }
-      node = walker.nextSibling();
-    }
-    return nodes;
-  }
-
   /**
    * Get the next sibling of a given node.  Getting nodes one at a time
    * might be inefficient, be careful.
-   *
-   * @param object options
-   *    Named options:
-   *    `whatToShow`: A bitmask of node types that should be included.  See
-   *       https://developer.mozilla.org/en-US/docs/Web/API/NodeFilter.
    */
-  nextSibling(node, options = {}) {
+  nextSibling(node) {
     if (isNodeDead(node)) {
       return null;
     }
 
-    const walker = this.getDocumentWalker(node.rawNode, options.whatToShow);
+    const walker = this.getDocumentWalker(node.rawNode);
     const sibling = walker.nextSibling();
     return sibling ? this._getOrCreateNodeActor(sibling) : null;
   }
@@ -1149,18 +970,13 @@ class WalkerActor extends Actor {
   /**
    * Get the previous sibling of a given node.  Getting nodes one at a time
    * might be inefficient, be careful.
-   *
-   * @param object options
-   *    Named options:
-   *    `whatToShow`: A bitmask of node types that should be included.  See
-   *       https://developer.mozilla.org/en-US/docs/Web/API/NodeFilter.
    */
-  previousSibling(node, options = {}) {
+  previousSibling(node) {
     if (isNodeDead(node)) {
       return null;
     }
 
-    const walker = this.getDocumentWalker(node.rawNode, options.whatToShow);
+    const walker = this.getDocumentWalker(node.rawNode);
     const sibling = walker.previousSibling();
     return sibling ? this._getOrCreateNodeActor(sibling) : null;
   }
@@ -1181,26 +997,6 @@ class WalkerActor extends Actor {
       }
       node = walker.nextSibling();
     } while (node && --count);
-    return ret;
-  }
-
-  /**
-   * Helper function for the `children` method: Read backward in the sibling
-   * list into an array with `count` items, including the current node.
-   */
-  _readBackward(walker, count) {
-    const ret = [];
-
-    let node = walker.currentNode;
-    do {
-      if (!walker.isSkippedNode(node)) {
-        // The walker can be on a node that would be filtered out if it didn't find any
-        // other node to fallback to.
-        ret.push(node);
-      }
-      node = walker.previousSibling();
-    } while (node && --count);
-    ret.reverse();
     return ret;
   }
 
@@ -1983,7 +1779,10 @@ class WalkerActor extends Actor {
     }
     const rawNode = node.rawNode;
 
-    if (rawNode.ownerDocument && !rawNode.ownerDocument.contains(rawNode)) {
+    if (
+      rawNode.ownerDocument &&
+      rawNode.getRootNode({ composed: true }) != rawNode.ownerDocument
+    ) {
       // We only allow watching for mutations on nodes that are attached to
       // documents. That allows us to clean up our mutation listeners when all
       // of the watched nodes have been removed from the document.
@@ -2183,6 +1982,9 @@ class WalkerActor extends Actor {
   onSubtreeModified(evt) {
     const action = evt.type === "devtoolschildinserted" ? "add" : "remove";
     let node = evt.target;
+    if (node.isNativeAnonymous && !this.showAllAnonymousContent) {
+      return;
+    }
     while ((node = node.parentNode) !== null) {
       const mutationBpInfo = this._breakpointInfoForNode(node);
       if (mutationBpInfo?.subtree) {

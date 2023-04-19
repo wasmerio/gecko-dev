@@ -135,6 +135,7 @@ class Browsertime(Perftest):
             "chrome",
             "chrome-m",
             "chromium",
+            "custom-car",
         ):
             if (
                 not self.config.get("run_local", None)
@@ -309,6 +310,8 @@ class Browsertime(Perftest):
             "true" if self.config["test_bytecode_cache"] else "false",
             "--firefox.perfStats",
             test.get("perfstats", "false"),
+            "--browsertime.moz_fetch_dir",
+            os.environ.get("MOZ_FETCHES_DIR", "None"),
         ]
 
         if test.get("perfstats") == "true":
@@ -353,7 +356,7 @@ class Browsertime(Perftest):
                     browsertime_options.extend(pairing)
 
         priority1_options = self.browsertime_args
-        if self.config["app"] in ("chrome", "chromium", "chrome-m"):
+        if self.config["app"] in ("chrome", "chromium", "chrome-m", "custom-car"):
             priority1_options.extend(self.setup_chrome_args(test))
 
         if self.debug_mode:
@@ -412,6 +415,7 @@ class Browsertime(Perftest):
                 "chromium",
                 "chrome-m",
                 "chrome",
+                "custom-car",
             ):
                 priority1_options.extend(
                     [

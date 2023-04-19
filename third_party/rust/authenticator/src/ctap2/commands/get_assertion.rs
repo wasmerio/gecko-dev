@@ -1,14 +1,14 @@
 use super::{
-    Command, CommandError, PinAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
+    Command, CommandError, PinUvAuthCommand, Request, RequestCtap1, RequestCtap2, Retryable,
     StatusCode,
 };
 use crate::consts::{
     PARAMETER_SIZE, U2F_AUTHENTICATE, U2F_CHECK_IS_REGISTERED, U2F_REQUEST_USER_PRESENCE,
 };
-use crate::crypto::{authenticate, encrypt, COSEKey, CryptoError, ECDHSecret};
+use crate::crypto::{COSEKey, CryptoError, PinUvAuthParam, PinUvAuthToken, SharedSecret};
 use crate::ctap2::attestation::{AuthenticatorData, AuthenticatorDataFlags};
 use crate::ctap2::client_data::{ClientDataHash, CollectedClientData, CollectedClientDataWrapper};
-use crate::ctap2::commands::client_pin::{Pin, PinAuth};
+use crate::ctap2::commands::client_pin::Pin;
 use crate::ctap2::commands::get_next_assertion::GetNextAssertion;
 use crate::ctap2::commands::make_credentials::UserVerification;
 use crate::ctap2::server::{PublicKeyCredentialDescriptor, RelyingPartyWrapper, User};
@@ -28,7 +28,6 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_cbor::{de::from_slice, ser, Value};
-use std::convert::TryInto;
 use std::fmt;
 use std::io;
 
@@ -76,7 +75,7 @@ impl UserVerification for GetAssertionOptions {
 pub struct CalculatedHmacSecretExtension {
     pub public_key: COSEKey,
     pub salt_enc: Vec<u8>,
-    pub salt_auth: [u8; 16],
+    pub salt_auth: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -95,7 +94,7 @@ impl HmacSecretExtension {
         }
     }
 
-    pub fn calculate(&mut self, secret: &ECDHSecret) -> Result<(), AuthenticatorError> {
+    pub fn calculate(&mut self, secret: &SharedSecret) -> Result<(), AuthenticatorError> {
         if self.salt1.len() < 32 {
             return Err(CryptoError::WrongSaltLength.into());
         }
@@ -105,24 +104,12 @@ impl HmacSecretExtension {
                     return Err(CryptoError::WrongSaltLength.into());
                 }
                 let salts = [&self.salt1[..32], &salt2[..32]].concat(); // salt1 || salt2
-                encrypt(secret.shared_secret(), &salts)
+                secret.encrypt(&salts)
             }
-            None => encrypt(secret.shared_secret(), &self.salt1[..32]),
-        }
-        .map_err(CryptoError::Backend)?;
-        let salt_auth_full =
-            authenticate(secret.shared_secret(), &salt_enc).map_err(CryptoError::Backend)?;
-        let salt_auth = salt_auth_full
-            .windows(16)
-            .next()
-            .ok_or_else(|| AuthenticatorError::InternalError(String::from("salt_auth too short")))?
-            .try_into()
-            .map_err(|_| {
-                AuthenticatorError::InternalError(String::from(
-                    "salt_auth conversion failed. Should never happen.",
-                ))
-            })?;
-        let public_key = secret.my_public_key().clone();
+            None => secret.encrypt(&self.salt1[..32]),
+        }?;
+        let salt_auth = secret.authenticate(&salt_enc)?;
+        let public_key = secret.client_input().clone();
         self.calculated_hmac = Some(CalculatedHmacSecretExtension {
             public_key,
             salt_enc,
@@ -189,11 +176,10 @@ pub struct GetAssertion {
     pub(crate) extensions: GetAssertionExtensions,
     pub(crate) options: GetAssertionOptions,
     pub(crate) pin: Option<Pin>,
-    pub(crate) pin_auth: Option<PinAuth>,
+    pub(crate) pin_uv_auth_param: Option<PinUvAuthParam>,
 
     // This is used to implement the FIDO AppID extension.
     pub(crate) alternate_rp_id: Option<String>,
-    //TODO(MS): pinProtocol
 }
 
 impl GetAssertion {
@@ -214,13 +200,13 @@ impl GetAssertion {
             extensions,
             options,
             pin,
-            pin_auth: None,
+            pin_uv_auth_param: None,
             alternate_rp_id,
         })
     }
 }
 
-impl PinAuthCommand for GetAssertion {
+impl PinUvAuthCommand for GetAssertion {
     fn pin(&self) -> &Option<Pin> {
         &self.pin
     }
@@ -229,20 +215,47 @@ impl PinAuthCommand for GetAssertion {
         self.pin = pin;
     }
 
-    fn pin_auth(&self) -> &Option<PinAuth> {
-        &self.pin_auth
-    }
-
-    fn set_pin_auth(&mut self, pin_auth: Option<PinAuth>, _pint_auth_protocol: Option<u64>) {
-        self.pin_auth = pin_auth;
+    fn set_pin_uv_auth_param(
+        &mut self,
+        pin_uv_auth_token: Option<PinUvAuthToken>,
+    ) -> Result<(), AuthenticatorError> {
+        let mut param = None;
+        if let Some(token) = pin_uv_auth_token {
+            param = Some(
+                token
+                    .derive(self.client_data_hash().as_ref())
+                    .map_err(CommandError::Crypto)?,
+            );
+        }
+        self.pin_uv_auth_param = param;
+        Ok(())
     }
 
     fn client_data_hash(&self) -> ClientDataHash {
         self.client_data_wrapper.hash()
     }
 
-    fn unset_uv_option(&mut self) {
-        self.options.user_verification = None;
+    fn set_uv_option(&mut self, uv: Option<bool>) {
+        self.options.user_verification = uv;
+    }
+
+    fn get_uv_option(&mut self) -> Option<bool> {
+        self.options.user_verification
+    }
+
+    fn get_rp_id(&self) -> Option<&String> {
+        match &self.rp {
+            // CTAP1 case: We only have the hash, not the entire RpID
+            RelyingPartyWrapper::Hash(..) => None,
+            RelyingPartyWrapper::Data(r) => Some(&r.id),
+        }
+    }
+
+    fn set_discouraged_uv_option(&mut self) {
+        // "[..] the Relying Party does not wish to require user verification (e.g., by setting options.userVerification
+        // to "discouraged" in the WebAuthn API), the platform invokes the authenticatorGetAssertion operation using
+        // the marshalled input parameters along with an absent "uv" option key."
+        self.set_uv_option(None);
     }
 }
 
@@ -263,7 +276,7 @@ impl Serialize for GetAssertion {
         if self.options.has_some() {
             map_len += 1;
         }
-        if self.pin_auth.is_some() {
+        if self.pin_uv_auth_param.is_some() {
             map_len += 2;
         }
 
@@ -290,9 +303,9 @@ impl Serialize for GetAssertion {
         if self.options.has_some() {
             map.serialize_entry(&5, &self.options)?;
         }
-        if let Some(pin_auth) = &self.pin_auth {
-            map.serialize_entry(&6, &pin_auth)?;
-            map.serialize_entry(&7, &1)?;
+        if let Some(pin_uv_auth_param) = &self.pin_uv_auth_param {
+            map.serialize_entry(&6, &pin_uv_auth_param)?;
+            map.serialize_entry(&7, &pin_uv_auth_param.pin_protocol.id())?;
         }
         map.end()
     }
@@ -351,10 +364,11 @@ impl<'assertion> RequestCtap1 for CheckKeyHandle<'assertion> {
         // if the control byte is set to 0x07 by the FIDO Client, the U2F token is supposed to
         // simply check whether the provided key handle was originally created by this token,
         // and whether it was created for the provided application parameter. If so, the U2F
-        // token MUST respond with an authentication response message:error:test-of-user-presence-required
-        // (note that despite the name this signals a success condition).
-        // If the key handle was not created by this U2F token, or if it was created for a different
-        // application parameter, the token MUST respond with an authentication response message:error:bad-key-handle.
+        // token MUST respond with an authentication response
+        // message:error:test-of-user-presence-required (note that despite the name this
+        // signals a success condition). If the key handle was not created by this U2F
+        // token, or if it was created for a different application parameter, the token MUST
+        // respond with an authentication response message:error:bad-key-handle.
         match status {
             Ok(_) | Err(ApduErrorStatus::ConditionsNotSatisfied) => Ok(()),
             Err(e) => Err(Retryable::Error(HIDError::ApduStatus(e))),
@@ -749,28 +763,26 @@ pub mod test {
             0x3,  //allowList
             0x81, // array(1)
             0xa2, // map(2)
-            0x64, // text(4),
-            0x74, 0x79, 0x70, // typ
+            0x62, // text(2)
+            0x69, 0x64, // id
+            0x58, // bytes(
         ]);
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
         msg.extend([0x0]); //SEQ
-        msg.extend(vec![
-            0x65, // e (continuation of type)
-            0x6a, // text(10)
-            0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, // public-key
-            0x62, // text(2)
-            0x69, 0x64, // id
-            0x58, 0x40, // bytes(64)
-        ]);
-        msg.extend(&assertion.allow_list[0].id[..42]);
+        msg.extend([0x40]); // 64)
+        msg.extend(&assertion.allow_list[0].id[..58]);
         device.add_write(&msg, 0);
 
         msg = cid.to_vec();
         msg.extend([0x1]); //SEQ
-        msg.extend(&assertion.allow_list[0].id[42..]);
+        msg.extend(&assertion.allow_list[0].id[58..64]);
         msg.extend(vec![
+            0x64, // text(4),
+            0x74, 0x79, 0x70, 0x65, // type
+            0x6a, // text(10)
+            0x70, 0x75, 0x62, 0x6C, 0x69, 0x63, 0x2D, 0x6B, 0x65, 0x79, // public-key
             0x5,  // options
             0xa1, // map(1)
             0x62, // text(2)

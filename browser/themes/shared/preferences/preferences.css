@@ -192,7 +192,8 @@ checkbox {
 /* Category List */
 
 #categories {
-  overflow: visible !important; /* Cancel scrollbar and do not clip overflow content when window size goes very small */
+  overflow: visible;
+  min-height: auto;
   padding: 1px; /* Adding padding around richlistitem in order to make entire keyboard focusing outline visible */
 }
 
@@ -243,6 +244,12 @@ checkbox {
 #isDefaultLabel,
 #isNotDefaultLabel {
   font-weight: 600;
+}
+
+@supports not -moz-bool-pref("browser.migrate.preferences-entrypoint.enabled") {
+  #dataMigrationGroup {
+    display: none;
+  }
 }
 
 #browserContainersExtensionContent {
@@ -371,11 +378,6 @@ checkbox {
   min-height: 30px;
 }
 
-#handlersViewHeader > treecol,
-#handlersView > richlistitem > hbox {
-  width: 50%;
-}
-
 #handlersView .actionsMenu {
   margin: 0;
   min-height: 0;
@@ -469,6 +471,11 @@ richlistitem[selected] .actionsMenu:focus-visible {
 
 .addon-with-favicon .menu-iconic-icon {
   margin-inline-start: 0;
+}
+
+a[is="moz-support-link"] {
+  display: inline-block;
+  white-space: initial;
 }
 
 /* Search Pane */
@@ -579,6 +586,10 @@ richlistitem[selected] .actionsMenu:focus-visible {
   visibility: hidden;
 }
 
+html|dialog {
+  padding: 24px;
+}
+
 html|dialog::backdrop,
 .dialogOverlay[topmost="true"] {
   background-color: rgba(0,0,0,0.5);
@@ -676,7 +687,7 @@ html|dialog,
 }
 
 #defaultFont {
-  width: 25ch;
+  flex: 1 25ch;
 }
 
 #defaultFontType,
@@ -801,6 +812,10 @@ html|dialog,
   display: block;
 }
 
+.sync-choose-dialog-description {
+  margin-block-end: 10px;
+}
+
 .sync-engines-list > div,
 .sync-engines-list + hbox {
   margin-top: 0;
@@ -836,10 +851,12 @@ dialog > .sync-engines-list + hbox {
 .sync-engines-list {
   column-count: 2;
   column-fill: balance;
+  margin-block-end: 10px;
 }
 
 .sync-engines-list > div:not([hidden]) {
   display: flex;
+  break-inside: avoid;
 }
 
 .sync-engine-bookmarks .checkbox-icon,
@@ -929,19 +946,15 @@ dialog > .sync-engines-list + hbox {
   }
 }
 
-.face-sad {
-  content: url("chrome://browser/skin/preferences/face-sad.svg");
-  width: 20px;
-  height: 20px;
-  margin-block: 5px;
+.face-sad::before {
+  content: "\01F641";
+  font-size: 1.3em;
   margin-inline-end: 8px;
 }
 
-.face-smile {
-  content: url("chrome://browser/skin/preferences/face-smile.svg");
-  width: 20px;
-  height: 20px;
-  margin-block: 5px;
+.face-smile::before {
+  content: "\01F600";
+  font-size: 1.3em;
   margin-inline-end: 8px;
 }
 
@@ -1028,6 +1041,7 @@ dialog > .sync-engines-list + hbox {
   border-top-color: #d7b600;
   top: 100%;
   inset-inline-start: calc(50% - 7px);
+  forced-color-adjust: none;
 }
 
 .search-tooltip::after {
@@ -1037,6 +1051,17 @@ dialog > .sync-engines-list + hbox {
   border-top-color: #ffe900;
   top: 100%;
   inset-inline-start: calc(50% - 6px);
+  forced-color-adjust: none;
+}
+
+@media (forced-colors: active) {
+  .search-tooltip::before {
+    border-top-color: CanvasText;
+  }
+
+  .search-tooltip::after {
+    border-top-color: Canvas;
+  }
 }
 
 .search-tooltip-parent {

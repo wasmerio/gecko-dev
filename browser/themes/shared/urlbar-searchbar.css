@@ -269,7 +269,11 @@
 
 #urlbar-container,
 #wrapper-urlbar-container {
-  flex: 400 400;
+  flex: 400 0 auto;
+}
+
+:root[chromehidden~="toolbar"] :is(#urlbar-container, #wrapper-urlbar-container) {
+  flex-shrink: 1;
 }
 
 #urlbar-search-splitter {
@@ -575,6 +579,30 @@
   fill-opacity: 1;
 }
 
+/* Picture-in-Picture icon */
+#picture-in-picture-button > .urlbar-icon {
+  list-style-image: url("chrome://global/skin/media/picture-in-picture-open.svg");
+}
+
+#picture-in-picture-button[pipactive] > .urlbar-icon {
+  list-style-image: url("chrome://global/skin/media/picture-in-picture-closed.svg");
+}
+
+#picture-in-picture-button:-moz-locale-dir(rtl) > .urlbar-icon {
+  transform: scaleX(-1);
+}
+
+/* Translations button */
+
+#translations-button > .urlbar-icon {
+  list-style-image: url(chrome://browser/skin/translations.svg);
+}
+
+#translations-button[translationsactive] > .urlbar-icon {
+  fill: var(--toolbar-field-icon-fill-attention);
+  fill-opacity: 1;
+}
+
 /* Zoom button */
 
 #urlbar-zoom-button {
@@ -637,6 +665,7 @@
 
 #search-container {
   min-width: 125px;
+  width: 125px;
 }
 
 #search-container,

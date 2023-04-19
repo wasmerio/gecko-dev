@@ -14,6 +14,7 @@
 
 namespace mozilla {
 namespace dom {
+class OwningHTMLCanvasElementOrOffscreenCanvas;
 class Promise;
 struct GPUCanvasConfiguration;
 enum class GPUTextureFormat : uint8_t;
@@ -57,7 +58,8 @@ class CanvasContext final : public nsICanvasRenderingContextInternal,
 
   bool InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
                                 layers::CanvasRenderer* aRenderer) override;
-  mozilla::UniquePtr<uint8_t[]> GetImageBuffer(int32_t* aFormat) override;
+  mozilla::UniquePtr<uint8_t[]> GetImageBuffer(
+      int32_t* out_format, gfx::IntSize* out_imageSize) override;
   NS_IMETHOD GetInputStream(const char* aMimeType,
                             const nsAString& aEncoderOptions,
                             nsIInputStream** aStream) override;
@@ -81,10 +83,11 @@ class CanvasContext final : public nsICanvasRenderingContextInternal,
   }
 
  public:
+  void GetCanvas(dom::OwningHTMLCanvasElementOrOffscreenCanvas&) const;
+
   void Configure(const dom::GPUCanvasConfiguration& aDesc);
   void Unconfigure();
 
-  dom::GPUTextureFormat GetPreferredFormat(Adapter& aAdapter) const;
   RefPtr<Texture> GetCurrentTexture(ErrorResult& aRv);
   void MaybeQueueSwapChainPresent();
   void SwapChainPresent();

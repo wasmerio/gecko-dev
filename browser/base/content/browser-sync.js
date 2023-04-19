@@ -9,15 +9,11 @@ const { UIState } = ChromeUtils.importESModule(
   "resource://services-sync/UIState.sys.mjs"
 );
 
-ChromeUtils.defineModuleGetter(
-  this,
-  "ExperimentAPI",
-  "resource://nimbus/ExperimentAPI.jsm"
-);
-
 ChromeUtils.defineESModuleGetters(this, {
   EnsureFxAccountsWebChannel:
     "resource://gre/modules/FxAccountsWebChannel.sys.mjs",
+
+  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   FxAccounts: "resource://gre/modules/FxAccounts.sys.mjs",
   SyncedTabs: "resource://services-sync/SyncedTabs.sys.mjs",
   Weave: "resource://services-sync/main.sys.mjs",
@@ -365,7 +361,7 @@ var gSync = {
         "browser/accounts.ftl",
         "browser/appmenu.ftl",
         "browser/sync.ftl",
-        "browser/branding/sync-brand.ftl",
+        "toolkit/branding/accounts.ftl",
       ],
       true
     ));

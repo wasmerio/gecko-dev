@@ -277,7 +277,7 @@ class ControlStackEntry {
   }
 
   void switchToCatch() {
-    MOZ_ASSERT(kind() == LabelKind::Try);
+    MOZ_ASSERT(kind() == LabelKind::Try || kind() == LabelKind::Catch);
     kind_ = LabelKind::Catch;
     polymorphicBase_ = false;
   }
@@ -1609,9 +1609,9 @@ inline bool OpIter<Policy>::readCatch(LabelKind* kind, uint32_t* tagIndex,
   }
 
   valueStack_.shrinkTo(block.valueStackBase());
-  if (block.kind() == LabelKind::Try) {
-    block.switchToCatch();
-  }
+  block.switchToCatch();
+  // Reset local state to the beginning of the 'try' block.
+  unsetLocals_.resetToBlock(controlStack_.length() - 1);
 
   return push(env_.tags[*tagIndex].type->resultType());
 }
@@ -1635,6 +1635,8 @@ inline bool OpIter<Policy>::readCatchAll(LabelKind* kind, ResultType* paramType,
 
   valueStack_.shrinkTo(block.valueStackBase());
   block.switchToCatchAll();
+  // Reset local state to the beginning of the 'try' block.
+  unsetLocals_.resetToBlock(controlStack_.length() - 1);
 
   return true;
 }
@@ -3951,14 +3953,18 @@ inline bool OpIter<Policy>::readIntrinsic(const Intrinsic** intrinsic,
 }  // namespace wasm
 }  // namespace js
 
-namespace mozilla {
+static_assert(std::is_trivially_copyable<
+                  js::wasm::TypeAndValueT<mozilla::Nothing>>::value,
+              "Must be trivially copyable");
+static_assert(std::is_trivially_destructible<
+                  js::wasm::TypeAndValueT<mozilla::Nothing>>::value,
+              "Must be trivially destructible");
 
-// Specialize IsPod for the Nothing specializations.
-template <>
-struct IsPod<js::wasm::TypeAndValueT<Nothing>> : std::true_type {};
-template <>
-struct IsPod<js::wasm::ControlStackEntry<Nothing>> : std::true_type {};
-
-}  // namespace mozilla
+static_assert(std::is_trivially_copyable<
+                  js::wasm::ControlStackEntry<mozilla::Nothing>>::value,
+              "Must be trivially copyable");
+static_assert(std::is_trivially_destructible<
+                  js::wasm::ControlStackEntry<mozilla::Nothing>>::value,
+              "Must be trivially destructible");
 
 #endif  // wasm_op_iter_h

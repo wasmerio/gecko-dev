@@ -11,10 +11,10 @@
 #include "mozilla/StateMirroring.h"
 #include "mozilla/Maybe.h"
 #include "js/RootingAPI.h"
-#include "libwebrtcglue/MediaConduitInterface.h"
 #include "libwebrtcglue/RtpRtcpConfig.h"
 #include "nsTArray.h"
 #include "mozilla/dom/RTCStatsReportBinding.h"
+#include "mozilla/dom/RTCRtpCapabilitiesBinding.h"
 #include "mozilla/dom/RTCRtpParametersBinding.h"
 #include "RTCStatsReport.h"
 #include "jsep/JsepTrack.h"
@@ -34,6 +34,7 @@ class MediaStreamTrack;
 class Promise;
 class RTCDtlsTransport;
 class RTCDTMFSender;
+struct RTCRtpCapabilities;
 class RTCRtpTransceiver;
 
 class RTCRtpSender : public nsISupports,
@@ -62,6 +63,8 @@ class RTCRtpSender : public nsISupports,
   already_AddRefed<Promise> ReplaceTrack(MediaStreamTrack* aWithTrack,
                                          ErrorResult& aError);
   already_AddRefed<Promise> GetStats(ErrorResult& aError);
+  static void GetCapabilities(const GlobalObject&, const nsAString& kind,
+                              Nullable<dom::RTCRtpCapabilities>& result);
   already_AddRefed<Promise> SetParameters(
       const dom::RTCRtpSendParameters& aParameters, ErrorResult& aError);
   // Not a simple getter, so not const
@@ -76,13 +79,12 @@ class RTCRtpSender : public nsISupports,
   nsTArray<RefPtr<RTCStatsPromise>> GetStatsInternal(
       bool aSkipIceStats = false);
 
-  // This would just be stream ids, except PeerConnection.jsm uses GetStreams
-  // to implement the non-standard RTCPeerConnection.getLocalStreams. We might
-  // be able to simplify this later.
-  // ChromeOnly webidl
-  void SetStreams(const Sequence<OwningNonNull<DOMMediaStream>>& aStreams);
+  void SetStreams(const Sequence<OwningNonNull<DOMMediaStream>>& aStreams,
+                  ErrorResult& aRv);
   // ChromeOnly webidl
   void GetStreams(nsTArray<RefPtr<DOMMediaStream>>& aStreams);
+  // ChromeOnly webidl
+  void SetStreamsImpl(const Sequence<OwningNonNull<DOMMediaStream>>& aStreams);
   // ChromeOnly webidl
   void SetTrack(const RefPtr<MediaStreamTrack>& aTrack);
   void Shutdown();
@@ -175,7 +177,6 @@ class RTCRtpSender : public nsISupports,
   // TODO(bug 1803388): Remove the glean warnings once they are no longer needed
   bool mHaveWarnedBecauseNoGetParameters = false;
   bool mHaveWarnedBecauseEncodingCountChange = false;
-  bool mHaveWarnedBecauseRidChange = false;
   bool mHaveWarnedBecauseNoTransactionId = false;
   bool mHaveWarnedBecauseStaleTransactionId = false;
   // TODO(bug 1803389): Remove the glean errors once they are no longer needed.

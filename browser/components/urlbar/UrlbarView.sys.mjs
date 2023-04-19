@@ -446,6 +446,10 @@ export class UrlbarView {
       return;
     }
 
+    this.#inputWidthOnLastClose = getBoundsWithoutFlushing(
+      this.input.textbox
+    ).width;
+
     // We exit search mode preview on close since the result previewing it is
     // implicitly unselected.
     if (this.input.searchMode?.isPreview) {
@@ -513,7 +517,8 @@ export class UrlbarView {
 
     if (
       !this.input.value ||
-      this.input.getAttribute("pageproxystate") == "valid"
+      (this.input.getAttribute("pageproxystate") == "valid" &&
+        !this.window.gBrowser.selectedBrowser.searchTerms)
     ) {
       if (!this.isOpen && ["mousedown", "command"].includes(event.type)) {
         // Try to reuse the cached top-sites context. If it's not cached, then
@@ -542,14 +547,25 @@ export class UrlbarView {
       return false;
     }
 
+    // We can reuse the current rows as they are if the input value and width
+    // haven't changed since the view was closed. The width check is related to
+    // row overflow: If we reuse the current rows, overflow and underflow events
+    // won't fire even if the view's width has changed and there are rows that
+    // do actually overflow or underflow. That means previously overflowed rows
+    // may unnecessarily show the overflow gradient, for example.
     if (
       this.#rows.firstElementChild &&
-      this.#queryContext.searchString == this.input.value
+      this.#queryContext.searchString == this.input.value &&
+      this.#inputWidthOnLastClose ==
+        getBoundsWithoutFlushing(this.input.textbox).width
     ) {
-      // We can reuse the current results.
+      // We can reuse the current rows.
       queryOptions.allowAutofill = this.#queryContext.allowAutofill;
     } else {
-      // To reduce results flickering, try to reuse a cached UrlbarQueryContext.
+      // To reduce flickering, try to reuse a cached UrlbarQueryContext. The
+      // overflow problem is addressed in this case because `onQueryResults()`
+      // starts the regular view-update process, during which the overflow state
+      // is reset on all rows.
       let cachedQueryContext = this.queryContextCache.get(this.input.value);
       if (cachedQueryContext) {
         this.onQueryResults(cachedQueryContext);
@@ -907,6 +923,7 @@ export class UrlbarView {
 
   // Private properties and methods below.
   #announceTabToSearchOnSelection;
+  #inputWidthOnLastClose = 0;
   #l10nCache;
   #mainContainer;
   #mousedownSelectedElement;
@@ -1358,12 +1375,14 @@ export class UrlbarView {
       if (result.payload.isBlockable) {
         this.#addRowButton(item, {
           name: "block",
+          command: "dismiss",
           l10n: result.payload.blockL10n,
         });
       }
       if (result.payload.helpUrl) {
         this.#addRowButton(item, {
           name: "help",
+          command: "help",
           url: result.payload.helpUrl,
           l10n: result.payload.helpL10n,
         });
@@ -1381,7 +1400,7 @@ export class UrlbarView {
     }
   }
 
-  #addRowButton(item, { name, l10n, url, attributes }) {
+  #addRowButton(item, { name, command, l10n, url, attributes }) {
     let button = this.#createElement("span");
     this.#setDynamicAttributes(button, attributes);
     button.id = `${item.id}-button-${name}`;
@@ -1390,6 +1409,9 @@ export class UrlbarView {
     button.dataset.name = name;
     if (l10n) {
       this.#setElementL10n(button, l10n);
+    }
+    if (command) {
+      button.dataset.command = command;
     }
     if (url) {
       button.dataset.url = url;

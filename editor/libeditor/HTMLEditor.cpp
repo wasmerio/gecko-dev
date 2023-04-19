@@ -29,7 +29,8 @@
 #include "mozilla/ContentIterator.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EditorForwards.h"
-#include "mozilla/Encoding.h"      // for Encoding
+#include "mozilla/Encoding.h"  // for Encoding
+#include "mozilla/IMEStateManager.h"
 #include "mozilla/IntegerRange.h"  // for IntegerRange
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/mozInlineSpellChecker.h"
@@ -737,6 +738,43 @@ void HTMLEditor::UpdateRootElement() {
   }
 }
 
+nsresult HTMLEditor::FocusedElementOrDocumentBecomesEditable(
+    Document& aDocument, Element* aElement) {
+  // If we should've already handled focus event, selection limiter should not
+  // be set.  Therefore, if it's set, we should do nothing here.
+  if (GetSelectionAncestorLimiter()) {
+    return NS_OK;
+  }
+  // If we should be in the design mode, we want to handle focus event fired
+  // on the document node.  Therefore, we should emulate it here.
+  if (IsInDesignMode() && (!aElement || aElement->IsInDesignMode())) {
+    MOZ_ASSERT(&aDocument == GetDocument());
+    nsresult rv = OnFocus(aDocument);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "HTMLEditor::OnFocus() failed");
+    return rv;
+  }
+
+  if (NS_WARN_IF(!aElement)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  // Otherwise, we should've already handled focus event on the element,
+  // therefore, we need to emulate it here.
+  MOZ_ASSERT(nsFocusManager::GetFocusManager()->GetFocusedElement() ==
+             aElement);
+  nsresult rv = OnFocus(*aElement);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "HTMLEditor::OnFocus() failed");
+
+  // Note that we don't need to call
+  // IMEStateManager::MaybeOnEditableStateDisabled here because
+  // EditorBase::OnFocus must have already been called IMEStateManager::OnFocus
+  // if succeeded. And perhaps, it's okay that IME is not enabled when
+  // HTMLEditor fails to start handling since nobody can handle composition
+  // events anyway...
+
+  return rv;
+}
+
 nsresult HTMLEditor::OnFocus(const nsINode& aOriginalEventTargetNode) {
   // Before doing anything, we should check whether the original target is still
   // valid focus event target because it may have already lost focus.
@@ -750,6 +788,66 @@ nsresult HTMLEditor::OnFocus(const nsINode& aOriginalEventTargetNode) {
   }
 
   return EditorBase::OnFocus(aOriginalEventTargetNode);
+}
+
+nsresult HTMLEditor::FocusedElementOrDocumentBecomesNotEditable(
+    HTMLEditor* aHTMLEditor, Document& aDocument, Element* aElement) {
+  nsresult rv = [&]() MOZ_CAN_RUN_SCRIPT {
+    // If HTMLEditor has not been created yet, we just need to adjust
+    // IMEStateManager.  So, don't return error.
+    if (!aHTMLEditor) {
+      return NS_OK;
+    }
+
+    nsIContent* const limiter = aHTMLEditor->GetSelectionAncestorLimiter();
+    // The HTMLEditor has not received `focus` event so that it does not need to
+    // emulate `blur`.
+    if (!limiter) {
+      return NS_OK;
+    }
+
+    // If we should be in the design mode, we should treat it as blur from
+    // the document node.
+    if (aHTMLEditor->IsInDesignMode() &&
+        (!aElement || aElement->IsInDesignMode())) {
+      MOZ_ASSERT(aHTMLEditor->GetDocument() == &aDocument);
+      nsresult rv = aHTMLEditor->OnBlur(&aDocument);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "HTMLEditor::OnBlur() failed");
+      return rv;
+    }
+    // If the HTMLEditor has already received `focus` event for different
+    // element than aElement, we'll receive `blur` event later so that we need
+    // to do nothing here.
+    if (aElement != limiter) {
+      return NS_OK;
+    }
+
+    // Otherwise, even though the limiter keeps having focus but becomes not
+    // editable.  From HTMLEditor point of view, this is equivalent to the
+    // elements gets blurred.  Therefore, we should treat it as losing
+    // focus.
+    nsresult rv = aHTMLEditor->OnBlur(aElement);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "HTMLEditor::OnBlur() failed");
+    return rv;
+  }();
+
+  // If the element becomes not editable without focus change, IMEStateManager
+  // does not have a chance to disable IME.  Therefore, (even if we fail to
+  // handle the emulated blur above,) we should notify IMEStateManager of the
+  // editing state change.
+  RefPtr<Element> focusedElement = aElement ? aElement
+                                   : aHTMLEditor
+                                       ? aHTMLEditor->GetFocusedElement()
+                                       : nullptr;
+  RefPtr<nsPresContext> presContext =
+      focusedElement ? focusedElement->GetPresContext(
+                           Element::PresContextFor::eForComposedDoc)
+                     : aDocument.GetPresContext();
+  if (presContext) {
+    IMEStateManager::MaybeOnEditableStateDisabled(*presContext, focusedElement);
+  }
+
+  return rv;
 }
 
 nsresult HTMLEditor::OnBlur(const EventTarget* aEventTarget) {
@@ -769,8 +867,6 @@ nsresult HTMLEditor::OnBlur(const EventTarget* aEventTarget) {
   // If it's in the designMode, and blur occurs, the target must be the
   // document node.  If a blur event is fired and the target is an element, it
   // must be delayed blur event at initializing the `HTMLEditor`.
-  // TODO: Add automated tests for checking the case that the target node
-  //       is in a shadow DOM tree whose host is in design mode.
   if (IsInDesignMode() && Element::FromEventTargetOrNull(aEventTarget)) {
     return NS_OK;
   }
@@ -2102,8 +2198,7 @@ nsresult HTMLEditor::InsertElementAtSelectionAsAction(
     if (MOZ_UNLIKELY(insertElementResult.isErr())) {
       NS_WARNING(
           "HTMLEditor::InsertNodeIntoProperAncestorWithTransaction("
-          "SplitAtEdges::"
-          "eAllowToCreateEmptyContainer) failed");
+          "SplitAtEdges::eAllowToCreateEmptyContainer) failed");
       return EditorBase::ToGenericNSResult(insertElementResult.unwrapErr());
     }
     insertElementResult.inspect().IgnoreCaretPointSuggestion();
@@ -2150,6 +2245,7 @@ Result<CreateNodeResultBase<NodeType>, nsresult>
 HTMLEditor::InsertNodeIntoProperAncestorWithTransaction(
     NodeType& aContentToInsert, const EditorDOMPoint& aPointToInsert,
     SplitAtEdges aSplitAtEdges) {
+  MOZ_ASSERT(aPointToInsert.IsSetAndValidInComposedDoc());
   if (NS_WARN_IF(!aPointToInsert.IsSet())) {
     return Err(NS_ERROR_FAILURE);
   }
@@ -2196,7 +2292,7 @@ HTMLEditor::InsertNodeIntoProperAncestorWithTransaction(
       return splitNodeResult.propagateErr();
     }
     pointToInsert = splitNodeResult.inspect().AtSplitPoint<EditorDOMPoint>();
-    MOZ_ASSERT(pointToInsert.IsSet());
+    MOZ_ASSERT(pointToInsert.IsSetAndValidInComposedDoc());
     // Caret should be set by the caller of this method so that we don't
     // need to handle it here.
     splitNodeResult.inspect().IgnoreCaretPointSuggestion();
@@ -4813,6 +4909,7 @@ Result<SplitNodeResult, nsresult> HTMLEditor::SplitNodeWithTransaction(
       !ignoredError.Failed(),
       "OnStartToHandleTopLevelEditSubAction() failed, but ignored");
 
+  mMaybeHasJoinSplitTransactions = true;
   RefPtr<SplitNodeTransaction> transaction =
       SplitNodeTransaction::Create(*this, aStartOfRightNode);
   nsresult rv = DoTransactionInternal(transaction);
@@ -4833,6 +4930,10 @@ Result<SplitNodeResult, nsresult> HTMLEditor::SplitNodeWithTransaction(
   }
   TopLevelEditSubActionDataRef().DidSplitContent(
       *this, *splitContent, *newContent, transaction->GetSplitNodeDirection());
+  if (NS_WARN_IF(!newContent->IsInComposedDoc()) ||
+      NS_WARN_IF(!splitContent->IsInComposedDoc())) {
+    return Err(NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE);
+  }
 
   return SplitNodeResult(*newContent, *splitContent,
                          transaction->GetSplitNodeDirection());
@@ -4842,13 +4943,13 @@ Result<SplitNodeResult, nsresult> HTMLEditor::SplitNodeDeepWithTransaction(
     nsIContent& aMostAncestorToSplit,
     const EditorDOMPoint& aDeepestStartOfRightNode,
     SplitAtEdges aSplitAtEdges) {
-  MOZ_ASSERT(aDeepestStartOfRightNode.IsSetAndValid());
+  MOZ_ASSERT(aDeepestStartOfRightNode.IsSetAndValidInComposedDoc());
   MOZ_ASSERT(
       aDeepestStartOfRightNode.GetContainer() == &aMostAncestorToSplit ||
       EditorUtils::IsDescendantOf(*aDeepestStartOfRightNode.GetContainer(),
                                   aMostAncestorToSplit));
 
-  if (NS_WARN_IF(!aDeepestStartOfRightNode.IsSet())) {
+  if (NS_WARN_IF(!aDeepestStartOfRightNode.IsInComposedDoc())) {
     return Err(NS_ERROR_INVALID_ARG);
   }
 
@@ -4858,6 +4959,8 @@ Result<SplitNodeResult, nsresult> HTMLEditor::SplitNodeDeepWithTransaction(
   // split a node actually.
   SplitNodeResult lastResult =
       SplitNodeResult::NotHandled(atStartOfRightNode, GetSplitNodeDirection());
+  MOZ_ASSERT(lastResult.AtSplitPoint<EditorRawDOMPoint>()
+                 .IsSetAndValidInComposedDoc());
 
   while (true) {
     // Need to insert rules code call here to do things like not split a list
@@ -4900,6 +5003,10 @@ Result<SplitNodeResult, nsresult> HTMLEditor::SplitNodeDeepWithTransaction(
       }
       lastResult = SplitNodeResult::MergeWithDeeperSplitNodeResult(
           splitNodeResult.unwrap(), lastResult);
+      if (NS_WARN_IF(!lastResult.AtSplitPoint<EditorRawDOMPoint>()
+                          .IsInComposedDoc())) {
+        return Err(NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE);
+      }
       MOZ_ASSERT(lastResult.HasCaretPointSuggestion());
       MOZ_ASSERT(lastResult.GetOriginalContent() == splittingContent);
       if (splittingContent == &aMostAncestorToSplit) {
@@ -4915,6 +5022,8 @@ Result<SplitNodeResult, nsresult> HTMLEditor::SplitNodeDeepWithTransaction(
     else if (!atStartOfRightNode.IsStartOfContainer()) {
       lastResult = SplitNodeResult::HandledButDidNotSplitDueToEndOfContainer(
           *splittingContent, GetSplitNodeDirection(), &lastResult);
+      MOZ_ASSERT(lastResult.AtSplitPoint<EditorRawDOMPoint>()
+                     .IsSetAndValidInComposedDoc());
       if (splittingContent == &aMostAncestorToSplit) {
         return lastResult;
       }
@@ -4936,7 +5045,10 @@ Result<SplitNodeResult, nsresult> HTMLEditor::SplitNodeDeepWithTransaction(
       //     method will return "not handled".
       lastResult = SplitNodeResult::NotHandled(
           atStartOfRightNode, GetSplitNodeDirection(), &lastResult);
+      MOZ_ASSERT(lastResult.AtSplitPoint<EditorRawDOMPoint>()
+                     .IsSetAndValidInComposedDoc());
       atStartOfRightNode.Set(splittingContent);
+      MOZ_ASSERT(atStartOfRightNode.IsSetAndValidInComposedDoc());
     }
   }
 
@@ -5263,6 +5375,7 @@ Result<JoinNodesResult, nsresult> HTMLEditor::JoinNodesWithTransaction(
     return Err(NS_ERROR_FAILURE);
   }
 
+  mMaybeHasJoinSplitTransactions = true;
   const nsresult rv = DoTransactionInternal(transaction);
   // FYI: Now, DidJoinNodesTransaction() must have been run if succeeded.
   if (NS_WARN_IF(Destroyed())) {

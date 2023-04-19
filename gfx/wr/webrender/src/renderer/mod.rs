@@ -42,6 +42,7 @@ use api::{ExternalImageSource, ExternalImageType, ImageFormat, PremultipliedColo
 use api::{PipelineId, ImageRendering, Checkpoint, NotificationRequest, ImageBufferKind};
 #[cfg(feature = "replay")]
 use api::ExternalImage;
+use api::FramePublishId;
 use api::units::*;
 use api::channel::{Sender, Receiver};
 pub use api::DebugFlags;
@@ -66,7 +67,7 @@ use crate::frame_builder::Frame;
 use glyph_rasterizer::GlyphFormat;
 use crate::gpu_cache::{GpuCacheUpdate, GpuCacheUpdateList};
 use crate::gpu_cache::{GpuCacheDebugChunk, GpuCacheDebugCmd};
-use crate::gpu_types::{ScalingInstance, SvgFilterInstance, CopyInstance};
+use crate::gpu_types::{ScalingInstance, SvgFilterInstance, CopyInstance, MaskInstance, PrimitiveInstanceData};
 use crate::gpu_types::{BlurInstance, ClearInstance, CompositeInstance, CompositorTransform};
 use crate::internal_types::{TextureSource, TextureCacheCategory, FrameId};
 #[cfg(any(feature = "capture", feature = "replay"))]
@@ -79,8 +80,8 @@ use crate::prim_store::DeferredResolve;
 use crate::profiler::{self, GpuProfileTag, TransactionProfile};
 use crate::profiler::{Profiler, add_event_marker, add_text_marker, thread_is_being_profiled};
 use crate::device::query::GpuProfiler;
-use crate::render_target::ResolveOp;
-use crate::render_task_graph::RenderTaskGraph;
+use crate::render_target::{ResolveOp};
+use crate::render_task_graph::{RenderTaskGraph};
 use crate::render_task::{RenderTask, RenderTaskKind, ReadbackTask};
 use crate::screen_capture::AsyncScreenshotGrabber;
 use crate::render_target::{AlphaRenderTarget, ColorRenderTarget, PictureCacheTarget, PictureCacheTargetKind};
@@ -217,6 +218,14 @@ const GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag {
 const GPU_TAG_PRIMITIVE: GpuProfileTag = GpuProfileTag {
     label: "Primitive",
     color: debug_colors::RED,
+};
+const GPU_TAG_INDIRECT_PRIM: GpuProfileTag = GpuProfileTag {
+    label: "Primitive (indirect)",
+    color: debug_colors::YELLOWGREEN,
+};
+const GPU_TAG_INDIRECT_MASK: GpuProfileTag = GpuProfileTag {
+    label: "Mask (indirect)",
+    color: debug_colors::IVORY,
 };
 const GPU_TAG_BLUR: GpuProfileTag = GpuProfileTag {
     label: "Blur",
@@ -874,6 +883,13 @@ pub struct Renderer {
     /// Count consecutive oom frames to detectif we are stuck unable to render
     /// in a loop.
     consecutive_oom_frames: u32,
+
+    /// update() defers processing of ResultMsg, if frame_publish_id of
+    /// ResultMsg::PublishDocument exceeds target_frame_publish_id.
+    target_frame_publish_id: Option<FramePublishId>,
+
+    /// Hold a next ResultMsg that will be handled by update().
+    pending_result_msg: Option<ResultMsg>,
 }
 
 #[derive(Debug)]
@@ -943,6 +959,25 @@ impl Renderer {
         self.pipeline_info.epochs.get(&(pipeline_id, document_id)).cloned()
     }
 
+    fn get_next_result_msg(&mut self) -> Option<ResultMsg> {
+        if self.pending_result_msg.is_none() {
+            if let Ok(msg) = self.result_rx.try_recv() {
+                self.pending_result_msg = Some(msg);
+            }
+        }
+
+        match (&self.pending_result_msg, &self.target_frame_publish_id) {
+          (Some(ResultMsg::PublishDocument(frame_publish_id, _, _, _)), Some(target_id)) => {
+            if frame_publish_id > target_id {
+              return None;
+            }
+          }
+          _ => {}
+        }
+
+        self.pending_result_msg.take()
+    }
+
     /// Processes the result queue.
     ///
     /// Should be called before `render()`, as texture cache updates are done here.
@@ -950,7 +985,7 @@ impl Renderer {
         profile_scope!("update");
 
         // Pull any pending results and return the most recent.
-        while let Ok(msg) = self.result_rx.try_recv() {
+        while let Some(msg) = self.get_next_result_msg() {
             match msg {
                 ResultMsg::PublishPipelineInfo(mut pipeline_info) => {
                     for ((pipeline_id, document_id), epoch) in pipeline_info.epochs {
@@ -959,6 +994,7 @@ impl Renderer {
                     self.pipeline_info.removed_pipelines.extend(pipeline_info.removed_pipelines.drain(..));
                 }
                 ResultMsg::PublishDocument(
+                    _,
                     document_id,
                     mut doc,
                     resource_update_list,
@@ -1122,6 +1158,12 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// update() defers processing of ResultMsg, if frame_publish_id of
+    /// ResultMsg::PublishDocument exceeds target_frame_publish_id.
+    pub fn set_target_frame_publish_id(&mut self, publish_id: FramePublishId) {
+        self.target_frame_publish_id = Some(publish_id);
     }
 
     fn handle_debug_command(&mut self, command: DebugCommand) {
@@ -2128,6 +2170,81 @@ impl Renderer {
         self.device.reset_read_target();
     }
 
+    fn handle_prims(
+        &mut self,
+        prim_instances: &[PrimitiveInstanceData],
+        mask_instances_fast: &[MaskInstance],
+        mask_instances_slow: &[MaskInstance],
+        projection: &default::Transform3D<f32>,
+        stats: &mut RendererStats,
+    ) {
+        if prim_instances.is_empty() {
+            return;
+        }
+
+        {
+            let _timer = self.gpu_profiler.start_timer(GPU_TAG_INDIRECT_PRIM);
+
+            self.device.disable_depth_write();
+            self.set_blend(false, FramebufferKind::Other);
+
+            self.shaders.borrow_mut().ps_quad_textured.bind(
+                &mut self.device,
+                projection,
+                None,
+                &mut self.renderer_errors,
+                &mut self.profile,
+            );
+
+            self.draw_instanced_batch(
+                prim_instances,
+                VertexArrayKind::Primitive,
+                &BatchTextures::empty(),
+                stats,
+            );
+        }
+
+        {
+            let _timer = self.gpu_profiler.start_timer(GPU_TAG_INDIRECT_MASK);
+
+            self.set_blend(true, FramebufferKind::Other);
+            self.set_blend_mode_multiply(FramebufferKind::Other);
+
+            if !mask_instances_fast.is_empty() {
+                self.shaders.borrow_mut().ps_mask_fast.bind(
+                    &mut self.device,
+                    projection,
+                    None,
+                    &mut self.renderer_errors,
+                    &mut self.profile,
+                );
+
+                self.draw_instanced_batch(
+                    mask_instances_fast,
+                    VertexArrayKind::Mask,
+                    &BatchTextures::empty(),
+                    stats,
+                );
+            }
+
+            if !mask_instances_slow.is_empty() {
+                self.shaders.borrow_mut().ps_mask.bind(
+                    &mut self.device,
+                    projection,
+                    None,
+                    &mut self.renderer_errors,
+                    &mut self.profile,
+                );
+
+                self.draw_instanced_batch(
+                    mask_instances_slow,
+                    VertexArrayKind::Mask,
+                    &BatchTextures::empty(),
+                    stats,
+                );
+            }
+        }
+    }
 
     fn handle_blits(
         &mut self,
@@ -3350,6 +3467,14 @@ impl Renderer {
                 stats,
             );
         }
+
+        self.handle_prims(
+            &target.prim_instances,
+            &target.mask_instances_fast,
+            &target.mask_instances_slow,
+            projection,
+            stats,
+        );
 
         if clear_depth.is_some() {
             self.device.invalidate_depth_target();

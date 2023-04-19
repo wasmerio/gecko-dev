@@ -6,12 +6,6 @@
 
 loader.lazyRequireGetter(
   this,
-  "isShadowRoot",
-  "resource://devtools/shared/layout/utils.js",
-  true
-);
-loader.lazyRequireGetter(
-  this,
   "nodeFilterConstants",
   "resource://devtools/shared/dom-node-filter-constants.js"
 );
@@ -35,8 +29,6 @@ class DocumentWalker {
    * @param {DOMNode} node
    * @param {Window} rootWin
    * @param {Object}
-   *        - {Number} whatToShow
-   *          See nodeFilterConstants / inIDeepTreeWalker for options.
    *        - {Function} filter
    *          A custom filter function Taking in a DOMNode and returning an Int. See
    *          WalkerActor.nodeFilter for an example.
@@ -54,7 +46,6 @@ class DocumentWalker {
     node,
     rootWin,
     {
-      whatToShow = nodeFilterConstants.SHOW_ALL,
       filter = standardTreeWalkerFilter,
       skipTo = SKIP_TO_PARENT,
       showAnonymousContent = true,
@@ -70,7 +61,7 @@ class DocumentWalker {
     this.walker.showAnonymousContent = showAnonymousContent;
     this.walker.showSubDocuments = true;
     this.walker.showDocumentsAsNodes = true;
-    this.walker.init(rootWin.document, whatToShow);
+    this.walker.init(rootWin.document);
     this.filter = filter;
 
     // Make sure that the walker knows about the initial node (which could
@@ -78,9 +69,6 @@ class DocumentWalker {
     this.walker.currentNode = this.getStartingNode(node, skipTo);
   }
 
-  get whatToShow() {
-    return this.walker.whatToShow;
-  }
   get currentNode() {
     return this.walker.currentNode;
   }
@@ -89,17 +77,6 @@ class DocumentWalker {
   }
 
   parentNode() {
-    if (isShadowRoot(this.currentNode)) {
-      this.currentNode = this.currentNode.host;
-      return this.currentNode;
-    }
-
-    const parentNode = this.currentNode.parentNode;
-    // deep-tree-walker currently does not return shadowRoot elements as parentNodes.
-    if (parentNode && isShadowRoot(parentNode)) {
-      this.currentNode = parentNode;
-      return this.currentNode;
-    }
     return this.walker.parentNode();
   }
 
@@ -118,8 +95,7 @@ class DocumentWalker {
   }
 
   firstChild() {
-    const node = this.walker.currentNode;
-    if (!node) {
+    if (!this.walker.currentNode) {
       return null;
     }
 
@@ -132,8 +108,7 @@ class DocumentWalker {
   }
 
   lastChild() {
-    const node = this.walker.currentNode;
-    if (!node) {
+    if (!this.walker.currentNode) {
       return null;
     }
 

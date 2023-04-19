@@ -558,7 +558,6 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
     WriteParam(aWriter, aParam.mMetrics);
     WriteParam(aWriter, aParam.mSnapInfo);
     WriteParam(aWriter, aParam.mScrollParentId);
-    WriteParam(aWriter, aParam.mBackgroundColor);
     WriteParam(aWriter, aParam.GetContentDescription());
     WriteParam(aWriter, aParam.mLineScrollAmount);
     WriteParam(aWriter, aParam.mPageScrollAmount);
@@ -591,7 +590,6 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
     return (ReadParam(aReader, &aResult->mMetrics) &&
             ReadParam(aReader, &aResult->mSnapInfo) &&
             ReadParam(aReader, &aResult->mScrollParentId) &&
-            ReadParam(aReader, &aResult->mBackgroundColor) &&
             ReadContentDescription(aReader, aResult) &&
             ReadParam(aReader, &aResult->mLineScrollAmount) &&
             ReadParam(aReader, &aResult->mPageScrollAmount) &&
@@ -1124,9 +1122,9 @@ struct ParamTraits<mozilla::layers::ZoomTarget> {
       MOZ_ASSERT(rv, "Serialize ##type_## failed");                         \
       WriteParam(aWriter, std::move(v));                                    \
     }                                                                       \
-    static mozilla::Maybe<paramType> Read(MessageReader* aReader) {         \
+    static ReadResult<paramType> Read(MessageReader* aReader) {             \
       mozilla::ipc::ByteBuf in;                                             \
-      mozilla::Maybe<paramType> result;                                     \
+      ReadResult<paramType> result;                                         \
       if (!ReadParam(aReader, &in) || !in.mData) {                          \
         return result;                                                      \
       }                                                                     \
@@ -1135,7 +1133,7 @@ struct ParamTraits<mozilla::layers::ZoomTarget> {
       if (!Servo_##type_##_Deserialize(&in, value.addr())) {                \
         return result;                                                      \
       }                                                                     \
-      result.emplace(std::move(*value.addr()));                             \
+      result = std::move(*value.addr());                                    \
       value.addr()->~paramType();                                           \
       return result;                                                        \
     }                                                                       \

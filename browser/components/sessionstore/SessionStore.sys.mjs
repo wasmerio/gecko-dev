@@ -459,13 +459,15 @@ export var SessionStore = {
     aBrowser,
     aBrowsingContext,
     aPermanentKey,
-    aData
+    aData,
+    aForStorage
   ) {
     return SessionStoreInternal.updateSessionStoreFromTablistener(
       aBrowser,
       aBrowsingContext,
       aPermanentKey,
-      aData
+      aData,
+      aForStorage
     );
   },
 
@@ -1357,7 +1359,8 @@ var SessionStoreInternal = {
     browser,
     browsingContext,
     permanentKey,
-    update
+    update,
+    forStorage = false
   ) {
     permanentKey = browser?.permanentKey ?? permanentKey;
     if (!permanentKey) {
@@ -1380,10 +1383,18 @@ var SessionStoreInternal = {
       );
 
       if (listener) {
-        let historychange = listener.collect(permanentKey, browsingContext, {
-          collectFull: !!update.sHistoryNeeded,
-          writeToCache: false,
-        });
+        let historychange =
+          // If it is not the scheduled update (tab closed, window closed etc),
+          // try to store the loading non-web-controlled page opened in _blank
+          // first.
+          (forStorage &&
+            lazy.SessionHistory.collectNonWebControlledBlankLoadingSession(
+              browsingContext
+            )) ||
+          listener.collect(permanentKey, browsingContext, {
+            collectFull: !!update.sHistoryNeeded,
+            writeToCache: false,
+          });
 
         if (historychange) {
           update.data.historychange = historychange;
@@ -4369,7 +4380,7 @@ var SessionStoreInternal = {
       this._restore_on_demand;
 
     if (winData.tabs.length) {
-      var tabs = tabbrowser.addMultipleTabs(
+      var tabs = tabbrowser.createTabsForSessionRestore(
         restoreTabsLazily,
         selectTab,
         winData.tabs
@@ -4654,12 +4665,17 @@ var SessionStoreInternal = {
       tabsDataArray.splice(numTabsInWindow - numTabsToRestore);
     }
 
-    // Let the tab data array have the right number of slots.
-    tabsDataArray.length = numTabsInWindow;
+    // Remove items from aTabData if there is no corresponding tab:
+    if (numTabsInWindow < tabsDataArray.length) {
+      tabsDataArray.length = numTabsInWindow;
+    }
 
-    // Fill out any empty items in the list:
-    let maxPos = Math.max(...aTabs.map(tab => tab._tPos));
-    this._ensureNoNullsInTabDataList(tabbrowser.tabs, tabsDataArray, maxPos);
+    // Ensure the tab data array has items for each of the tabs
+    this._ensureNoNullsInTabDataList(
+      tabbrowser.tabs,
+      tabsDataArray,
+      numTabsInWindow - 1
+    );
 
     if (aSelectTab > 0 && aSelectTab <= aTabs.length) {
       // Update the window state in case we shut down without being notified.
@@ -4735,6 +4751,11 @@ var SessionStoreInternal = {
     // we collect their data for the first time when saving state.
     DirtyWindows.add(window);
 
+    if (!tab.hasOwnProperty("_tPos")) {
+      throw new Error(
+        "Shouldn't be trying to restore a tab that has no position"
+      );
+    }
     // Update the tab state in case we shut down without being notified.
     this._windows[window.__SSi].tabs[tab._tPos] = tabData;
 

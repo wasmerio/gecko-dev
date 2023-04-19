@@ -52,6 +52,7 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineESModuleGetters(lazy, {
   NewTabUtils: "resource://gre/modules/NewTabUtils.sys.mjs",
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   Region: "resource://gre/modules/Region.sys.mjs",
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
 });
@@ -67,14 +68,10 @@ ChromeUtils.defineModuleGetter(
 );
 
 XPCOMUtils.defineLazyGetter(lazy, "log", () => {
-  const { Logger } = ChromeUtils.import(
-    "resource://messaging-system/lib/Logger.jsm"
+  const { Logger } = ChromeUtils.importESModule(
+    "resource://messaging-system/lib/Logger.sys.mjs"
   );
   return new Logger("TopSitesFeed");
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
 });
 
 const DEFAULT_SITES_PREF = "default.sites";
@@ -98,6 +95,10 @@ const MAX_NUM_SPONSORED = 2;
 // both Contile and Pocket sources.
 // The default will be `MAX_NUM_SPONSORED` if this variable is unspecified.
 const NIMBUS_VARIABLE_MAX_SPONSORED = "topSitesMaxSponsored";
+// Nimbus variable to allow more than two sponsored tiles from Contile to be
+//considered for Top Sites.
+const NIMBUS_VARIABLE_ADDITIONAL_TILES =
+  "topSitesUseAdditionalTilesFromContile";
 
 // Search experiment stuff
 const FILTER_DEFAULT_SEARCH_PREF = "improvesearch.noDefaultSearchTile";
@@ -201,11 +202,16 @@ class ContileIntegration {
       const body = await response.json();
       if (body?.tiles && Array.isArray(body.tiles)) {
         let { tiles } = body;
+        if (
+          !lazy.NimbusFeatures.newtab.getVariable(
+            NIMBUS_VARIABLE_ADDITIONAL_TILES
+          )
+        ) {
+          tiles.length = CONTILE_MAX_NUM_SPONSORED;
+        }
         tiles = this._filterBlockedSponsors(tiles);
         if (tiles.length > CONTILE_MAX_NUM_SPONSORED) {
-          lazy.log.warn(
-            `Contile provided more links than permitted. (${tiles.length} received, limit is ${CONTILE_MAX_NUM_SPONSORED})`
-          );
+          lazy.log.info("Remove unused links from Contile");
           tiles.length = CONTILE_MAX_NUM_SPONSORED;
         }
         this._sites = tiles;
@@ -283,7 +289,7 @@ class TopSitesFeed {
     Services.prefs.removeObserver(REMOTE_SETTING_DEFAULTS_PREF, this);
     Services.prefs.removeObserver(DEFAULT_SITES_OVERRIDE_PREF, this);
     Services.prefs.removeObserver(DEFAULT_SITES_EXPERIMENTS_PREF_BRANCH, this);
-    lazy.NimbusFeatures.newtab.off(this._nimbusChangeListener);
+    lazy.NimbusFeatures.newtab.offUpdate(this._nimbusChangeListener);
   }
 
   observe(subj, topic, data) {
@@ -720,6 +726,11 @@ class TopSitesFeed {
             // Actual position can shift based on other content.
             // We send the intended position in the ping.
             pos: positionIndex,
+            // Set this so that SPOC topsites won't be shown in the URL bar.
+            // See Bug 1822027. Note that `sponsored_position` is 1-based.
+            sponsored_position: positionIndex + 1,
+            // This is used for topsites deduping.
+            hostname: shortURL({ url: spoc.url }),
           };
           sponsored.push(link);
         }
@@ -917,16 +928,9 @@ class TopSitesFeed {
         return;
       }
       let index = link.sponsored_position - 1;
-      // For DiscoveryStream spocs, we use a different position property
-      if (link.type === "SPOC") {
-        index = link.pos;
-      }
-      if (index > withPinned.length) {
+      if (index >= withPinned.length) {
         withPinned[index] = link;
-      } else if (
-        link.type === "SPOC" &&
-        withPinned[index].show_sponsored_label
-      ) {
+      } else if (withPinned[index]?.sponsored_position) {
         // We currently want DiscoveryStream spocs to replace existing spocs.
         withPinned[index] = link;
       } else {
@@ -1307,7 +1311,7 @@ class TopSitesFeed {
       const link = this._linksWithDefaults[i];
       if (
         link &&
-        (link.sponsored_position || link.type === "SPOC") &&
+        link.sponsored_position &&
         this._linksWithDefaults[i]?.url !== site.url
       ) {
         adjustedIndex--;

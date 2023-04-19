@@ -8,15 +8,14 @@
 #define LAYOUT_SVG_SVGIMAGEFRAME_H_
 
 // Keep in (case-insensitive) order:
+#include "mozilla/gfx/2D.h"
+#include "mozilla/SVGGeometryFrame.h"
 #include "gfxContext.h"
 #include "gfxPlatform.h"
-#include "mozilla/gfx/2D.h"
 #include "imgIContainer.h"
 #include "nsContainerFrame.h"
 #include "imgINotificationObserver.h"
-#include "mozilla/SVGGeometryFrame.h"
 #include "nsIReflowCallback.h"
-#include "mozilla/Unused.h"
 
 namespace mozilla {
 class PresShell;
@@ -55,13 +54,15 @@ class SVGImageFrame final : public SVGGeometryFrame, public nsIReflowCallback {
 
   // ISVGDisplayableFrame interface:
   void PaintSVG(gfxContext& aContext, const gfxMatrix& aTransform,
-                imgDrawingParams& aImgParams,
-                const nsIntRect* aDirtyRect = nullptr) override;
+                imgDrawingParams& aImgParams) override;
   nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   void ReflowSVG() override;
+  void NotifySVGChanged(uint32_t aFlags) override;
+  SVGBBox GetBBoxContribution(const Matrix& aToBBoxUserspace,
+                              uint32_t aFlags) override;
 
-  // SVGGeometryFrame methods:
-  uint16_t GetHitTestFlags() override;
+  void BuildDisplayList(nsDisplayListBuilder* aBuilder,
+                        const nsDisplayListSet& aLists) override;
 
   // nsIFrame interface:
   nsresult AttributeChanged(int32_t aNameSpaceID, nsAtom* aAttribute,
@@ -93,7 +94,12 @@ class SVGImageFrame final : public SVGGeometryFrame, public nsIReflowCallback {
   /// Always sync decode our image when painting if @aForce is true.
   void SetForceSyncDecoding(bool aForce) { mForceSyncDecoding = aForce; }
 
+  // SVGImageFrame methods:
+  bool IsInvisible() const override;
+
  private:
+  uint16_t GetHitTestFlags();
+
   gfx::Matrix GetRasterImageTransform(int32_t aNativeWidth,
                                       int32_t aNativeHeight);
   gfx::Matrix GetVectorImageTransform();

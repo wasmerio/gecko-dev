@@ -558,11 +558,6 @@ class nsDocShell final : public nsDocLoader,
   nsDocShell(mozilla::dom::BrowsingContext* aBrowsingContext,
              uint64_t aContentWindowID);
 
-  // Security check to prevent frameset spoofing. See comments at
-  // implementation site.
-  static bool ValidateOrigin(mozilla::dom::BrowsingContext* aOrigin,
-                             mozilla::dom::BrowsingContext* aTarget);
-
   static inline uint32_t PRTimeToSeconds(PRTime aTimeUsec) {
     return uint32_t(aTimeUsec / PR_USEC_PER_SEC);
   }
@@ -1062,11 +1057,15 @@ class nsDocShell final : public nsDocLoader,
     bool mCurrentURIHasRef = false;
     bool mNewURIHasRef = false;
     bool mSameExceptHashes = false;
+    bool mSecureUpgradeURI = false;
     bool mHistoryNavBetweenSameDoc = false;
   };
 
   // Check to see if we're loading a prior history entry or doing a fragment
   // navigation in the same document.
+  // NOTE: In case we are doing a fragment navigation, and HTTPS-Only/ -First
+  // mode is enabled and upgraded the underlying document, we update the URI of
+  // aLoadState from HTTP to HTTPS (if neccessary).
   bool IsSameDocumentNavigation(nsDocShellLoadState* aLoadState,
                                 SameDocumentNavigationState& aState);
 
@@ -1299,6 +1298,8 @@ class nsDocShell final : public nsDocLoader,
 
   uint64_t mChannelToDisconnectOnPageHide;
 
+  uint32_t mPendingReloadCount = 0;
+
   // The following two fields cannot be declared as bit fields
   // because of uses with AutoRestore.
   bool mCreatingDocument;  // (should be) debugging only
@@ -1319,7 +1320,6 @@ class nsDocShell final : public nsDocLoader,
   bool mAllowKeywordFixup : 1;
   bool mDisableMetaRefreshWhenInactive : 1;
   bool mIsAppTab : 1;
-  bool mDeviceSizeIsPageSize : 1;
   bool mWindowDraggingAllowed : 1;
   bool mInFrameSwap : 1;
 

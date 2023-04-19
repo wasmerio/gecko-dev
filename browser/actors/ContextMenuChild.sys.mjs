@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
-
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -13,12 +11,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
   InlineSpellCheckerContent:
     "resource://gre/modules/InlineSpellCheckerContent.sys.mjs",
+  LoginManagerChild: "resource://gre/modules/LoginManagerChild.sys.mjs",
   SelectionUtils: "resource://gre/modules/SelectionUtils.sys.mjs",
   SpellCheckHelper: "resource://gre/modules/InlineSpellChecker.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  LoginManagerChild: "resource://gre/modules/LoginManagerChild.jsm",
 });
 
 let contextMenus = new WeakMap();
@@ -117,28 +112,30 @@ export class ContextMenuChild extends JSWindowActorChild {
                 }
                 break;
               case "pictureinpicture":
-                Services.telemetry.keyedScalarAdd(
-                  "pictureinpicture.opened_method",
-                  "contextmenu",
-                  1
-                );
-                let args = {
-                  method: "contextMenu",
-                  firstTimeToggle: (!Services.prefs.getBoolPref(
-                    "media.videocontrols.picture-in-picture.video-toggle.has-used"
-                  )).toString(),
-                };
-                Services.telemetry.recordEvent(
-                  "pictureinpicture",
-                  "opened_method",
-                  "method",
-                  null,
-                  args
-                );
+                if (!media.isCloningElementVisually) {
+                  Services.telemetry.keyedScalarAdd(
+                    "pictureinpicture.opened_method",
+                    "contextmenu",
+                    1
+                  );
+                  let args = {
+                    firstTimeToggle: (!Services.prefs.getBoolPref(
+                      "media.videocontrols.picture-in-picture.video-toggle.has-used"
+                    )).toString(),
+                  };
+                  Services.telemetry.recordEvent(
+                    "pictureinpicture",
+                    "opened_method",
+                    "contextMenu",
+                    null,
+                    args
+                  );
+                }
                 let event = new this.contentWindow.CustomEvent(
                   "MozTogglePictureInPicture",
                   {
                     bubbles: true,
+                    detail: { reason: "contextMenu" },
                   },
                   this.contentWindow
                 );

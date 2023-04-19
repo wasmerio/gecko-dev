@@ -10,6 +10,7 @@
  */
 
 import { prefs, features } from "../utils/prefs";
+import { searchKeys } from "../constants";
 
 export const initialUIState = () => ({
   selectedPrimaryPaneTab: "sources",
@@ -26,6 +27,27 @@ export const initialUIState = () => ({
   inlinePreviewEnabled: features.inlinePreview,
   editorWrappingEnabled: prefs.editorWrapping,
   javascriptEnabled: true,
+  javascriptTracingLogMethod: prefs.javascriptTracingLogMethod,
+  mutableSearchOptions: prefs.searchOptions || {
+    [searchKeys.FILE_SEARCH]: {
+      regexMatch: false,
+      wholeWord: false,
+      caseSensitive: false,
+      excludePatterns: "",
+    },
+    [searchKeys.PROJECT_SEARCH]: {
+      regexMatch: false,
+      wholeWord: false,
+      caseSensitive: false,
+      excludePatterns: "",
+    },
+    [searchKeys.QUICKOPEN_SEARCH]: {
+      regexMatch: false,
+      wholeWord: false,
+      caseSensitive: false,
+      excludePatterns: "",
+    },
+  },
 });
 
 function update(state = initialUIState(), action) {
@@ -117,6 +139,20 @@ function update(state = initialUIState(), action) {
 
     case "NAVIGATE": {
       return { ...state, activeSearch: null, highlightedLineRange: {} };
+    }
+
+    case "SET_JAVASCRIPT_TRACING_LOG_METHOD": {
+      prefs.javascriptTracingLogMethod = action.value;
+      return { ...state, javascriptTracingLogMethod: action.value };
+    }
+
+    case "SET_SEARCH_OPTIONS": {
+      state.mutableSearchOptions[action.searchKey] = {
+        ...state.mutableSearchOptions[action.searchKey],
+        ...action.searchOptions,
+      };
+      prefs.searchOptions = state.mutableSearchOptions;
+      return { ...state };
     }
 
     default: {

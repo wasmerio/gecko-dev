@@ -14,21 +14,17 @@ const { AppConstants } = ChromeUtils.importESModule(
   "resource://gre/modules/AppConstants.sys.mjs"
 );
 
-ChromeUtils.defineModuleGetter(
-  this,
-  "DownloadUtils",
-  "resource://gre/modules/DownloadUtils.jsm"
-);
+ChromeUtils.defineESModuleGetters(this, {
+  DownloadUtils: "resource://gre/modules/DownloadUtils.sys.mjs",
+  PlacesDBUtils: "resource://gre/modules/PlacesDBUtils.sys.mjs",
+  ProcessType: "resource://gre/modules/ProcessType.sys.mjs",
+});
 
 ChromeUtils.defineModuleGetter(
   this,
   "PluralForm",
   "resource://gre/modules/PluralForm.jsm"
 );
-ChromeUtils.defineESModuleGetters(this, {
-  PlacesDBUtils: "resource://gre/modules/PlacesDBUtils.sys.mjs",
-  ProcessType: "resource://gre/modules/ProcessType.sys.mjs",
-});
 
 window.addEventListener("load", function onload(event) {
   try {
@@ -747,6 +743,7 @@ var snapshotFormatters = {
       if (obj) {
         const str = JSON.stringify(obj, null, "  ");
         await addRow("features", feature, [new Text(str)]);
+        delete data[feature];
       }
     }
 
@@ -1026,8 +1023,8 @@ var snapshotFormatters = {
       let button = $("enumerate-database-button");
       if (button) {
         button.addEventListener("click", function(event) {
-          let { KeyValueService } = ChromeUtils.import(
-            "resource://gre/modules/kvstore.jsm"
+          let { KeyValueService } = ChromeUtils.importESModule(
+            "resource://gre/modules/kvstore.sys.mjs"
           );
           let currProfDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
           currProfDir.append("mediacapabilities");
@@ -1611,9 +1608,17 @@ Serializer.prototype = {
           // queued up from querySelectorAll earlier.
           this._appendText(rowHeading + ": ");
         } else {
-          this._appendText(
-            rowHeading + ": " + this._nodeText(children[1]).trim()
-          );
+          this._appendText(rowHeading + ": ");
+          for (let k = 1; k < children.length; k++) {
+            let l = this._nodeText(children[k]).trim();
+            if (l == "") {
+              continue;
+            }
+            if (k < children.length - 1) {
+              l += ", ";
+            }
+            this._appendText(l);
+          }
         }
       }
       this._startNewLine();

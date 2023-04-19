@@ -442,27 +442,30 @@ inline NativeObject* NativeObject::create(
   const uint32_t slotSpan = shape->slotSpan();
   const size_t nDynamicSlots = calculateDynamicSlots(nfixed, slotSpan, clasp);
 
-  NativeObject* nobj =
-      cx->newCell<NativeObject>(kind, nDynamicSlots, heap, clasp, site);
+  NativeObject* nobj = cx->newCell<NativeObject>(kind, heap, clasp, site);
   if (!nobj) {
     return nullptr;
   }
 
   nobj->initShape(shape);
-  // NOTE: Dynamic slots are created internally by Allocate<JSObject>.
+  nobj->setEmptyElements();
+
   if (!nDynamicSlots) {
     nobj->initEmptyDynamicSlots();
+  } else if (!nobj->allocateInitialSlots(cx, nDynamicSlots)) {
+    return nullptr;
   }
-  nobj->setEmptyElements();
 
   if (slotSpan > 0) {
     nobj->initSlots(nfixed, slotSpan);
   }
 
-  if (clasp->shouldDelayMetadataBuilder()) {
-    cx->realm()->setObjectPendingMetadata(cx, nobj);
-  } else {
-    nobj = SetNewObjectMetadata(cx, nobj);
+  if (MOZ_UNLIKELY(cx->realm()->hasAllocationMetadataBuilder())) {
+    if (clasp->shouldDelayMetadataBuilder()) {
+      cx->realm()->setObjectPendingMetadata(nobj);
+    } else {
+      nobj = SetNewObjectMetadata(cx, nobj);
+    }
   }
 
   js::gc::gcprobes::CreateObject(nobj);

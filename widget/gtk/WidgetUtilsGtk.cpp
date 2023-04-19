@@ -28,6 +28,7 @@
 #include <dlfcn.h>
 #include <glib.h>
 
+#undef LOGW
 #ifdef MOZ_LOGGING
 #  include "mozilla/Logging.h"
 extern mozilla::LazyLogModule gWidgetLog;
@@ -247,9 +248,11 @@ static gboolean token_failed(gpointer aData);
 class XDGTokenRequest {
  public:
   void SetTokenID(const char* aTokenID) {
+    LOGW("RequestWaylandFocusPromise() SetTokenID %s", aTokenID);
     mTransferPromise->Resolve(aTokenID, __func__);
   }
   void Cancel() {
+    LOGW("RequestWaylandFocusPromise() canceled");
     mTransferPromise->Reject(false, __func__);
     mActivationTimeoutID = 0;
   }
@@ -296,19 +299,20 @@ static const struct xdg_activation_token_v1_listener token_listener = {
 
 RefPtr<FocusRequestPromise> RequestWaylandFocusPromise() {
 #ifdef MOZ_WAYLAND
-  if (!GdkIsWaylandDisplay() || !nsWindow::GetFocusedWindow() ||
-      nsWindow::GetFocusedWindow()->IsDestroyed()) {
+  if (!GdkIsWaylandDisplay() || !KeymapWrapper::GetSeat()) {
+    LOGW("RequestWaylandFocusPromise() failed.");
     return nullptr;
   }
 
   RefPtr<nsWindow> sourceWindow = nsWindow::GetFocusedWindow();
-  if (!sourceWindow) {
+  if (!sourceWindow || sourceWindow->IsDestroyed()) {
+    LOGW("RequestWaylandFocusPromise() missing source window");
     return nullptr;
   }
 
-  RefPtr<nsWaylandDisplay> display = WaylandDisplayGet();
-  xdg_activation_v1* xdg_activation = display->GetXdgActivation();
+  xdg_activation_v1* xdg_activation = WaylandDisplayGet()->GetXdgActivation();
   if (!xdg_activation) {
+    LOGW("RequestWaylandFocusPromise() missing xdg_activation");
     return nullptr;
   }
 
@@ -316,6 +320,7 @@ RefPtr<FocusRequestPromise> RequestWaylandFocusPromise() {
   uint32_t focusSerial;
   KeymapWrapper::GetFocusInfo(&focusSurface, &focusSerial);
   if (!focusSurface) {
+    LOGW("RequestWaylandFocusPromise() missing focusSurface");
     return nullptr;
   }
 
@@ -325,6 +330,7 @@ RefPtr<FocusRequestPromise> RequestWaylandFocusPromise() {
   }
   wl_surface* surface = gdk_wayland_window_get_wl_surface(gdkWindow);
   if (focusSurface != surface) {
+    LOGW("RequestWaylandFocusPromise() missing wl_surface");
     return nullptr;
   }
 
@@ -340,6 +346,8 @@ RefPtr<FocusRequestPromise> RequestWaylandFocusPromise() {
                                      KeymapWrapper::GetSeat());
   xdg_activation_token_v1_set_surface(aXdgToken, focusSurface);
   xdg_activation_token_v1_commit(aXdgToken);
+
+  LOGW("RequestWaylandFocusPromise() XDG Token sent");
 
   return transferPromise.forget();
 #else  // !defined(MOZ_WAYLAND)
@@ -428,13 +436,17 @@ const nsCString& GetDesktopEnvironmentIdentifier() {
   MOZ_ASSERT(NS_IsMainThread());
   static const nsDependentCString sIdentifier = [] {
     nsCString ident = [] {
-      if (const char* currentDesktop = getenv("XDG_CURRENT_DESKTOP")) {
+      auto Env = [](const char* aKey) -> const char* {
+        const char* v = getenv(aKey);
+        return v && *v ? v : nullptr;
+      };
+      if (const char* currentDesktop = Env("XDG_CURRENT_DESKTOP")) {
         return nsCString(currentDesktop);
       }
       if (auto wm = GetWindowManagerName(); !wm.IsEmpty()) {
         return wm;
       }
-      if (const char* sessionDesktop = getenv("XDG_SESSION_DESKTOP")) {
+      if (const char* sessionDesktop = Env("XDG_SESSION_DESKTOP")) {
         // This is not really standardized in freedesktop.org, but it is
         // documented here, and should be set in systemd systems.
         // https://www.freedesktop.org/software/systemd/man/pam_systemd.html#%24XDG_SESSION_DESKTOP
@@ -455,7 +467,7 @@ const nsCString& GetDesktopEnvironmentIdentifier() {
       if (getenv("LXQT_SESSION_CONFIG")) {
         return nsCString("lxqt"_ns);
       }
-      if (const char* desktopSession = getenv("DESKTOP_SESSION")) {
+      if (const char* desktopSession = Env("DESKTOP_SESSION")) {
         // Try the legacy DESKTOP_SESSION as a last resort.
         return nsCString(desktopSession);
       }
@@ -471,11 +483,14 @@ const nsCString& GetDesktopEnvironmentIdentifier() {
 }
 
 bool IsGnomeDesktopEnvironment() {
-  return FindInReadable("gnome"_ns, GetDesktopEnvironmentIdentifier());
+  static bool sIsGnome =
+      !!FindInReadable("gnome"_ns, GetDesktopEnvironmentIdentifier());
+  return sIsGnome;
 }
 
 bool IsKdeDesktopEnvironment() {
-  return GetDesktopEnvironmentIdentifier().EqualsLiteral("kde");
+  static bool sIsKde = GetDesktopEnvironmentIdentifier().EqualsLiteral("kde");
+  return sIsKde;
 }
 
 }  // namespace mozilla::widget

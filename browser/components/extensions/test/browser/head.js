@@ -57,8 +57,8 @@ const { AppUiTestDelegate, AppUiTestInternals } = ChromeUtils.import(
 const { Preferences } = ChromeUtils.importESModule(
   "resource://gre/modules/Preferences.sys.mjs"
 );
-const { ClientEnvironmentBase } = ChromeUtils.import(
-  "resource://gre/modules/components-utils/ClientEnvironment.jsm"
+const { ClientEnvironmentBase } = ChromeUtils.importESModule(
+  "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs"
 );
 
 ChromeUtils.defineModuleGetter(
@@ -100,8 +100,8 @@ Services.prefs
 {
   // Touch the recipeParentPromise lazy getter so we don't get
   // `this._recipeManager is undefined` errors during tests.
-  const { LoginManagerParent } = ChromeUtils.import(
-    "resource://gre/modules/LoginManagerParent.jsm"
+  const { LoginManagerParent } = ChromeUtils.importESModule(
+    "resource://gre/modules/LoginManagerParent.sys.mjs"
   );
   void LoginManagerParent.recipeParentPromise;
 }

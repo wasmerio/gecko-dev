@@ -3,9 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 "use strict";
+requestLongerTimeout(3);
 
 /* import-globals-from ../../mochitest/layout.js */
 loadScripts({ name: "layout.js", dir: MOCHITESTS_DIR });
+
+// Note that testTextNode, testChar and testTextRange currently don't handle
+// white space in the code that doesn't get rendered on screen. To work around
+// this, ensure that containers you want to test are all on a single line in the
+// test snippet.
 
 async function testTextNode(accDoc, browser, id) {
   await testTextRange(accDoc, browser, id, 0, -1);
@@ -562,13 +568,14 @@ addAccessibleTask(
   async function(browser, docAcc) {
     const input = findAccessibleChildByID(docAcc, "input", [nsIAccessibleText]);
     info("Setting caret and focusing input");
-    let focused = waitForEvent(EVENT_FOCUS, input);
+    let caretMoved = waitForEvent(EVENT_TEXT_CARET_MOVED, input);
     await invokeContentTask(browser, [], () => {
       const inputDom = content.document.getElementById("input");
       inputDom.selectionStart = inputDom.selectionEnd = 1;
       inputDom.focus();
     });
-    await focused;
+    await caretMoved;
+    is(input.caretOffset, 1, "input caretOffset is 1");
     let expectedX = {};
     let expectedY = {};
     let expectedW = {};
@@ -623,4 +630,77 @@ addAccessibleTask(
     );
   },
   { chrome: true, topLevel: !isWinNoCache, remoteIframe: !isWinNoCache }
+);
+
+/**
+ * Test wrapped text and pre-formatted text beginning with an empty line.
+ */
+addAccessibleTask(
+  `
+<style>
+  #wrappedText {
+    width: 3ch;
+    font-family: monospace;
+  }
+</style>
+<p id="wrappedText"><a href="https://example.com/">a</a>b cd</p>
+<p id="emptyFirstLine" style="white-space: pre-line;">
+foo</p>
+  `,
+  async function(browser, docAcc) {
+    await testChar(docAcc, browser, "wrappedText", 0);
+    await testChar(docAcc, browser, "wrappedText", 1);
+    await testChar(docAcc, browser, "wrappedText", 2);
+    await testChar(docAcc, browser, "wrappedText", 3);
+    await testChar(docAcc, browser, "wrappedText", 4);
+
+    // We can't use testChar for emptyFirstLine because it doesn't handle white
+    // space properly. Instead, verify that the first character is at the top
+    // left of the text leaf.
+    const emptyFirstLine = findAccessibleChildByID(docAcc, "emptyFirstLine", [
+      nsIAccessibleText,
+    ]);
+    const emptyFirstLineLeaf = emptyFirstLine.firstChild;
+    const leafX = {};
+    const leafY = {};
+    emptyFirstLineLeaf.getBounds(leafX, leafY, {}, {});
+    testTextPos(
+      emptyFirstLine,
+      0,
+      [leafX.value, leafY.value],
+      COORDTYPE_SCREEN_RELATIVE
+    );
+  },
+  { chrome: true, topLevel: !isWinNoCache, remoteIframe: !isWinNoCache }
+);
+
+/**
+ * Test character bounds in an intervening inline element with non-br line breaks
+ */
+addAccessibleTask(
+  `
+  <style>
+    @font-face {
+      font-family: Ahem;
+      src: url(${CURRENT_CONTENT_DIR}e10s/fonts/Ahem.sjs);
+    }
+    pre {
+      font: 20px/20px Ahem;
+    }
+  </style>
+  <pre><code id="t" role="group">XX
+XXX
+XX
+X</pre>`,
+  async function(browser, docAcc) {
+    await testChar(docAcc, browser, "t", 0);
+    await testChar(docAcc, browser, "t", 3);
+    await testChar(docAcc, browser, "t", 7);
+    await testChar(docAcc, browser, "t", 10);
+  },
+  {
+    chrome: true,
+    topLevel: !isWinNoCache,
+    iframe: !isWinNoCache,
+  }
 );

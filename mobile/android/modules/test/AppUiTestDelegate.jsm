@@ -6,19 +6,12 @@
 
 const EXPORTED_SYMBOLS = ["AppUiTestDelegate"];
 
-const { XPCOMUtils } = ChromeUtils.importESModule(
-  "resource://gre/modules/XPCOMUtils.sys.mjs"
-);
-
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   EventDispatcher: "resource://gre/modules/Messaging.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  mobileWindowTracker: "resource://gre/modules/GeckoViewWebExtension.jsm",
-  GeckoViewTabBridge: "resource://gre/modules/GeckoViewTab.jsm",
+  GeckoViewTabBridge: "resource://gre/modules/GeckoViewTab.sys.mjs",
+  mobileWindowTracker: "resource://gre/modules/GeckoViewWebExtension.sys.mjs",
 });
 
 const TEST_SUPPORT_EXTENSION_ID = "test-runner-support@tests.mozilla.org";

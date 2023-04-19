@@ -33,9 +33,8 @@
 #include "mozilla/dom/UserActivation.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/TimelineConsumers.h"
-#include "mozilla/EventTimelineMarker.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/dom/ChromeUtils.h"
 
 #include "EventListenerService.h"
 #include "nsCOMPtr.h"
@@ -113,6 +112,7 @@ EventListenerManagerBase::EventListenerManagerBase()
       mMayHaveInputOrCompositionEventListener(false),
       mMayHaveSelectionChangeEventListener(false),
       mMayHaveFormSelectEventListener(false),
+      mMayHaveTransitionEventListener(false),
       mClearingListeners(false),
       mIsMainThreadELM(NS_IsMainThread()),
       mHasNonPrivilegedClickListeners(false),
@@ -459,6 +459,22 @@ void EventListenerManager::AddEventListenerInternal(
             doc->SetUseCounter(eUseCounter_custom_onmozmousepixelscroll);
           }
         }
+        break;
+      case eTransitionStart:
+      case eTransitionRun:
+      case eTransitionEnd:
+      case eTransitionCancel:
+      case eWebkitTransitionEnd:
+        mMayHaveTransitionEventListener = true;
+        if (nsPIDOMWindowInner* window = GetInnerWindowForTarget()) {
+          window->SetHasTransitionEventListeners();
+        }
+        break;
+      case eFormCheckboxStateChange:
+        nsContentUtils::SetMayHaveFormCheckboxStateChangeListeners();
+        break;
+      case eFormRadioStateChange:
+        nsContentUtils::SetMayHaveFormRadioStateChangeListeners();
         break;
       default:
         // XXX Use NS_ASSERTION here to print resolvedEventMessage since
@@ -1299,7 +1315,10 @@ nsresult EventListenerManager::HandleEventSubType(Listener* aListener,
   }
 
   if (NS_SUCCEEDED(result)) {
-    EventCallbackDebuggerNotificationGuard dbgGuard(aCurrentTarget, aDOMEvent);
+    Maybe<EventCallbackDebuggerNotificationGuard> dbgGuard;
+    if (dom::ChromeUtils::IsDevToolsOpened()) {
+      dbgGuard.emplace(aCurrentTarget, aDOMEvent);
+    }
     nsAutoMicroTask mt;
 
     // Event::currentTarget is set in EventDispatcher.
@@ -1461,27 +1480,6 @@ void EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
               legacyAutoOverride.emplace(*aDOMEvent, eventMessage);
             }
 
-            // Maybe add a marker to the docshell's timeline, but only
-            // bother with all the logic if some docshell is recording.
-            nsCOMPtr<nsIDocShell> docShell;
-            bool needsEndEventMarker = false;
-
-            if (mIsMainThreadELM &&
-                listener->mListenerType != Listener::eNativeListener) {
-              docShell = nsContentUtils::GetDocShellForEventTarget(mTarget);
-              if (docShell) {
-                if (TimelineConsumers::HasConsumer(docShell)) {
-                  needsEndEventMarker = true;
-                  nsAutoString typeStr;
-                  (*aDOMEvent)->GetType(typeStr);
-                  uint16_t phase = (*aDOMEvent)->EventPhase();
-                  TimelineConsumers::AddMarkerForDocShell(
-                      docShell, MakeUnique<EventTimelineMarker>(
-                                    typeStr, phase, MarkerTracingType::START));
-                }
-              }
-            }
-
             aEvent->mFlags.mInPassiveListener = listener->mFlags.mPassive;
             Maybe<Listener> listenerHolder;
             if (listener->mFlags.mOnce) {
@@ -1511,11 +1509,6 @@ void EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
               aEvent->mFlags.mExceptionWasRaised = true;
             }
             aEvent->mFlags.mInPassiveListener = false;
-
-            if (needsEndEventMarker) {
-              TimelineConsumers::AddMarkerForDocShell(docShell, "DOMEvent",
-                                                      MarkerTracingType::END);
-            }
           }
         }
       }

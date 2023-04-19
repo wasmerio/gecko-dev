@@ -19,10 +19,6 @@
   -moz-user-focus: ignore;
   display: flex;
   box-sizing: border-box;
-  /* By default XUL content isn't allowed to shrink. This is legacy (result of
-   * -moz-box-flex defaulting to zero) and could be removed with some amount of
-   * effort. */
-  flex-shrink: 0;
 }
 
 /* hide the content and destroy the frame */
@@ -367,6 +363,8 @@ panel,
 tooltip {
   position: fixed;
   -moz-top-layer: top;
+  width: fit-content;
+  height: fit-content;
   /* Popups can't have overflow */
   contain: paint;
   z-index: 2147483647;
@@ -378,8 +376,6 @@ tooltip {
   -moz-default-appearance: tooltip;
   -moz-font-smoothing-background-color: -moz-mac-tooltip;
 
-  /* TODO: Switch to flex-direction: column once bug 1809084 lands */
-  -moz-box-orient: vertical;
   white-space: pre-wrap;
 
   background-color: InfoBackground;
@@ -760,6 +756,10 @@ richlistbox {
   min-height: 0;
 }
 
+richlistitem {
+  flex-shrink: 0;
+}
+
 /*********** findbar ************/
 findbar {
   overflow-x: hidden;
@@ -790,4 +790,4 @@ button, image {
 [pack="end"] { justify-content: flex-end !important; }
 
 [flex="0"] { flex: none !important; }
-[flex="1"] { flex-grow: 1 !important; flex-shrink: 1 !important }
+[flex="1"] { flex: 1 !important; }

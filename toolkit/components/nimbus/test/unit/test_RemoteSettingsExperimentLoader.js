@@ -1,17 +1,19 @@
 "use strict";
 
-const { ExperimentFakes } = ChromeUtils.import(
-  "resource://testing-common/NimbusTestUtils.jsm"
+const { ExperimentFakes } = ChromeUtils.importESModule(
+  "resource://testing-common/NimbusTestUtils.sys.mjs"
 );
-const { ExperimentManager } = ChromeUtils.import(
-  "resource://nimbus/lib/ExperimentManager.jsm"
+const { ExperimentManager } = ChromeUtils.importESModule(
+  "resource://nimbus/lib/ExperimentManager.sys.mjs"
 );
-
 const {
   RemoteSettingsExperimentLoader,
   EnrollmentsContext,
-} = ChromeUtils.import(
-  "resource://nimbus/lib/RemoteSettingsExperimentLoader.jsm"
+} = ChromeUtils.importESModule(
+  "resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs"
+);
+const { TestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/TestUtils.sys.mjs"
 );
 
 const ENABLED_PREF = "messaging-system.rsexperimentloader.enabled";
@@ -159,11 +161,14 @@ add_task(async function test_updateRecipes_someMismatch() {
   );
   ok(loader.manager.onFinalize.calledOnce, "Should call onFinalize.");
   ok(
-    loader.manager.onFinalize.calledWith("rs-loader", {
+    onFinalizeCalled(loader.manager.onFinalize, "rs-loader", {
       recipeMismatches: [FAIL_FILTER_RECIPE.slug],
       invalidRecipes: [],
       invalidBranches: new Map(),
       invalidFeatures: new Map(),
+      missingL10nIds: new Map(),
+      missingLocale: [],
+      locale: Services.locale.appLocaleAsBCP47,
       validationEnabled: true,
     }),
     "should call .onFinalize with the recipes that failed targeting"
@@ -317,4 +322,25 @@ add_task(async function test_optIn_studies_disabled() {
   Services.prefs.clearUserPref(DEBUG_PREF);
   Services.prefs.clearUserPref(UPLOAD_PREF);
   Services.prefs.clearUserPref(STUDIES_OPT_OUT_PREF);
+});
+
+add_task(async function test_enrollment_changed_notification() {
+  const loader = ExperimentFakes.rsLoader();
+
+  const PASS_FILTER_RECIPE = ExperimentFakes.recipe("foo", {
+    targeting: "true",
+  });
+  sinon.stub(loader, "setTimer");
+  sinon.spy(loader, "updateRecipes");
+  const enrollmentChanged = TestUtils.topicObserved(
+    "nimbus:enrollments-updated"
+  );
+  sinon.stub(loader.remoteSettingsClient, "get").resolves([PASS_FILTER_RECIPE]);
+  sinon.stub(loader.manager, "onRecipe").resolves();
+  sinon.stub(loader.manager, "onFinalize");
+
+  Services.prefs.setBoolPref(ENABLED_PREF, true);
+  await loader.init();
+  await enrollmentChanged;
+  ok(loader.updateRecipes.called, "should call .updateRecipes");
 });

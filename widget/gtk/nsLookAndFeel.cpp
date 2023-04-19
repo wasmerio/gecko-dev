@@ -945,11 +945,17 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
     case IntID::GTKCSDCloseButtonPosition:
       aResult = mCSDCloseButtonPosition;
       break;
-    case IntID::UseAccessibilityTheme: {
+    case IntID::UseAccessibilityTheme:
+    // If high contrast is enabled, enable prefers-reduced-transparency media
+    // query as well as there is no dedicated option.
+    case IntID::PrefersReducedTransparency:
       EnsureInit();
       aResult = mSystemTheme.mHighContrast;
       break;
-    }
+    case IntID::InvertedColors:
+      // No GTK API for checking if inverted colors is enabled
+      aResult = 0;
+      break;
     case IntID::TitlebarRadius: {
       EnsureInit();
       aResult = EffectiveTheme().mTitlebarRadius;

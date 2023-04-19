@@ -15,15 +15,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
   ClientID: "resource://gre/modules/ClientID.sys.mjs",
   DoHConfigController: "resource:///modules/DoHConfig.sys.mjs",
+  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   Heuristics: "resource:///modules/DoHHeuristics.sys.mjs",
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   Preferences: "resource://gre/modules/Preferences.sys.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
-  ExperimentAPI: "resource://nimbus/ExperimentAPI.jsm",
 });
 
 // When this is set we suppress automatic TRR selection beyond dry-run as well
@@ -252,7 +249,7 @@ export const DoHController = {
         console.error(`Error getting dooh.ohttpURI: ${e.message}`);
       }
 
-      lazy.Preferences.set(ROLLOUT_URI_PREF, uri);
+      lazy.Preferences.set(ROLLOUT_URI_PREF, uri || "");
     }
     this.runHeuristicsThrottled("startup");
     Services.obs.addObserver(this, kLinkStatusChangedTopic);

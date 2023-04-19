@@ -80,7 +80,7 @@ class RemoteTextureHostWrapper : public TextureHost {
 
   AndroidHardwareBuffer* GetAndroidHardwareBuffer() const override;
 
-  bool CheckIsReadyForRendering();
+  bool IsReadyForRendering();
 
   void ApplyTextureFlagsToRemoteTexture();
 

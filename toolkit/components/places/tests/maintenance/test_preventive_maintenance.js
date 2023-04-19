@@ -1111,11 +1111,11 @@ tests.push({
           rows.forEach(r => {
             aResultArray.push(r.getResultByName("id"));
           });
-          await PlacesTestUtils.dumpTable(db, "moz_bookmarks", [
-            "id",
-            "parent",
-            "position",
-          ]);
+          await PlacesTestUtils.dumpTable({
+            db,
+            table: "moz_bookmarks",
+            columns: ["id", "parent", "position"],
+          });
         });
       });
     }
@@ -1155,11 +1155,11 @@ tests.push({
         let position = row.getResultByName("position");
         if (aResultArray.indexOf(id) != position) {
           info("Expected order: " + aResultArray);
-          await PlacesTestUtils.dumpTable(db, "moz_bookmarks", [
-            "id",
-            "parent",
-            "position",
-          ]);
+          await PlacesTestUtils.dumpTable({
+            db,
+            table: "moz_bookmarks",
+            columns: ["id", "parent", "position"],
+          });
           do_throw(`Unexpected bookmarks order for ${aParent}.`);
         }
       }
@@ -2808,7 +2808,9 @@ add_task(async function test_preventive_maintenance() {
 // ------------------------------------------------------------------------------
 
 add_task(async function test_idle_daily() {
-  const { sinon } = ChromeUtils.import("resource://testing-common/Sinon.jsm");
+  const { sinon } = ChromeUtils.importESModule(
+    "resource://testing-common/Sinon.sys.mjs"
+  );
   const sandbox = sinon.createSandbox();
   sandbox.stub(PlacesDBUtils, "maintenanceOnIdle");
   Services.prefs.clearUserPref("places.database.lastMaintenance");

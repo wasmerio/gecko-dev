@@ -47,6 +47,8 @@ module.exports = {
     jest: true,
   },
   rules: {
+    "prettier/prettier": "off",
+
     // These are the rules that have been configured so far to match the
     // devtools coding style.
 
@@ -357,9 +359,6 @@ module.exports = {
     // require assignment operator shorthand where possible or prohibit it
     // entirely
     "operator-assignment": 0,
-
-    // Rules from the prettier plugin
-    "prettier/prettier": "error",
 
     "file-header/file-header": [
       "error",

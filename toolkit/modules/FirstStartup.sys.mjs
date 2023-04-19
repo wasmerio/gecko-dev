@@ -4,13 +4,11 @@
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
-import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
-
 const lazy = {};
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  Normandy: "resource://normandy/Normandy.jsm",
-  TaskScheduler: "resource://gre/modules/TaskScheduler.jsm",
+ChromeUtils.defineESModuleGetters(lazy, {
+  Normandy: "resource://normandy/Normandy.sys.mjs",
+  TaskScheduler: "resource://gre/modules/TaskScheduler.sys.mjs",
 });
 
 const PREF_TIMEOUT = "first-startup.timeout";

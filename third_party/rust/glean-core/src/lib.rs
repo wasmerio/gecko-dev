@@ -28,7 +28,7 @@ use crossbeam_channel::unbounded;
 use once_cell::sync::{Lazy, OnceCell};
 use uuid::Uuid;
 
-use metrics::MetricsDisabledConfig;
+use metrics::MetricsEnabledConfig;
 
 mod common_metric_data;
 mod core;
@@ -170,6 +170,7 @@ static STATE: OnceCell<Mutex<State>> = OnceCell::new();
 /// Get a reference to the global state object.
 ///
 /// Panics if no global state object was set.
+#[track_caller] // If this fails we're interested in the caller.
 fn global_state() -> &'static Mutex<State> {
     STATE.get().unwrap()
 }
@@ -772,13 +773,14 @@ pub fn glean_test_get_experiment_data(experiment_id: String) -> Option<RecordedE
     core::with_glean(|glean| glean.test_get_experiment_data(experiment_id.to_owned()))
 }
 
-/// Sets a remote configuration for the metrics' disabled property
+/// Sets a remote configuration to override metrics' default enabled/disabled
+/// state
 ///
-/// See [`core::Glean::set_metrics_disabled_config`].
-pub fn glean_set_metrics_disabled_config(json: String) {
-    match MetricsDisabledConfig::try_from(json) {
+/// See [`core::Glean::set_metrics_enabled_config`].
+pub fn glean_set_metrics_enabled_config(json: String) {
+    match MetricsEnabledConfig::try_from(json) {
         Ok(cfg) => launch_with_glean(|glean| {
-            glean.set_metrics_disabled_config(cfg);
+            glean.set_metrics_enabled_config(cfg);
         }),
         Err(e) => {
             log::error!("Error setting metrics feature config: {:?}", e);
@@ -981,7 +983,7 @@ pub fn glean_test_destroy_glean(clear_stores: bool, data_path: Option<String>) {
         INITIALIZE_CALLED.store(false, Ordering::SeqCst);
     } else if clear_stores {
         if let Some(data_path) = data_path {
-            let _ = remove_dir_all::remove_dir_all(data_path).ok();
+            let _ = std::fs::remove_dir_all(data_path).ok();
         } else {
             log::warn!("Asked to clear stores before initialization, but no data path given.");
         }

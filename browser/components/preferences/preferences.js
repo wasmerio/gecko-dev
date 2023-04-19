@@ -83,7 +83,12 @@ ChromeUtils.defineESModuleGetters(this, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
+  DownloadUtils: "resource://gre/modules/DownloadUtils.sys.mjs",
+  FeatureGate: "resource://featuregates/FeatureGate.sys.mjs",
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+  FirefoxRelay: "resource://gre/modules/FirefoxRelay.sys.mjs",
+  LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   OSKeyStore: "resource://gre/modules/OSKeyStore.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   QuickSuggest: "resource:///modules/QuickSuggest.sys.mjs",
@@ -97,17 +102,11 @@ ChromeUtils.defineESModuleGetters(this, {
 });
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  AMTelemetry: "resource://gre/modules/AddonManager.jsm",
-  DownloadUtils: "resource://gre/modules/DownloadUtils.jsm",
   ExtensionPreferencesManager:
     "resource://gre/modules/ExtensionPreferencesManager.jsm",
   ExtensionSettingsStore: "resource://gre/modules/ExtensionSettingsStore.jsm",
-  FeatureGate: "resource://featuregates/FeatureGate.jsm",
-  FirefoxRelay: "resource://gre/modules/FirefoxRelay.jsm",
   HomePage: "resource:///modules/HomePage.jsm",
   LangPackMatcher: "resource://gre/modules/LangPackMatcher.jsm",
-  LoginHelper: "resource://gre/modules/LoginHelper.jsm",
-  NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
   SelectionChangedMenulist: "resource:///modules/SelectionChangedMenulist.jsm",
   SiteDataManager: "resource:///modules/SiteDataManager.jsm",
   TransientPrefs: "resource:///modules/TransientPrefs.jsm",
@@ -154,7 +153,6 @@ XPCOMUtils.defineLazyGetter(this, "gSubDialog", function() {
 
 var gLastCategory = { category: undefined, subcategory: undefined };
 const gXULDOMParser = new DOMParser();
-
 var gCategoryModules = new Map();
 var gCategoryInits = new Map();
 function init_category_if_required(category) {
@@ -283,10 +281,6 @@ function init_all() {
       }
       let mainWindow = window.browsingContext.topChromeWindow;
       mainWindow.BrowserOpenAddonsMgr();
-      AMTelemetry.recordLinkEvent({
-        object: "aboutPreferences",
-        value: "about:addons",
-      });
     });
 
     document.dispatchEvent(

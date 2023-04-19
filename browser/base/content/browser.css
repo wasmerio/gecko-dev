@@ -164,6 +164,7 @@ panelview:not([visible]) {
 
 .panel-viewcontainer {
   overflow: hidden;
+  flex-shrink: 0;
   min-width: 0;
   min-height: 0;
 }
@@ -206,7 +207,6 @@ panelview:not([visible]) {
   flex: 100 100;
   max-width: 225px;
   min-width: var(--tab-min-width);
-  width: 0;
   transition: min-width 100ms ease-out,
               max-width 100ms ease-out;
 }
@@ -589,9 +589,8 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 #urlbar,
 #searchbar {
-  /* Setting a width and min-width to let the location & search bars maintain
-     a constant width in case they haven't been resized manually. (bug 965772) */
-  width: 1px;
+  /* Setting a min-width to let the location & search bars maintain a constant
+   * width in case they haven't been resized manually. (bug 965772) */
   min-width: 1px;
 }
 
@@ -722,13 +721,11 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 /* Define the minimum width based on the style of result rows.
    The order of the min-width rules below must be in increasing order. */
-#PopupAutoComplete[resultstyles~="loginsFooter"],
-#PopupAutoComplete[resultstyles~="insecureWarning"] {
+#PopupAutoComplete:is([resultstyles~="loginsFooter"], [resultstyles~="insecureWarning"])::part(content) {
   min-width: 17em;
 }
 
-#PopupAutoComplete[resultstyles~="importableLogins"],
-#PopupAutoComplete[resultstyles~="generatedPassword"] {
+#PopupAutoComplete:is([resultstyles~="importableLogins"], [resultstyles~="generatedPassword"])::part(content) {
   min-width: 22em;
 }
 
@@ -771,26 +768,25 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
  * on hidpi don't accidentally result in the buttons going into overflow.
  */
 #urlbar-container {
-  min-width: calc(310px + 2 * (24px + 2 * var(--toolbarbutton-inner-padding)));
+  width: calc(310px + 2 * (24px + 2 * var(--toolbarbutton-inner-padding)));
 }
 
 /* When the download button OR the unified extensions button is shown, we leave
  * 310px plus the space needed for a single button as described above. */
-#nav-bar[downloadsbuttonshown] #urlbar-container,
-#nav-bar[unifiedextensionsbuttonshown] #urlbar-container {
-  min-width: calc(310px + 24px + 2 * var(--toolbarbutton-inner-padding));
+#nav-bar:is([downloadsbuttonshown], [unifiedextensionsbuttonshown]) #urlbar-container {
+  width: calc(310px + 24px + 2 * var(--toolbarbutton-inner-padding));
 }
 
 /* When both the download and unified extensions buttons are visible, we use
  * the base min-width value. */
 #nav-bar[downloadsbuttonshown][unifiedextensionsbuttonshown] #urlbar-container {
-  min-width: 310px;
+  width: 310px;
 }
 
 /* Customize mode is difficult to use at moderate window width if the Urlbar
    remains 310px wide. */
 :root[customizing] #urlbar-container {
-  min-width: 280px;
+  width: 280px;
 }
 
 #identity-icon-box {
@@ -799,17 +795,16 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 @media (max-width: 770px) {
   #urlbar-container {
-    min-width: calc(240px + 2 * (24px + 2 * var(--toolbarbutton-inner-padding)));
+    width: calc(240px + 2 * (24px + 2 * var(--toolbarbutton-inner-padding)));
   }
-  #nav-bar[downloadsbuttonshown] #urlbar-container,
-  #nav-bar[unifiedextensionsbuttonshown] #urlbar-container {
-    min-width: calc(240px + 24px + 2 * var(--toolbarbutton-inner-padding));
+  #nav-bar:is([downloadsbuttonshown], [unifiedextensionsbuttonshown]) #urlbar-container {
+    width: calc(240px + 24px + 2 * var(--toolbarbutton-inner-padding));
   }
   #nav-bar[downloadsbuttonshown][unifiedextensionsbuttonshown] #urlbar-container {
-    min-width: 240px;
+    width: 240px;
   }
   :root[customizing] #urlbar-container {
-    min-width: 245px;
+    width: 245px;
   }
   #identity-icon-box {
     max-width: 80px;
@@ -843,14 +838,14 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 }
 @media (max-width: 550px) {
   #urlbar-container {
-    min-width: calc(176px + 2 * (24px + 2 * var(--toolbarbutton-inner-padding)));
+    width: calc(176px + 2 * (24px + 2 * var(--toolbarbutton-inner-padding)));
   }
   #nav-bar[downloadsbuttonshown] #urlbar-container,
   #nav-bar[unifiedextensionsbuttonshown] #urlbar-container {
-    min-width: calc(176px + 24px + 2 * var(--toolbarbutton-inner-padding));
+    width: calc(176px + 24px + 2 * var(--toolbarbutton-inner-padding));
   }
   #nav-bar[downloadsbuttonshown][unifiedextensionsbuttonshown] #urlbar-container {
-    min-width: 176px;
+    width: 176px;
   }
   #identity-icon-box {
     max-width: 70px;
@@ -1209,7 +1204,6 @@ toolbarpaletteitem[place="palette"] > #downloads-button > .toolbarbutton-badge-s
 
 #customization-panelWrapper {
   flex: 1;
-  height: 0; /* Don't let my contents affect ancestors' content-based sizing */
   align-items: end; /* align to the end on the cross-axis (affects arrow) */
 }
 
@@ -1526,6 +1520,7 @@ toolbar[keyNav=true]:not([collapsed=true], [customizing=true]) toolbartabstop {
 }
 
 .dialogOverlay {
+  align-items: center;
   visibility: hidden;
 }
 
@@ -1616,6 +1611,7 @@ toolbar[keyNav=true]:not([collapsed=true], [customizing=true]) toolbartabstop {
 
 .content-prompt-dialog > .dialogOverlay {
   display: grid;
+  align-items: unset;
   place-content: center;
   /* 90% for 5% top/bottom margins, the document height so that
    * smaller dialogs don't become too big. */

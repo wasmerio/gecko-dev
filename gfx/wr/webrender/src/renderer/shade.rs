@@ -262,6 +262,7 @@ impl LazilyCompiledShader {
                 VertexArrayKind::Composite => &desc::COMPOSITE,
                 VertexArrayKind::Clear => &desc::CLEAR,
                 VertexArrayKind::Copy => &desc::COPY,
+                VertexArrayKind::Mask => &desc::MASK,
             };
 
             device.link_program(program, vertex_descriptor)?;
@@ -626,7 +627,9 @@ pub struct Shaders {
     pub ps_text_run_dual_source: Option<TextShader>,
 
     ps_split_composite: LazilyCompiledShader,
-    pub ps_quad: LazilyCompiledShader,
+    pub ps_quad_textured: LazilyCompiledShader,
+    pub ps_mask: LazilyCompiledShader,
+    pub ps_mask_fast: LazilyCompiledShader,
     pub ps_clear: LazilyCompiledShader,
     pub ps_copy: LazilyCompiledShader,
 
@@ -761,6 +764,26 @@ impl Shaders {
             profile,
         )?;
 
+        let ps_mask = LazilyCompiledShader::new(
+            ShaderKind::Cache(VertexArrayKind::Mask),
+            "ps_quad_mask",
+            &[],
+            device,
+            options.precache_flags,
+            &shader_list,
+            profile,
+        )?;
+
+        let ps_mask_fast = LazilyCompiledShader::new(
+            ShaderKind::Cache(VertexArrayKind::Mask),
+            "ps_quad_mask",
+            &[FAST_PATH_FEATURE],
+            device,
+            options.precache_flags,
+            &shader_list,
+            profile,
+        )?;
+
         let cs_clip_rectangle_slow = LazilyCompiledShader::new(
             ShaderKind::ClipCache(VertexArrayKind::ClipRect),
             "cs_clip_rectangle",
@@ -861,9 +884,9 @@ impl Shaders {
             None
         };
 
-        let ps_quad = LazilyCompiledShader::new(
+        let ps_quad_textured = LazilyCompiledShader::new(
             ShaderKind::Primitive,
-            "ps_quad",
+            "ps_quad_textured",
             &[],
             device,
             options.precache_flags,
@@ -1105,7 +1128,9 @@ impl Shaders {
             cs_clip_image,
             ps_text_run,
             ps_text_run_dual_source,
-            ps_quad,
+            ps_quad_textured,
+            ps_mask,
+            ps_mask_fast,
             ps_split_composite,
             ps_clear,
             ps_copy,
@@ -1145,7 +1170,7 @@ impl Shaders {
     ) -> &mut LazilyCompiledShader {
         match key.kind {
             BatchKind::Primitive => {
-                &mut self.ps_quad
+                &mut self.ps_quad_textured
             }
             BatchKind::SplitComposite => {
                 &mut self.ps_split_composite
@@ -1274,7 +1299,9 @@ impl Shaders {
         self.cs_line_decoration.deinit(device);
         self.cs_border_segment.deinit(device);
         self.ps_split_composite.deinit(device);
-        self.ps_quad.deinit(device);
+        self.ps_quad_textured.deinit(device);
+        self.ps_mask.deinit(device);
+        self.ps_mask_fast.deinit(device);
         self.ps_clear.deinit(device);
         self.ps_copy.deinit(device);
         self.composite.deinit(device);

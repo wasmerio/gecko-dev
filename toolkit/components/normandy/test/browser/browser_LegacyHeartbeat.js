@@ -3,24 +3,26 @@
 
 "use strict";
 
-const { BaseAction } = ChromeUtils.import(
-  "resource://normandy/actions/BaseAction.jsm"
+const { BaseAction } = ChromeUtils.importESModule(
+  "resource://normandy/actions/BaseAction.sys.mjs"
 );
-const { ClientEnvironment } = ChromeUtils.import(
-  "resource://normandy/lib/ClientEnvironment.jsm"
+const { ClientEnvironment } = ChromeUtils.importESModule(
+  "resource://normandy/lib/ClientEnvironment.sys.mjs"
 );
-const { Heartbeat } = ChromeUtils.import(
-  "resource://normandy/lib/Heartbeat.jsm"
+const { Heartbeat } = ChromeUtils.importESModule(
+  "resource://normandy/lib/Heartbeat.sys.mjs"
 );
-const { Normandy } = ChromeUtils.import("resource://normandy/Normandy.jsm");
-const { ExperimentAPI } = ChromeUtils.import(
-  "resource://nimbus/ExperimentAPI.jsm"
+const { Normandy } = ChromeUtils.importESModule(
+  "resource://normandy/Normandy.sys.mjs"
 );
-const { ExperimentFakes } = ChromeUtils.import(
-  "resource://testing-common/NimbusTestUtils.jsm"
+const { ExperimentAPI } = ChromeUtils.importESModule(
+  "resource://nimbus/ExperimentAPI.sys.mjs"
 );
-const { RecipeRunner } = ChromeUtils.import(
-  "resource://normandy/lib/RecipeRunner.jsm"
+const { ExperimentFakes } = ChromeUtils.importESModule(
+  "resource://testing-common/NimbusTestUtils.sys.mjs"
+);
+const { RecipeRunner } = ChromeUtils.importESModule(
+  "resource://normandy/lib/RecipeRunner.sys.mjs"
 );
 const { RemoteSettings } = ChromeUtils.import(
   "resource://services-settings/remote-settings.js"

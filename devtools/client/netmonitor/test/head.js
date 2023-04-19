@@ -22,8 +22,8 @@ Services.scriptloader.loadSubScript(
   this
 );
 
-const { LinkHandlerParent } = ChromeUtils.import(
-  "resource:///actors/LinkHandlerParent.jsm"
+const { LinkHandlerParent } = ChromeUtils.importESModule(
+  "resource:///actors/LinkHandlerParent.sys.mjs"
 );
 
 const {
@@ -112,6 +112,8 @@ const HTTPS_CUSTOM_GET_URL = HTTPS_EXAMPLE_URL + "html_custom-get-page.html";
 const SINGLE_GET_URL = EXAMPLE_URL + "html_single-get-page.html";
 const HTTPS_SINGLE_GET_URL = HTTPS_EXAMPLE_URL + "html_single-get-page.html";
 const STATISTICS_URL = EXAMPLE_URL + "html_statistics-test-page.html";
+const STATISTICS_EDGE_CASE_URL =
+  EXAMPLE_URL + "html_statistics-edge-case-page.html";
 const CURL_URL = EXAMPLE_URL + "html_copy-as-curl.html";
 const HTTPS_CURL_URL = HTTPS_EXAMPLE_URL + "html_copy-as-curl.html";
 const HTTPS_CURL_UTILS_URL = HTTPS_EXAMPLE_URL + "html_curl-utils.html";
@@ -143,7 +145,6 @@ const CORS_SJS_PATH =
   "/browser/devtools/client/netmonitor/test/sjs_cors-test-server.sjs";
 const HSTS_SJS = EXAMPLE_URL + "sjs_hsts-test-server.sjs";
 const METHOD_SJS = EXAMPLE_URL + "sjs_method-test-server.sjs";
-const SLOW_SJS = EXAMPLE_URL + "sjs_slow-test-server.sjs";
 const HTTPS_SLOW_SJS = HTTPS_EXAMPLE_URL + "sjs_slow-test-server.sjs";
 const SET_COOKIE_SAME_SITE_SJS = EXAMPLE_URL + "sjs_set-cookie-same-site.sjs";
 const SEARCH_SJS = EXAMPLE_URL + "sjs_search-test-server.sjs";
@@ -324,7 +325,7 @@ function initNetMonitor(
 ) {
   info("Initializing a network monitor pane.");
 
-  if (!requestCount) {
+  if (!requestCount && !enableCache) {
     ok(
       false,
       "initNetMonitor should be given a number of requests the page will perform"

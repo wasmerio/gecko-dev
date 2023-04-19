@@ -12,14 +12,19 @@
 #include "nsIURL.h"
 #include "nsIWebTransportStream.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PWebTransport.h"
 #include "mozilla/dom/ReadableStream.h"
 #include "mozilla/dom/ReadableStreamDefaultController.h"
+#include "mozilla/dom/RemoteWorkerChild.h"
 #include "mozilla/dom/WebTransportDatagramDuplexStream.h"
 #include "mozilla/dom/WebTransportError.h"
 #include "mozilla/dom/WebTransportLog.h"
+#include "mozilla/dom/WindowGlobalChild.h"
+#include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WritableStream.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/Endpoint.h"
@@ -45,6 +50,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(WebTransport)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mGlobal)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mUnidirectionalStreams)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBidirectionalStreams)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mIncomingUnidirectionalStreams)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mIncomingBidirectionalStreams)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mIncomingUnidirectionalAlgorithm)
@@ -133,6 +140,11 @@ void WebTransport::NewUnidirectionalStream(
   }
 }
 
+void WebTransport::NewDatagramReceived(nsTArray<uint8_t>&& aData,
+                                       const mozilla::TimeStamp& aTimeStamp) {
+  mDatagrams->NewDatagramReceived(std::move(aData), aTimeStamp);
+}
+
 // WebIDL Boilerplate
 
 nsIGlobalObject* WebTransport::GetParentObject() const { return mGlobal; }
@@ -157,6 +169,9 @@ already_AddRefed<WebTransport> WebTransport::Constructor(
   if (aError.Failed()) {
     return nullptr;
   }
+
+  // Don't let this document go into BFCache
+  result->NotifyToWindow(true);
 
   // Step 25 Return transport
   return result.forget();
@@ -213,6 +228,11 @@ void WebTransport::Init(const GlobalObject& aGlobal, const nsAString& aURL,
   // Step 14: Let datagrams be the result of creating a
   // WebTransportDatagramDuplexStream, its readable set to
   // incomingDatagrams and its writable set to outgoingDatagrams.
+  mDatagrams = new WebTransportDatagramDuplexStream(mGlobal, this);
+  mDatagrams->Init(aError);
+  if (aError.Failed()) {
+    return;
+  }
 
   // XXX TODO
 
@@ -232,6 +252,11 @@ void WebTransport::Init(const GlobalObject& aGlobal, const nsAString& aURL,
   }
 
   nsCOMPtr<nsIPrincipal> principal = mGlobal->PrincipalOrNull();
+  mozilla::Maybe<IPCClientInfo> ipcClientInfo;
+
+  if (mGlobal->GetClientInfo().isSome()) {
+    ipcClientInfo = mozilla::Some(mGlobal->GetClientInfo().ref().ToIPC());
+  }
   // Create a new IPC connection
   Endpoint<PWebTransportParent> parentEndpoint;
   Endpoint<PWebTransportChild> childEndpoint;
@@ -239,8 +264,15 @@ void WebTransport::Init(const GlobalObject& aGlobal, const nsAString& aURL,
       PWebTransport::CreateEndpoints(&parentEndpoint, &childEndpoint));
 
   RefPtr<WebTransportChild> child = new WebTransportChild(this);
-  if (!childEndpoint.Bind(child)) {
-    return;
+  if (NS_IsMainThread()) {
+    if (!childEndpoint.Bind(child)) {
+      return;
+    }
+  } else {
+    if (!childEndpoint.Bind(child,
+                            mGlobal->EventTargetFor(TaskCategory::Other))) {
+      return;
+    }
   }
 
   mState = WebTransportState::CONNECTING;
@@ -302,7 +334,7 @@ void WebTransport::Init(const GlobalObject& aGlobal, const nsAString& aURL,
 
   // https://w3c.github.io/webtransport/#webtransport-constructor Spec 5.2
   backgroundChild
-      ->SendCreateWebTransportParent(aURL, principal, dedicated,
+      ->SendCreateWebTransportParent(aURL, principal, ipcClientInfo, dedicated,
                                      requireUnreliable,
                                      (uint32_t)congestionControl,
                                      // XXX serverCertHashes,
@@ -311,13 +343,13 @@ void WebTransport::Init(const GlobalObject& aGlobal, const nsAString& aURL,
              [self = RefPtr{this},
               child](PBackgroundChild::CreateWebTransportParentPromise::
                          ResolveOrRejectValue&& aResult) {
-               // aResult is a Tuple<nsresult, uint8_t>
+               // aResult is a std::tuple<nsresult, uint8_t>
                // TODO: is there a better/more-spec-compliant error in the
                // reject case? Which begs the question, why would we get a
                // reject?
                nsresult rv = aResult.IsReject()
                                  ? NS_ERROR_FAILURE
-                                 : Get<0>(aResult.ResolveValue());
+                                 : std::get<0>(aResult.ResolveValue());
                LOG(("isreject: %d nsresult 0x%x", aResult.IsReject(),
                     (uint32_t)rv));
                if (NS_FAILED(rv)) {
@@ -328,7 +360,7 @@ void WebTransport::Init(const GlobalObject& aGlobal, const nsAString& aURL,
 
                  self->ResolveWaitingConnection(
                      static_cast<WebTransportReliabilityMode>(
-                         Get<1>(aResult.ResolveValue())),
+                         std::get<1>(aResult.ResolveValue())),
                      child);
                }
              });
@@ -349,6 +381,7 @@ void WebTransport::ResolveWaitingConnection(
   }
 
   mChild = aChild;
+  mDatagrams->SetChild(aChild);
   // Step 17.2: Set transport.[[State]] to "connected".
   mState = WebTransportState::CONNECTED;
   // Step 17.3: Set transport.[[Session]] to session.
@@ -527,9 +560,7 @@ void WebTransport::Close(const WebTransportCloseInfo& aOptions,
 
 already_AddRefed<WebTransportDatagramDuplexStream> WebTransport::GetDatagrams(
     ErrorResult& aError) {
-  LOG(("Datagrams() called"));
-  aError.Throw(NS_ERROR_NOT_IMPLEMENTED);
-  return nullptr;
+  return do_AddRef(mDatagrams);
 }
 
 already_AddRefed<Promise> WebTransport::CreateBidirectionalStream(
@@ -747,6 +778,75 @@ void WebTransport::Cleanup(WebTransportError* aError,
   // Let go of the algorithms
   mIncomingBidirectionalAlgorithm = nullptr;
   mIncomingUnidirectionalAlgorithm = nullptr;
+
+  // We no longer block BFCache
+  NotifyToWindow(false);
 }
+
+void WebTransport::NotifyBFCacheOnMainThread(nsPIDOMWindowInner* aInner,
+                                             bool aCreated) {
+  AssertIsOnMainThread();
+  if (!aInner) {
+    return;
+  }
+  if (aCreated) {
+    aInner->RemoveFromBFCacheSync();
+  }
+
+  uint32_t count = aInner->UpdateWebTransportCount(aCreated);
+  // It's okay for WindowGlobalChild to not exist, as it should mean it already
+  // is destroyed and can't enter bfcache anyway.
+  if (WindowGlobalChild* child = aInner->GetWindowGlobalChild()) {
+    if (aCreated && count == 1) {
+      // The first WebTransport is active.
+      child->BlockBFCacheFor(BFCacheStatus::ACTIVE_WEBTRANSPORT);
+    } else if (count == 0) {
+      child->UnblockBFCacheFor(BFCacheStatus::ACTIVE_WEBTRANSPORT);
+    }
+  }
+}
+
+class BFCacheNotifyWTRunnable final : public WorkerProxyToMainThreadRunnable {
+ public:
+  explicit BFCacheNotifyWTRunnable(bool aCreated) : mCreated(aCreated) {}
+
+  void RunOnMainThread(WorkerPrivate* aWorkerPrivate) override {
+    MOZ_ASSERT(aWorkerPrivate);
+    AssertIsOnMainThread();
+    if (aWorkerPrivate->IsDedicatedWorker()) {
+      WebTransport::NotifyBFCacheOnMainThread(
+          aWorkerPrivate->GetAncestorWindow(), mCreated);
+      return;
+    }
+    if (aWorkerPrivate->IsSharedWorker()) {
+      aWorkerPrivate->GetRemoteWorkerController()->NotifyWebTransport(mCreated);
+      return;
+    }
+    MOZ_ASSERT_UNREACHABLE("Unexpected worker type");
+  }
+
+  void RunBackOnWorkerThreadForCleanup(WorkerPrivate* aWorkerPrivate) override {
+    MOZ_ASSERT(aWorkerPrivate);
+    aWorkerPrivate->AssertIsOnWorkerThread();
+  }
+
+ private:
+  bool mCreated;
+};
+
+void WebTransport::NotifyToWindow(bool aCreated) const {
+  if (NS_IsMainThread()) {
+    NotifyBFCacheOnMainThread(GetParentObject()->AsInnerWindow(), aCreated);
+    return;
+  }
+
+  WorkerPrivate* wp = GetCurrentThreadWorkerPrivate();
+  if (wp->IsDedicatedWorker() || wp->IsSharedWorker()) {
+    RefPtr<BFCacheNotifyWTRunnable> runnable =
+        new BFCacheNotifyWTRunnable(aCreated);
+
+    runnable->Dispatch(wp);
+  }
+};
 
 }  // namespace mozilla::dom

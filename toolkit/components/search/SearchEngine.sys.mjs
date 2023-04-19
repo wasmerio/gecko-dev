@@ -9,11 +9,8 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
 });
 
 const BinaryInputStream = Components.Constructor(
@@ -582,16 +579,6 @@ export class SearchEngine {
   #cachedSearchForm = null;
   // Whether or not to send an attribution request to the server.
   _sendAttributionRequest = false;
-  // The number of days between update checks for new versions
-  _updateInterval = null;
-  // The url to check at for a new update
-  _updateURL = null;
-  // The url to check for a new icon
-  _iconUpdateURL = null;
-  // The extension ID if added by an extension.
-  _extensionID = null;
-  // The locale, or "DEFAULT", if required.
-  _locale = null;
   // The order hint from the configuration (if any).
   _orderHint = null;
   // The telemetry id from the configuration (if any).
@@ -1118,9 +1105,6 @@ export class SearchEngine {
     this._queryCharset =
       json.queryCharset || lazy.SearchUtils.DEFAULT_QUERY_CHARSET;
     this.#cachedSearchForm = json.__searchForm;
-    this._updateInterval = json._updateInterval || null;
-    this._updateURL = json._updateURL || null;
-    this._iconUpdateURL = json._iconUpdateURL || null;
     this._iconURI = lazy.SearchUtils.makeURI(json._iconURL);
     this._iconMapObj = json._iconMapObj || null;
     this._metaData = json._metaData || {};
@@ -1132,8 +1116,6 @@ export class SearchEngine {
       this._definedAliases.push(json._definedAlias);
     }
     this._filePath = json.filePath || json._filePath || null;
-    this._extensionID = json.extensionID || json._extensionID || null;
-    this._locale = json.extensionLocale || json._locale || null;
 
     for (let i = 0; i < json._urls.length; ++i) {
       let url = json._urls[i];
@@ -1165,12 +1147,7 @@ export class SearchEngine {
       "_urls",
       "_orderHint",
       "_telemetryId",
-      "_updateInterval",
-      "_updateURL",
-      "_iconUpdateURL",
       "_filePath",
-      "_extensionID",
-      "_locale",
       "_definedAliases",
     ];
 
@@ -1206,23 +1183,15 @@ export class SearchEngine {
     delete this._metaData[name];
   }
 
-  // nsISearchEngine
-
   /**
    * Get the user-defined alias.
    *
-   * @returns {string}
+   * @type {string}
    */
   get alias() {
     return this.getAttr("alias") || "";
   }
 
-  /**
-   * Set the user-defined alias.
-   *
-   * @param {string} val
-   *   The new alias.
-   */
   set alias(val) {
     var value = val ? val.trim() : "";
     if (value != this.alias) {
@@ -1349,10 +1318,7 @@ export class SearchEngine {
   }
 
   get isGeneralPurposeEngine() {
-    return !!(
-      this._extensionID &&
-      lazy.SearchUtils.GENERAL_SEARCH_ENGINE_IDS.has(this._extensionID)
-    );
+    return false;
   }
 
   get _hasUpdates() {
@@ -1619,13 +1585,8 @@ export class SearchEngine {
   }
 
   // from nsISearchEngine
-  getResultDomain(responseType) {
-    // We can't use a default parameter as that doesn't work correctly with
-    // the idl interfaces.
-    if (!responseType) {
-      responseType = lazy.SearchUtils.URL_TYPE.SEARCH;
-    }
-    let url = this._getURLOfType(responseType);
+  get searchUrlDomain() {
+    let url = this._getURLOfType(lazy.SearchUtils.URL_TYPE.SEARCH);
     if (url) {
       return url.templateHost;
     }
@@ -1779,10 +1740,6 @@ export class SearchEngine {
     }
   }
 
-  /**
-   * @returns {string}
-   *   The identifier of the Search Engine.
-   */
   get id() {
     return this.#id;
   }

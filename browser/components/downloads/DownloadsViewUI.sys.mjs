@@ -12,6 +12,7 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  DownloadUtils: "resource://gre/modules/DownloadUtils.sys.mjs",
   Downloads: "resource://gre/modules/Downloads.sys.mjs",
   DownloadsCommon: "resource:///modules/DownloadsCommon.sys.mjs",
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
@@ -20,7 +21,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 XPCOMUtils.defineLazyModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-  DownloadUtils: "resource://gre/modules/DownloadUtils.jsm",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -1031,7 +1031,7 @@ DownloadsViewUI.DownloadElementShell.prototype = {
   isCommandEnabled(aCommand) {
     switch (aCommand) {
       case "downloadsCmd_retry":
-        return this.download.canceled || this.download.error;
+        return this.download.canceled || !!this.download.error;
       case "downloadsCmd_pauseResume":
         return this.download.hasPartialData && !this.download.error;
       case "downloadsCmd_openReferrer":

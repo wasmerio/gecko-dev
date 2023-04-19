@@ -13,6 +13,7 @@
 #include "gc/GCProbes.h"
 #include "vm/WellKnownAtom.h"  // js_*_str
 
+#include "gc/ObjectKind-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 
@@ -46,12 +47,10 @@ inline JSFunction* JSFunction::create(JSContext* cx, js::gc::AllocKind kind,
   MOZ_ASSERT_IF(kind == js::gc::AllocKind::FUNCTION_EXTENDED,
                 clasp == js::FunctionExtendedClassPtr);
 
-  static constexpr size_t NumDynamicSlots = 0;
   MOZ_ASSERT(calculateDynamicSlots(shape->numFixedSlots(), shape->slotSpan(),
-                                   clasp) == NumDynamicSlots);
+                                   clasp) == 0);
 
-  NativeObject* nobj =
-      cx->newCell<NativeObject>(kind, NumDynamicSlots, heap, clasp);
+  NativeObject* nobj = cx->newCell<NativeObject>(kind, heap, clasp);
   if (!nobj) {
     return nullptr;
   }
@@ -75,7 +74,9 @@ inline JSFunction* JSFunction::create(JSContext* cx, js::gc::AllocKind kind,
              "Function has no extra data hanging off it, that wouldn't be "
              "allocated at this point, that would require delaying the "
              "building of metadata for it");
-  fun = SetNewObjectMetadata(cx, fun);
+  if (MOZ_UNLIKELY(cx->realm()->hasAllocationMetadataBuilder())) {
+    fun = SetNewObjectMetadata(cx, fun);
+  }
 
   js::gc::gcprobes::CreateObject(fun);
 
@@ -118,6 +119,23 @@ inline JSAtom* JSFunction::infallibleGetUnresolvedName(JSContext* cx) {
   }
 
   return cx->names().empty;
+}
+
+/* static */ inline bool JSFunction::getAllocKindForThis(
+    JSContext* cx, js::HandleFunction func, js::gc::AllocKind& allocKind) {
+  JSScript* script = getOrCreateScript(cx, func);
+  if (!script) {
+    return false;
+  }
+
+  size_t propertyCountEstimate =
+      script->immutableScriptData()->propertyCountEstimate;
+
+  // Choose the alloc assuming at least the default NewObjectKind slots, but
+  // bigger if our estimate shows we need it.
+  allocKind = js::gc::GetGCObjectKind(std::max(
+      js::gc::GetGCKindSlots(js::NewObjectGCKind()), propertyCountEstimate));
+  return true;
 }
 
 #endif /* vm_JSFunction_inl_h */

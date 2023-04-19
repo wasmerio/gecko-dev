@@ -252,6 +252,7 @@ namespace jit {
   _(SameValue, js::SameValue)                                                  \
   _(SetArrayLength, js::jit::SetArrayLength)                                   \
   _(SetElementMegamorphic, js::jit::SetElementMegamorphic)                     \
+  _(SetElementMegamorphicCached, js::jit::SetElementMegamorphicCached)         \
   _(SetElementSuper, js::SetElementSuper)                                      \
   _(SetFunctionName, js::SetFunctionName)                                      \
   _(SetIntrinsicOperation, js::SetIntrinsicOperation)                          \
@@ -305,7 +306,6 @@ namespace jit {
   _(DoCheckPrivateFieldFallback, js::jit::DoCheckPrivateFieldFallback, 2)   \
   _(DoCloseIterFallback, js::jit::DoCloseIterFallback, 0)                   \
   _(DoCompareFallback, js::jit::DoCompareFallback, 2)                       \
-  _(DoConcatStringObject, js::jit::DoConcatStringObject, 2)                 \
   _(DoGetElemFallback, js::jit::DoGetElemFallback, 2)                       \
   _(DoGetElemSuperFallback, js::jit::DoGetElemSuperFallback, 3)             \
   _(DoGetIntrinsicFallback, js::jit::DoGetIntrinsicFallback, 0)             \

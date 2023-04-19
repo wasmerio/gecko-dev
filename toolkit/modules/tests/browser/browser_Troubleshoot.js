@@ -9,22 +9,24 @@
 const { Troubleshoot } = ChromeUtils.importESModule(
   "resource://gre/modules/Troubleshoot.sys.mjs"
 );
-const { sinon } = ChromeUtils.import("resource://testing-common/Sinon.jsm");
+const { sinon } = ChromeUtils.importESModule(
+  "resource://testing-common/Sinon.sys.mjs"
+);
 
-const { FeatureGate } = ChromeUtils.import(
-  "resource://featuregates/FeatureGate.jsm"
+const { FeatureGate } = ChromeUtils.importESModule(
+  "resource://featuregates/FeatureGate.sys.mjs"
 );
-const { PreferenceExperiments } = ChromeUtils.import(
-  "resource://normandy/lib/PreferenceExperiments.jsm"
+const { PreferenceExperiments } = ChromeUtils.importESModule(
+  "resource://normandy/lib/PreferenceExperiments.sys.mjs"
 );
-const { PreferenceRollouts } = ChromeUtils.import(
-  "resource://normandy/lib/PreferenceRollouts.jsm"
+const { PreferenceRollouts } = ChromeUtils.importESModule(
+  "resource://normandy/lib/PreferenceRollouts.sys.mjs"
 );
-const { AddonStudies } = ChromeUtils.import(
-  "resource://normandy/lib/AddonStudies.jsm"
+const { AddonStudies } = ChromeUtils.importESModule(
+  "resource://normandy/lib/AddonStudies.sys.mjs"
 );
-const { NormandyTestUtils } = ChromeUtils.import(
-  "resource://testing-common/NormandyTestUtils.jsm"
+const { NormandyTestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/NormandyTestUtils.sys.mjs"
 );
 
 NormandyTestUtils.init({ Assert });

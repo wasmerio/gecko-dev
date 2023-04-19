@@ -271,6 +271,9 @@ with Files("GeolocationPosition*"):
 with Files("ProfileTimelineMarker.webidl"):
     BUG_COMPONENT = ("DevTools", "Performance Tools (Profiler/Timeline)")
 
+with Files("PopoverInvokerElement.webidl"):
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
+
 with Files("ProgressEvent.webidl"):
     BUG_COMPONENT = ("Core", "DOM: Events")
 
@@ -327,9 +330,6 @@ with Files("TextTrack*"):
 
 with Files("TrackEvent.webidl"):
     BUG_COMPONENT = ("Core", "Audio/Video")
-
-with Files("U2F.webidl"):
-    BUG_COMPONENT = ("Core", "DOM: Web Authentication")
 
 with Files("UDP*"):
     BUG_COMPONENT = ("Core", "DOM: Networking")
@@ -792,6 +792,7 @@ WEBIDL_FILES = [
     "Plugin.webidl",
     "PluginArray.webidl",
     "PointerEvent.webidl",
+    "PopoverInvokerElement.webidl",
     "ProcessingInstruction.webidl",
     "ProfileTimelineMarker.webidl",
     "Promise.webidl",
@@ -961,6 +962,7 @@ WEBIDL_FILES = [
     "TextTrackList.webidl",
     "TimeEvent.webidl",
     "TimeRanges.webidl",
+    "ToggleEvent.webidl",
     "Touch.webidl",
     "TouchEvent.webidl",
     "TouchList.webidl",
@@ -970,7 +972,6 @@ WEBIDL_FILES = [
     "TreeContentView.webidl",
     "TreeView.webidl",
     "TreeWalker.webidl",
-    "U2F.webidl",
     "UDPMessageEvent.webidl",
     "UDPSocket.webidl",
     "UIEvent.webidl",
@@ -1030,6 +1031,8 @@ WEBIDL_FILES = [
 
 if CONFIG["MOZ_DOM_STREAMS"]:
     WEBIDL_FILES += [
+        "CompressionStream.webidl",
+        "DecompressionStream.webidl",
         "FileSystemWritableFileStream.webidl",
         "QueuingStrategy.webidl",
         "ReadableByteStreamController.webidl",
@@ -1063,14 +1066,15 @@ if CONFIG["MOZ_WEBRTC"]:
         "RTCIdentityProvider.webidl",
         "RTCPeerConnection.webidl",
         "RTCPeerConnectionStatic.webidl",
+        "RTCRtpCapabilities.webidl",
         "RTCRtpParameters.webidl",
         "RTCRtpReceiver.webidl",
         "RTCRtpSender.webidl",
         "RTCRtpSources.webidl",
         "RTCRtpTransceiver.webidl",
+        "RTCSctpTransport.webidl",
         "RTCSessionDescription.webidl",
         "RTCStatsReport.webidl",
-        "WebrtcDeprecated.webidl",
         "WebrtcGlobalInformation.webidl",
     ]
 
@@ -1186,6 +1190,7 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     "TCPServerSocketEvent.webidl",
     "TCPSocketErrorEvent.webidl",
     "TCPSocketEvent.webidl",
+    "ToggleEvent.webidl",
     "TrackEvent.webidl",
     "UDPMessageEvent.webidl",
     "UserProximityEvent.webidl",

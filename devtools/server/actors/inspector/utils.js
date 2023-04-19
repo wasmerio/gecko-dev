@@ -150,10 +150,10 @@ function standardTreeWalkerFilter(node) {
       : nodeFilterConstants.FILTER_SKIP;
   }
 
-  // Ignore all native anonymous content inside a non-XUL document.
+  // Ignore all native anonymous roots inside a non-XUL document.
   // We need to do this to skip things like form controls, scrollbars,
   // video controls, etc (see bug 1187482).
-  if (!isInXULDocument(node) && isNativeAnonymous(node)) {
+  if (isNativeAnonymous(node) && !isInXULDocument(node)) {
     return nodeFilterConstants.FILTER_SKIP;
   }
 
@@ -185,17 +185,6 @@ function allAnonymousContentTreeWalkerFilter(node) {
       : nodeFilterConstants.FILTER_SKIP;
   }
   return nodeFilterConstants.FILTER_ACCEPT;
-}
-
-/**
- * This DeepTreeWalker filter only accepts <scrollbar> anonymous content.
- */
-function scrollbarTreeWalkerFilter(node) {
-  if (node.nodeName === "scrollbar" && nodeHasSize(node)) {
-    return nodeFilterConstants.FILTER_ACCEPT;
-  }
-
-  return nodeFilterConstants.FILTER_SKIP;
 }
 
 /**
@@ -577,7 +566,6 @@ module.exports = {
   imageToImageData,
   isNodeDead,
   nodeDocument,
-  scrollbarTreeWalkerFilter,
   standardTreeWalkerFilter,
   noAnonymousContentTreeWalkerFilter,
 };

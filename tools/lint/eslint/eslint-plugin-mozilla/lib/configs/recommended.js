@@ -19,7 +19,9 @@ module.exports = {
     "mozilla/specific": true,
   },
 
-  extends: ["eslint:recommended", "plugin:prettier/recommended"],
+  // The prettier configuration here comes from eslint-config-prettier and
+  // turns off all of ESLint's rules related to formatting.
+  extends: ["eslint:recommended", "prettier"],
 
   overrides: [
     {
@@ -72,7 +74,7 @@ module.exports = {
       rules: {
         "mozilla/reject-import-system-module-from-non-system": "error",
         "mozilla/reject-lazy-imports-into-globals": "error",
-        "no-shadow": "error",
+        "no-shadow": ["error", { allow: ["event"], builtinGlobals: true }],
       },
     },
     {
@@ -111,11 +113,14 @@ module.exports = {
   },
 
   // When adding items to this file please check for effects on sub-directories.
-  plugins: ["html", "fetch-options", "no-unsanitized"],
+  plugins: ["html", "fetch-options", "prettier", "no-unsanitized"],
 
   // When adding items to this file please check for effects on all of toolkit
   // and browser
   rules: {
+    // This may conflict with prettier, so we turn it off.
+    "arrow-body-style": "off",
+
     // Warn about cyclomatic complexity in functions.
     // XXX Get this down to 20?
     complexity: ["error", 34],
@@ -330,6 +335,11 @@ module.exports = {
 
     // Require object-literal shorthand with ES6 method syntax
     "object-shorthand": ["error", "always", { avoidQuotes: true }],
+
+    // This may conflict with prettier, so turn it off.
+    "prefer-arrow-callback": "off",
+
+    "prettier/prettier": "off",
 
     // This generates too many false positives that are not easy to work around,
     // and false positives seem to be inherent in the rule.

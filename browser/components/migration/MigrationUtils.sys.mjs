@@ -3,23 +3,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
+  LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.sys.mjs",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   Sqlite: "resource://gre/modules/Sqlite.sys.mjs",
-  setTimeout: "resource://gre/modules/Timer.sys.mjs",
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.sys.mjs",
+  setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "LoginHelper",
-  "resource://gre/modules/LoginHelper.jsm"
-);
 
 var gMigrators = null;
+var gFileMigrators = null;
 var gProfileStartup = null;
 var gL10n = null;
 var gPreviousDefaultBrowserKey = "";
@@ -110,12 +108,27 @@ const MIGRATOR_MODULES = Object.freeze({
   },
 });
 
+const FILE_MIGRATOR_MODULES = Object.freeze({
+  PasswordFileMigrator: {
+    moduleURI: "resource:///modules/FileMigrators.sys.mjs",
+  },
+});
+
 /**
  * The singleton MigrationUtils service. This service is the primary mechanism
  * by which migrations from other browsers to this browser occur. The singleton
  * instance of this class is exported from this module as `MigrationUtils`.
  */
 class MigrationUtils {
+  constructor() {
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "HISTORY_MAX_AGE_IN_DAYS",
+      "browser.migrate.history.maxAgeInDays",
+      180
+    );
+  }
+
   resourceTypes = Object.freeze({
     ALL: 0x0000,
     /* 0x01 used to be used for settings, but was removed. */
@@ -295,6 +308,26 @@ class MigrationUtils {
     return gMigrators;
   }
 
+  get #fileMigrators() {
+    if (!gFileMigrators) {
+      gFileMigrators = new Map();
+      for (let [symbol, { moduleURI }] of Object.entries(
+        FILE_MIGRATOR_MODULES
+      )) {
+        let { [symbol]: migratorClass } = ChromeUtils.importESModule(moduleURI);
+        if (gFileMigrators.has(migratorClass.key)) {
+          console.error(
+            "A pre-existing file migrator exists with key " +
+              `${migratorClass.key}. Not registering.`
+          );
+          continue;
+        }
+        gFileMigrators.set(migratorClass.key, new migratorClass());
+      }
+    }
+    return gFileMigrators;
+  }
+
   forceExitSpinResolve() {
     gForceExitSpinResolve = true;
   }
@@ -359,6 +392,15 @@ class MigrationUtils {
       console.error(ex);
       return null;
     }
+  }
+
+  getFileMigrator(aKey) {
+    let migrator = this.#fileMigrators.get(aKey);
+    if (!migrator) {
+      console.error(`Could not find a file migrator class for key ${aKey}`);
+      return null;
+    }
+    return migrator;
   }
 
   /**
@@ -499,7 +541,7 @@ class MigrationUtils {
    *   optional; the window that asks to open the wizard.
    * @param {object} [aOptions=null]
    *   optional named arguments for the migration wizard.
-   * @param {number} [aOptions.entrypoint=undefined]
+   * @param {string} [aOptions.entrypoint=undefined]
    *   migration entry point constant. See MIGRATION_ENTRYPOINTS.
    * @param {string} [aOptions.migratorKey=undefined]
    *   The key for which migrator to use automatically. This is the key that is exposed
@@ -520,8 +562,18 @@ class MigrationUtils {
    */
   showMigrationWizard(aOpener, aOptions) {
     if (
-      Services.prefs.getBoolPref("browser.migrate.content-modal.enabled", false)
+      Services.prefs.getBoolPref(
+        "browser.migrate.content-modal.enabled",
+        false
+      ) &&
+      !aOptions?.isStartupMigration
     ) {
+      let entrypoint =
+        aOptions.entrypoint || this.MIGRATION_ENTRYPOINTS.UNKNOWN;
+      Services.telemetry
+        .getHistogramById("FX_MIGRATION_ENTRY_POINT_CATEGORICAL")
+        .add(entrypoint);
+
       let openStandaloneWindow = () => {
         const FEATURES = "dialog,centerscreen,resizable=no";
         const win = Services.ww.openWindow(
@@ -545,6 +597,37 @@ class MigrationUtils {
       }
 
       if (aOpener?.openPreferences) {
+        if (aOptions.entrypoint == this.MIGRATION_ENTRYPOINTS.NEWTAB) {
+          // When migration is kicked off from about:welcome, there are
+          // a few different behaviors that we want to test, controlled
+          // by a preference that is instrumented for Nimbus. The pref
+          // has the following possible states:
+          //
+          // "autoclose":
+          //   The user will be directed to the migration wizard in
+          //   about:preferences, but once the wizard is dismissed,
+          //   the tab will close.
+          //
+          // "standalone":
+          //   The migration wizard will open in a new top-level content
+          //   window.
+          //
+          // "default" / other
+          //   The user will be directed to the migration wizard in
+          //   about:preferences. The tab will not close once the
+          //   user closes the wizard.
+          let aboutWelcomeBehavior = Services.prefs.getCharPref(
+            "browser.migrate.content-modal.about-welcome-behavior",
+            "default"
+          );
+
+          if (aboutWelcomeBehavior == "autoclose") {
+            return aOpener.openPreferences("general-migrate-autoclose");
+          } else if (aboutWelcomeBehavior == "standalone") {
+            openStandaloneWindow();
+            return Promise.resolve();
+          }
+        }
         return aOpener.openPreferences("general-migrate");
       }
 
@@ -911,6 +994,10 @@ class MigrationUtils {
     return [...this.#migrators.keys()];
   }
 
+  get availableFileMigrators() {
+    return [...this.#fileMigrators.values()];
+  }
+
   /**
    * Enum for the entrypoint that is being used to start migration.
    * Callers can use the MIGRATION_ENTRYPOINTS getter to use these.
@@ -924,31 +1011,34 @@ class MigrationUtils {
    */
   #MIGRATION_ENTRYPOINTS_ENUM = Object.freeze({
     /** The entrypoint was not supplied */
-    UNKNOWN: 0,
+    UNKNOWN: "unknown",
 
     /** Migration is occurring at startup */
-    FIRSTRUN: 1,
+    FIRSTRUN: "firstrun",
 
     /** Migration is occurring at after a profile refresh */
-    FXREFRESH: 2,
+    FXREFRESH: "fxrefresh",
 
     /** Migration is being started from the Library window */
-    PLACES: 3,
+    PLACES: "places",
 
     /** Migration is being started from our password management UI */
-    PASSWORDS: 4,
+    PASSWORDS: "passwords",
 
     /** Migration is being started from the default about:home/about:newtab */
-    NEWTAB: 5,
+    NEWTAB: "newtab",
 
     /** Migration is being started from the File menu */
-    FILE_MENU: 6,
+    FILE_MENU: "file_menu",
 
     /** Migration is being started from the Help menu */
-    HELP_MENU: 7,
+    HELP_MENU: "help_menu",
 
     /** Migration is being started from the Bookmarks Toolbar */
-    BOOKMARKS_TOOLBAR: 8,
+    BOOKMARKS_TOOLBAR: "bookmarks_toolbar",
+
+    /** Migration is being started from about:preferences */
+    PREFERENCES: "preferences",
   });
 
   /**
@@ -959,6 +1049,52 @@ class MigrationUtils {
    */
   get MIGRATION_ENTRYPOINTS() {
     return this.#MIGRATION_ENTRYPOINTS_ENUM;
+  }
+
+  /**
+   * Translates an entrypoint string into the proper numeric value for the legacy
+   * FX_MIGRATION_ENTRY_POINT histogram.
+   *
+   * @param {string} entrypoint
+   *   The entrypoint to translate from MIGRATION_ENTRYPOINTS.
+   * @returns {number}
+   *   The numeric value for the legacy FX_MIGRATION_ENTRY_POINT histogram.
+   */
+  getLegacyMigrationEntrypoint(entrypoint) {
+    switch (entrypoint) {
+      case this.MIGRATION_ENTRYPOINTS.FIRSTRUN: {
+        return 1;
+      }
+      case this.MIGRATION_ENTRYPOINTS.FXREFRESH: {
+        return 2;
+      }
+      case this.MIGRATION_ENTRYPOINTS.PLACES: {
+        return 3;
+      }
+      case this.MIGRATION_ENTRYPOINTS.PASSWORDS: {
+        return 4;
+      }
+      case this.MIGRATION_ENTRYPOINTS.NEWTAB: {
+        return 5;
+      }
+      case this.MIGRATION_ENTRYPOINTS.FILE_MENU: {
+        return 6;
+      }
+      case this.MIGRATION_ENTRYPOINTS.HELP_MENU: {
+        return 7;
+      }
+      case this.MIGRATION_ENTRYPOINTS.BOOKMARKS_TOOLBAR: {
+        return 8;
+      }
+      case this.MIGRATION_ENTRYPOINTS.PREFERENCES: {
+        return 9;
+      }
+      case this.MIGRATION_ENTRYPOINTS.UNKNOWN:
+      // Intentional fall-through
+      default: {
+        return 0; // Unknown
+      }
+    }
   }
 
   /**
@@ -991,6 +1127,10 @@ class MigrationUtils {
 
   getSourceIdForTelemetry(sourceName) {
     return this.#SOURCE_NAME_TO_ID_MAPPING_ENUM[sourceName] || 0;
+  }
+
+  get HISTORY_MAX_AGE_IN_MILLISECONDS() {
+    return this.HISTORY_MAX_AGE_IN_DAYS * 24 * 60 * 60 * 1000;
   }
 }
 

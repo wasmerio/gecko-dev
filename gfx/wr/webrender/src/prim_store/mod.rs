@@ -9,7 +9,6 @@ use api::{PrimitiveKeyKind, FillRule, POLYGON_CLIP_VERTEX_MAX};
 use api::units::*;
 use euclid::{SideOffsets2D, Size2D};
 use malloc_size_of::MallocSizeOf;
-use crate::command_buffer::PrimitiveCommand;
 use crate::clip::ClipLeafId;
 use crate::segment::EdgeAaSegmentMask;
 use crate::border::BorderSegmentCacheKey;
@@ -19,7 +18,7 @@ use crate::scene_building::{CreateShadow, IsVisible};
 use crate::frame_builder::FrameBuildingState;
 use glyph_rasterizer::GlyphKey;
 use crate::gpu_cache::{GpuCacheAddress, GpuCacheHandle, GpuDataRequest};
-use crate::gpu_types::{BrushFlags};
+use crate::gpu_types::{BrushFlags, QuadSegment};
 use crate::intern;
 use crate::picture::PicturePrimitive;
 use crate::render_task_graph::RenderTaskId;
@@ -902,7 +901,6 @@ pub struct NinePatchDescriptor {
     pub fill: bool,
     pub repeat_horizontal: RepeatMode,
     pub repeat_vertical: RepeatMode,
-    pub outset: SideOffsetsKey,
     pub widths: SideOffsetsKey,
 }
 
@@ -1215,8 +1213,8 @@ pub struct PrimitiveScratchBuffer {
     /// Set of sub-graphs that are required, determined during visibility pass
     pub required_sub_graphs: FastHashSet<PictureIndex>,
 
-    /// Buffer for building primitive command lists during prepare pass
-    pub prim_cmds: Vec<PrimitiveCommand>,
+    /// Temporary buffer for building segments in to during prepare pass
+    pub quad_segments: Vec<QuadSegment>,
 }
 
 impl Default for PrimitiveScratchBuffer {
@@ -1231,7 +1229,7 @@ impl Default for PrimitiveScratchBuffer {
             debug_items: Vec::new(),
             messages: Vec::new(),
             required_sub_graphs: FastHashSet::default(),
-            prim_cmds: Vec::new(),
+            quad_segments: Vec::new(),
         }
     }
 }
@@ -1245,17 +1243,16 @@ impl PrimitiveScratchBuffer {
         self.segment_instances.recycle(recycler);
         self.gradient_tiles.recycle(recycler);
         recycler.recycle_vec(&mut self.debug_items);
-        recycler.recycle_vec(&mut self.prim_cmds);
+        recycler.recycle_vec(&mut self.quad_segments);
     }
 
     pub fn begin_frame(&mut self) {
-        assert!(self.prim_cmds.is_empty());
-
         // Clear the clip mask tasks for the beginning of the frame. Append
         // a single kind representing no clip mask, at the ClipTaskIndex::INVALID
         // location.
         self.clip_mask_instances.clear();
         self.clip_mask_instances.push(ClipMaskKind::None);
+        self.quad_segments.clear();
 
         self.border_cache_handles.clear();
 
@@ -1449,7 +1446,7 @@ fn test_struct_sizes() {
     //     test expectations and move on.
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
-    assert_eq!(mem::size_of::<PrimitiveInstance>(), 104, "PrimitiveInstance size changed");
+    assert_eq!(mem::size_of::<PrimitiveInstance>(), 88, "PrimitiveInstance size changed");
     assert_eq!(mem::size_of::<PrimitiveInstanceKind>(), 24, "PrimitiveInstanceKind size changed");
     assert_eq!(mem::size_of::<PrimitiveTemplate>(), 56, "PrimitiveTemplate size changed");
     assert_eq!(mem::size_of::<PrimitiveTemplateKind>(), 28, "PrimitiveTemplateKind size changed");

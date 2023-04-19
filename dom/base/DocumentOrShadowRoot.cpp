@@ -10,7 +10,6 @@
 #include "mozilla/PointerLockManager.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/StyleSheet.h"
-#include "mozilla/SVGUtils.h"
 #include "mozilla/dom/AnimatableBinding.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/HTMLInputElement.h"
@@ -226,16 +225,28 @@ void DocumentOrShadowRoot::CloneAdoptedSheetsFrom(
   }
 }
 
-Element* DocumentOrShadowRoot::GetElementById(const nsAString& aElementId) {
+Element* DocumentOrShadowRoot::GetElementById(
+    const nsAString& aElementId) const {
   if (MOZ_UNLIKELY(aElementId.IsEmpty())) {
-    nsContentUtils::ReportEmptyGetElementByIdArg(AsNode().OwnerDoc());
+    ReportEmptyGetElementByIdArg();
     return nullptr;
   }
 
   if (IdentifierMapEntry* entry = mIdentifierMap.GetEntry(aElementId)) {
-    if (Element* el = entry->GetIdElement()) {
-      return el;
-    }
+    return entry->GetIdElement();
+  }
+
+  return nullptr;
+}
+
+Element* DocumentOrShadowRoot::GetElementById(nsAtom* aElementId) const {
+  if (MOZ_UNLIKELY(aElementId == nsGkAtoms::_empty)) {
+    ReportEmptyGetElementByIdArg();
+    return nullptr;
+  }
+
+  if (IdentifierMapEntry* entry = mIdentifierMap.GetEntry(aElementId)) {
+    return entry->GetIdElement();
   }
 
   return nullptr;
@@ -414,7 +425,7 @@ static void QueryNodesFromRect(DocumentOrShadowRoot& aRoot, const nsRect& aRect,
       // SVG 'text' element's SVGTextFrame doesn't respond to hit-testing, so
       // if 'content' is a child of such an element then we need to manually
       // defer to the parent here.
-      if (aMultiple == Multiple::Yes && !SVGUtils::IsInSVGTextSubtree(frame)) {
+      if (aMultiple == Multiple::Yes && !frame->IsInSVGTextSubtree()) {
         continue;
       }
 
@@ -579,7 +590,7 @@ Element* DocumentOrShadowRoot::LookupImageElement(const nsAString& aId) {
   return entry ? entry->GetImageIdElement() : nullptr;
 }
 
-void DocumentOrShadowRoot::ReportEmptyGetElementByIdArg() {
+void DocumentOrShadowRoot::ReportEmptyGetElementByIdArg() const {
   nsContentUtils::ReportEmptyGetElementByIdArg(AsNode().OwnerDoc());
 }
 

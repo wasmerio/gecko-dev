@@ -5,9 +5,10 @@
 extern crate log;
 
 use crate::consts::{CID_BROADCAST, MAX_HID_RPT_SIZE};
+use crate::ctap2::commands::get_info::AuthenticatorInfo;
 use crate::transport::hid::HIDDevice;
 use crate::transport::platform::iokit::*;
-use crate::transport::{AuthenticatorInfo, ECDHSecret, FidoDevice, HIDError};
+use crate::transport::{FidoDevice, HIDError, SharedSecret};
 use crate::u2ftypes::{U2FDevice, U2FDeviceInfo};
 use core_foundation::base::*;
 use core_foundation::string::*;
@@ -26,7 +27,7 @@ pub struct Device {
     cid: [u8; 4],
     report_rx: Option<Receiver<Vec<u8>>>,
     dev_info: Option<U2FDeviceInfo>,
-    secret: Option<ECDHSecret>,
+    secret: Option<SharedSecret>,
     authenticator_info: Option<AuthenticatorInfo>,
 }
 
@@ -188,11 +189,11 @@ impl HIDDevice for Device {
     fn is_u2f(&mut self) -> bool {
         true
     }
-    fn get_shared_secret(&self) -> Option<&ECDHSecret> {
+    fn get_shared_secret(&self) -> Option<&SharedSecret> {
         self.secret.as_ref()
     }
 
-    fn set_shared_secret(&mut self, secret: ECDHSecret) {
+    fn set_shared_secret(&mut self, secret: SharedSecret) {
         self.secret = Some(secret);
     }
 

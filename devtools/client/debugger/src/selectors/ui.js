@@ -53,3 +53,11 @@ export function getInlinePreview(state) {
 export function getEditorWrapping(state) {
   return state.ui.editorWrappingEnabled;
 }
+
+export function getJavascriptTracingLogMethod(state) {
+  return state.ui.javascriptTracingLogMethod;
+}
+
+export function getSearchOptions(state, searchKey) {
+  return state.ui.mutableSearchOptions[searchKey];
+}

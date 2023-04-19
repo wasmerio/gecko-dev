@@ -1077,10 +1077,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVisibility {
            mVisible == mozilla::StyleVisibility::Collapse;
   }
 
-  bool EmulateMozBoxWithFlex() const {
-    return mMozBoxLayout == mozilla::StyleMozBoxLayout::Flex;
-  }
-
   bool UseLegacyCollapseBehavior() const {
     return mMozBoxCollapse == mozilla::StyleMozBoxCollapse::Legacy;
   }
@@ -1116,7 +1112,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVisibility {
   mozilla::StyleImageRendering mImageRendering;
   mozilla::StyleWritingModeProperty mWritingMode;
   mozilla::StyleTextOrientation mTextOrientation;
-  mozilla::StyleMozBoxLayout mMozBoxLayout;
   mozilla::StyleMozBoxCollapse mMozBoxCollapse;
   mozilla::StylePrintColorAdjust mPrintColorAdjust;
 
@@ -1259,6 +1254,10 @@ struct StyleViewTimeline {
   // we can rely on the default constructor to handle the new constructed
   // elements.
   void SetInitialValues() {}
+
+  const nsAtom* GetName() const { return mName._0.AsAtom(); }
+  StyleScrollAxis GetAxis() const { return mAxis; }
+  const StyleViewTimelineInset& GetInset() const { return mInset; }
 
   bool operator==(const StyleViewTimeline& aOther) const {
     return mName == aOther.mName && mAxis == aOther.mAxis &&
@@ -1494,8 +1493,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     if (outside == mozilla::StyleDisplayOutside::Block) {
       return false;
     }
-    return mozilla::StyleDisplay::MozInlineBox == aDisplay ||
-           mozilla::StyleDisplay::RubyBase == aDisplay ||
+    return mozilla::StyleDisplay::RubyBase == aDisplay ||
            mozilla::StyleDisplay::RubyBaseContainer == aDisplay ||
            mozilla::StyleDisplay::RubyText == aDisplay ||
            mozilla::StyleDisplay::RubyTextContainer == aDisplay;
@@ -2132,6 +2130,10 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects {
   bool HasMixBlendMode() const {
     return mMixBlendMode != mozilla::StyleBlend::Normal;
   }
+
+  bool IsOpaque() const { return mOpacity >= 1.0f; }
+
+  bool IsTransparent() const { return mOpacity == 0.0f; }
 
   mozilla::StyleOwnedSlice<mozilla::StyleFilter> mFilters;
   mozilla::StyleOwnedSlice<mozilla::StyleBoxShadow> mBoxShadow;

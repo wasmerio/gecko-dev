@@ -18,6 +18,7 @@ DEFINES["WEBRTC_ENABLE_PROTOBUF"] = "0"
 DEFINES["WEBRTC_LIBRARY_IMPL"] = True
 DEFINES["WEBRTC_MOZILLA_BUILD"] = True
 DEFINES["WEBRTC_NON_STATIC_TRACE_EVENT_HANDLERS"] = "0"
+DEFINES["WEBRTC_STRICT_FIELD_TRIALS"] = "0"
 
 FINAL_LIBRARY = "webrtc"
 
@@ -30,7 +31,6 @@ LOCAL_INCLUDES += [
     "/media/libyuv/libyuv/include/",
     "/third_party/libwebrtc/",
     "/third_party/libwebrtc/third_party/abseil-cpp/",
-    "/third_party/pipewire/",
     "/tools/profiler/public"
 ]
 
@@ -253,9 +253,9 @@ if CONFIG["CPU_ARCH"] == "arm":
         "/third_party/drm/drm/",
         "/third_party/drm/drm/include/",
         "/third_party/drm/drm/include/libdrm/",
-        "/third_party/drm/libdrm/",
         "/third_party/gbm/gbm/",
-        "/third_party/libepoxy/libepoxy/include/"
+        "/third_party/libepoxy/libepoxy/include/",
+        "/third_party/pipewire/"
     ]
 
     SOURCES += [
@@ -266,12 +266,10 @@ if CONFIG["CPU_ARCH"] == "arm":
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/egl_dmabuf.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/restore_token_manager.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/scoped_glib.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screen_capture_portal_interface.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_portal.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_stream_utils.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
+        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc"
     ]
 
 if CONFIG["CPU_ARCH"] == "ppc64":
@@ -330,9 +328,9 @@ if CONFIG["CPU_ARCH"] == "aarch64" and CONFIG["OS_TARGET"] == "Linux":
         "/third_party/drm/drm/",
         "/third_party/drm/drm/include/",
         "/third_party/drm/drm/include/libdrm/",
-        "/third_party/drm/libdrm/",
         "/third_party/gbm/gbm/",
-        "/third_party/libepoxy/libepoxy/include/"
+        "/third_party/libepoxy/libepoxy/include/",
+        "/third_party/pipewire/"
     ]
 
     SOURCES += [
@@ -343,12 +341,10 @@ if CONFIG["CPU_ARCH"] == "aarch64" and CONFIG["OS_TARGET"] == "Linux":
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/egl_dmabuf.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/restore_token_manager.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/scoped_glib.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screen_capture_portal_interface.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_portal.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_stream_utils.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
+        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc"
     ]
 
 if CONFIG["CPU_ARCH"] == "x86" and CONFIG["OS_TARGET"] == "Linux":
@@ -366,9 +362,9 @@ if CONFIG["CPU_ARCH"] == "x86" and CONFIG["OS_TARGET"] == "Linux":
         "/third_party/drm/drm/",
         "/third_party/drm/drm/include/",
         "/third_party/drm/drm/include/libdrm/",
-        "/third_party/drm/libdrm/",
         "/third_party/gbm/gbm/",
-        "/third_party/libepoxy/libepoxy/include/"
+        "/third_party/libepoxy/libepoxy/include/",
+        "/third_party/pipewire/"
     ]
 
     SOURCES += [
@@ -379,12 +375,10 @@ if CONFIG["CPU_ARCH"] == "x86" and CONFIG["OS_TARGET"] == "Linux":
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/egl_dmabuf.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/restore_token_manager.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/scoped_glib.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screen_capture_portal_interface.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_portal.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_stream_utils.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
+        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc"
     ]
 
 if CONFIG["CPU_ARCH"] == "x86_64" and CONFIG["OS_TARGET"] == "Linux":
@@ -398,9 +392,9 @@ if CONFIG["CPU_ARCH"] == "x86_64" and CONFIG["OS_TARGET"] == "Linux":
         "/third_party/drm/drm/",
         "/third_party/drm/drm/include/",
         "/third_party/drm/drm/include/libdrm/",
-        "/third_party/drm/libdrm/",
         "/third_party/gbm/gbm/",
-        "/third_party/libepoxy/libepoxy/include/"
+        "/third_party/libepoxy/libepoxy/include/",
+        "/third_party/pipewire/"
     ]
 
     SOURCES += [
@@ -411,12 +405,10 @@ if CONFIG["CPU_ARCH"] == "x86_64" and CONFIG["OS_TARGET"] == "Linux":
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/egl_dmabuf.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/mouse_cursor_monitor_pipewire.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/restore_token_manager.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/scoped_glib.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screen_capture_portal_interface.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_portal.cc",
         "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/screencast_stream_utils.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
-        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
+        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc"
     ]
 
 if CONFIG["CPU_ARCH"] == "aarch64" and CONFIG["MOZ_X11"] == "1" and CONFIG["OS_TARGET"] == "Linux":

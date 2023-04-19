@@ -13,9 +13,12 @@ var { XPCOMUtils } = ChromeUtils.importESModule(
 
 ChromeUtils.defineESModuleGetters(this, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
+
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+  ShellService: "resource:///modules/ShellService.sys.mjs",
   URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
 });
 
@@ -23,7 +26,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AboutNewTab: "resource:///modules/AboutNewTab.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ExtensionSettingsStore: "resource://gre/modules/ExtensionSettingsStore.jsm",
-  ShellService: "resource:///modules/ShellService.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(this, "ReferrerInfo", () =>
@@ -79,7 +81,6 @@ function isBlankPageURL(aURL) {
   return (
     aURL == "about:blank" ||
     aURL == "about:home" ||
-    aURL == "about:welcome" ||
     aURL == BROWSER_NEW_TAB_URL ||
     aURL == "chrome://browser/content/blanktab.html"
   );
@@ -412,7 +413,7 @@ function openAboutDialog() {
   if (AppConstants.platform == "win") {
     features += "centerscreen,dependent";
   } else if (AppConstants.platform == "macosx") {
-    features += "resizable=no,minimizable=no";
+    features += "centerscreen,resizable=no,minimizable=no";
   } else {
     features += "centerscreen,dependent,dialog=no";
   }

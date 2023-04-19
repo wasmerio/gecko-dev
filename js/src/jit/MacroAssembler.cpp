@@ -826,7 +826,7 @@ void MacroAssembler::initTypedArraySlots(Register obj, Register temp,
 
     // Allocate a buffer on the heap to store the data elements.
     PushRegsInMask(liveRegs);
-    using Fn = void (*)(JSContext * cx, TypedArrayObject * obj, int32_t count);
+    using Fn = void (*)(JSContext* cx, TypedArrayObject* obj, int32_t count);
     setupUnalignedABICall(temp);
     loadJSContext(temp);
     passABIArg(temp);
@@ -982,7 +982,7 @@ void MacroAssembler::initGCThing(Register obj, Register temp,
   regs.takeUnchecked(obj);
   Register temp2 = regs.takeAnyGeneral();
 
-  using Fn = void (*)(JSObject * obj);
+  using Fn = void (*)(JSObject* obj);
   setupUnalignedABICall(temp2);
   passABIArg(obj);
   callWithABI<Fn, TraceCreateObject>();
@@ -2530,7 +2530,7 @@ void MacroAssembler::emitMegamorphicCachedSetSlot(
 #endif
     ValueOperand value, Label* cacheHit,
     void (*emitPreBarrier)(MacroAssembler&, const Address&, MIRType)) {
-  Label cacheMiss, dynamicSlot, doAdd, doSet;
+  Label cacheMiss, dynamicSlot, doAdd, doSet, doAddDynamic, doSetDynamic;
 
 #ifdef JS_CODEGEN_X86
   pushValue(value);
@@ -2595,29 +2595,67 @@ void MacroAssembler::emitMegamorphicCachedSetSlot(
   move32(scratch2, scratch1);
   rshift32(Imm32(TaggedSlotOffset::OffsetShift), scratch1);
 
-  // scratch3 = scratch3->afterShape()
-  loadPtr(
-      Address(scratch3, MegamorphicSetPropCache::Entry::offsetOfAfterShape()),
-      scratch3);
-
-  // Calculate slot address in scratch1. Jump to doSet if scratch3 == nullptr,
-  // else jump (or fall-through) to doAdd.
+  Address afterShapePtr(scratch3,
+                        MegamorphicSetPropCache::Entry::offsetOfAfterShape());
 
   // if (!slotOffset.isFixedSlot()) goto dynamicSlot
   branchTest32(Assembler::Zero, scratch2,
                Imm32(TaggedSlotOffset::IsFixedSlotFlag), &dynamicSlot);
+
+  // Calculate slot address in scratch1. Jump to doSet if scratch3 == nullptr,
+  // else jump (or fall-through) to doAdd.
   addPtr(obj, scratch1);
-  branchTestPtr(Assembler::Zero, scratch3, scratch3, &doSet);
+  branchPtr(Assembler::Equal, afterShapePtr, ImmPtr(nullptr), &doSet);
   jump(&doAdd);
 
   bind(&dynamicSlot);
-  addPtr(Address(obj, NativeObject::offsetOfSlots()), scratch1);
-
-  branchTestPtr(Assembler::Zero, scratch3, scratch3, &doSet);
+  branchPtr(Assembler::Equal, afterShapePtr, ImmPtr(nullptr), &doSetDynamic);
 
   Address slotAddr(scratch1, 0);
 
+  // If entry->newCapacity_ is nonzero, we need to grow the slots on the
+  // object. Otherwise just jump straight to a dynamic add.
+  load16ZeroExtend(
+      Address(scratch3, MegamorphicSetPropCache::Entry::offsetOfNewCapacity()),
+      scratch2);
+  branchTest32(Assembler::Zero, scratch2, scratch2, &doAddDynamic);
+
+  AllocatableRegisterSet regs(RegisterSet::Volatile());
+  LiveRegisterSet save(regs.asLiveSet());
+
+  PushRegsInMask(save);
+
+  regs.takeUnchecked(scratch2);
+  Register tmp;
+  if (regs.has(obj)) {
+    regs.takeUnchecked(obj);
+    tmp = regs.takeAnyGeneral();
+    regs.addUnchecked(obj);
+  } else {
+    tmp = regs.takeAnyGeneral();
+  }
+
+  using Fn = bool (*)(JSContext* cx, NativeObject* obj, uint32_t newCount);
+  setupUnalignedABICall(tmp);
+  loadJSContext(tmp);
+  passABIArg(tmp);
+  passABIArg(obj);
+  passABIArg(scratch2);
+  callWithABI<Fn, NativeObject::growSlotsPure>();
+  storeCallPointerResult(scratch2);
+  PopRegsInMask(save);
+
+  branchIfFalseBool(scratch2, &cacheMiss);
+
+  bind(&doAddDynamic);
+  addPtr(Address(obj, NativeObject::offsetOfSlots()), scratch1);
+
   bind(&doAdd);
+  // scratch3 = entry->afterShape()
+  loadPtr(
+      Address(scratch3, MegamorphicSetPropCache::Entry::offsetOfAfterShape()),
+      scratch3);
+
   storeObjShape(scratch3, obj,
                 [emitPreBarrier](MacroAssembler& masm, const Address& addr) {
                   emitPreBarrier(masm, addr, MIRType::Shape);
@@ -2628,8 +2666,9 @@ void MacroAssembler::emitMegamorphicCachedSetSlot(
   storeValue(value, slotAddr);
   jump(cacheHit);
 
+  bind(&doSetDynamic);
+  addPtr(Address(obj, NativeObject::offsetOfSlots()), scratch1);
   bind(&doSet);
-
   guardedCallPreBarrier(slotAddr, MIRType::Value);
 
 #ifdef JS_CODEGEN_X86
@@ -2726,7 +2765,7 @@ void MacroAssembler::guardSpecificAtom(Register str, JSAtom* atom,
   // function to do the comparison.
   PushRegsInMask(volatileRegs);
 
-  using Fn = bool (*)(JSString * str1, JSString * str2);
+  using Fn = bool (*)(JSString* str1, JSString* str2);
   setupUnalignedABICall(scratch);
   movePtr(ImmGCPtr(atom), scratch);
   passABIArg(scratch);
@@ -2763,7 +2802,7 @@ void MacroAssembler::guardStringToInt32(Register str, Register output,
     }
     PushRegsInMask(volatileRegs);
 
-    using Fn = bool (*)(JSContext * cx, JSString * str, int32_t * result);
+    using Fn = bool (*)(JSContext* cx, JSString* str, int32_t* result);
     setupUnalignedABICall(scratch);
     loadJSContext(scratch);
     passABIArg(scratch);
@@ -2855,7 +2894,7 @@ void MacroAssembler::generateBailoutTail(Register scratch,
     push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, resumeAddr)));
 
     // Call a stub to free allocated memory and create arguments objects.
-    using Fn = bool (*)(BaselineBailoutInfo * bailoutInfoArg);
+    using Fn = bool (*)(BaselineBailoutInfo* bailoutInfoArg);
     setupUnalignedABICall(temp);
     passABIArg(bailoutInfo);
     callWithABI<Fn, FinishBailoutToBaseline>(
@@ -4758,12 +4797,10 @@ void MacroAssembler::wasmCallRef(const wasm::CallSiteDesc& desc,
   bind(&done);
 }
 
-void MacroAssembler::branchWasmTypeDefIsSubtype(Register subTypeDef,
-                                                Register superTypeDef,
-                                                Register scratch,
-                                                uint32_t subTypingDepth,
-                                                Label* label, bool onSuccess) {
-  MOZ_ASSERT_IF(subTypingDepth >= wasm::MinSuperTypeVectorLength,
+void MacroAssembler::branchWasmSuperTypeVectorIsSubtype(
+    Register subSuperTypeVector, Register superSuperTypeVector,
+    Register scratch, uint32_t superTypeDepth, Label* label, bool onSuccess) {
+  MOZ_ASSERT_IF(superTypeDepth >= wasm::MinSuperTypeVectorLength,
                 scratch != Register::Invalid());
 
   // We generate just different enough code for 'is' subtype vs 'is not'
@@ -4771,53 +4808,55 @@ void MacroAssembler::branchWasmTypeDefIsSubtype(Register subTypeDef,
   if (onSuccess) {
     Label failed;
 
-    // Fast path for the type defs being equal.
-    branchPtr(Assembler::Equal, subTypeDef, superTypeDef, label);
-
-    // Slower path for checking the supertype vector of `subTypeDef`. We don't
-    // need `subTypeDef` at this point, so we use it as a scratch for storing
-    // the super type vector and entry from it.
-    loadPtr(Address(subTypeDef, wasm::TypeDef::offsetOfSuperTypeVector()),
-            subTypeDef);
+    // At this point, we could generate a fast success check which jumps to
+    // `label` if `subSuperTypeVector == superSuperTypeVector`.  However,
+    // profiling of Barista-3 seems to show this is hardly worth anything,
+    // whereas it is worth us generating smaller code and in particular one
+    // fewer conditional branch.  So it is omitted:
+    //
+    //   branchPtr(Assembler::Equal, subSuperTypeVector, superSuperTypeVector,
+    //   label);
 
     // Emit a bounds check if the super type depth may be out-of-bounds.
-    if (subTypingDepth >= wasm::MinSuperTypeVectorLength) {
+    if (superTypeDepth >= wasm::MinSuperTypeVectorLength) {
       // Slowest path for having a bounds check of the super type vector
-      load32(Address(subTypeDef, wasm::SuperTypeVector::offsetOfLength()),
-             scratch);
-      branch32(Assembler::LessThanOrEqual, scratch, Imm32(subTypingDepth),
+      load32(
+          Address(subSuperTypeVector, wasm::SuperTypeVector::offsetOfLength()),
+          scratch);
+      branch32(Assembler::LessThanOrEqual, scratch, Imm32(superTypeDepth),
                &failed);
     }
 
-    // Load the `subTypingDepth` entry from subTypeDef's super type vector. This
-    // will be `superTypeDef` if `subTypeDef` is indeed a subtype.
-    loadPtr(Address(subTypeDef, wasm::SuperTypeVector::offsetOfTypeDefInVector(
-                                    subTypingDepth)),
-            subTypeDef);
-    branchPtr(Assembler::Equal, subTypeDef, superTypeDef, label);
+    // Load the `superTypeDepth` entry from subSuperTypeVector. This
+    // will be `superSuperTypeVector` if `subSuperTypeVector` is indeed a
+    // subtype.
+    loadPtr(
+        Address(subSuperTypeVector,
+                wasm::SuperTypeVector::offsetOfTypeDefInVector(superTypeDepth)),
+        subSuperTypeVector);
+    branchPtr(Assembler::Equal, subSuperTypeVector, superSuperTypeVector,
+              label);
 
     // Fallthrough to the failed case
     bind(&failed);
     return;
   }
 
-  // Load the super type vector from subTypeDef
-  loadPtr(Address(subTypeDef, wasm::TypeDef::offsetOfSuperTypeVector()),
-          subTypeDef);
-
   // Emit a bounds check if the super type depth may be out-of-bounds.
-  if (subTypingDepth >= wasm::MinSuperTypeVectorLength) {
-    load32(Address(subTypeDef, wasm::SuperTypeVector::offsetOfLength()),
+  if (superTypeDepth >= wasm::MinSuperTypeVectorLength) {
+    load32(Address(subSuperTypeVector, wasm::SuperTypeVector::offsetOfLength()),
            scratch);
-    branch32(Assembler::LessThanOrEqual, scratch, Imm32(subTypingDepth), label);
+    branch32(Assembler::LessThanOrEqual, scratch, Imm32(superTypeDepth), label);
   }
 
-  // Load the `subTypingDepth` entry from subTypeDef's super type vector. This
-  // will be `superTypeDef` if `subTypeDef` is indeed a subtype.
-  loadPtr(Address(subTypeDef, wasm::SuperTypeVector::offsetOfTypeDefInVector(
-                                  subTypingDepth)),
-          subTypeDef);
-  branchPtr(Assembler::NotEqual, subTypeDef, superTypeDef, label);
+  // Load the `superTypeDepth` entry from subSuperTypeVector. This will be
+  // `superSuperTypeVector` if `subSuperTypeVector` is indeed a subtype.
+  loadPtr(
+      Address(subSuperTypeVector,
+              wasm::SuperTypeVector::offsetOfTypeDefInVector(superTypeDepth)),
+      subSuperTypeVector);
+  branchPtr(Assembler::NotEqual, subSuperTypeVector, superSuperTypeVector,
+            label);
   // Fallthrough to the success case
 }
 
@@ -5224,7 +5263,7 @@ void MacroAssembler::packedArrayShift(Register array, ValueOperand output,
 
     PushRegsInMask(volatileRegs);
 
-    using Fn = void (*)(ArrayObject * arr);
+    using Fn = void (*)(ArrayObject* arr);
     setupUnalignedABICall(temp1);
     passABIArg(array);
     callWithABI<Fn, ArrayShiftMoveElements>();

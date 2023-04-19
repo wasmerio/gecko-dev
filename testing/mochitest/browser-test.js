@@ -338,6 +338,10 @@ Tester.prototype = {
       // Thunderbird
       "MailMigrator",
       "SearchIntegration",
+      // lit
+      "reactiveElementVersions",
+      "litHtmlVersions",
+      "litElementVersions",
     ];
 
     this.PerTestCoverageUtils.beforeTestSync();
@@ -861,8 +865,10 @@ Tester.prototype = {
           let path = Services.env.get("MOZ_UPLOAD_DIR");
           let profilePath = PathUtils.join(path, filename);
           try {
-            let profileData = await Services.profiler.getProfileDataAsGzippedArrayBuffer();
-            await IOUtils.write(profilePath, new Uint8Array(profileData));
+            const {
+              profile,
+            } = await Services.profiler.getProfileDataAsGzippedArrayBuffer();
+            await IOUtils.write(profilePath, new Uint8Array(profile));
             this.currentTest.addResult(
               new testResult({
                 name:
@@ -1353,11 +1359,14 @@ Tester.prototype = {
 };
 
 // Note: duplicated in SimpleTest.js . See also bug 1820150.
-function isError(err) {
+function isErrorOrException(err) {
   // It'd be nice if we had either `Error.isError(err)` or `Error.isInstance(err)`
   // but we don't, so do it ourselves:
   if (!err) {
     return false;
+  }
+  if (err instanceof Ci.nsIException) {
+    return true;
   }
   try {
     let glob = Cu.getGlobalForObject(err);
@@ -1422,7 +1431,10 @@ function testResult({ name, pass, todo, ex, stack, allowFailure }) {
       this.msg += "at " + ex.fileName + ":" + ex.lineNumber + " - ";
     }
 
-    if (typeof ex == "string" || (typeof ex == "object" && isError(ex))) {
+    if (
+      typeof ex == "string" ||
+      (typeof ex == "object" && isErrorOrException(ex))
+    ) {
       this.msg += String(ex);
     } else {
       try {

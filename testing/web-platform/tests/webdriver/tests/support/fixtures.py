@@ -12,13 +12,15 @@ from tests.support import defaults
 from tests.support.helpers import cleanup_session, deep_update
 from tests.support.inline import build_inline
 from tests.support.http_request import HTTPRequest
+from tests.support.keys import Keys
 
+
+SCRIPT_TIMEOUT = 1
+PAGE_LOAD_TIMEOUT = 3
+IMPLICIT_WAIT_TIMEOUT = 0
 
 # The webdriver session can outlive a pytest session
 _current_session = None
-
-
-_custom_session = False
 
 
 def pytest_configure(config):
@@ -63,6 +65,7 @@ def full_configuration():
     host - WebDriver server host.
     port -  WebDriver server port.
     capabilites - Capabilites passed when creating the WebDriver session
+    timeout_multiplier - Multiplier for timeout values
     webdriver - Dict with keys `binary`: path to webdriver binary, and
                 `args`: Additional command line arguments passed to the webdriver
                 binary. This doesn't include all the required arguments e.g. the
@@ -137,6 +140,12 @@ async def session(capabilities, configuration):
         _current_session.window.size = defaults.WINDOW_SIZE
         _current_session.window.position = defaults.WINDOW_POSITION
 
+    # Set default timeouts
+    multiplier = configuration["timeout_multiplier"]
+    _current_session.timeouts.implicit = IMPLICIT_WAIT_TIMEOUT * multiplier
+    _current_session.timeouts.page_load = PAGE_LOAD_TIMEOUT * multiplier
+    _current_session.timeouts.script = SCRIPT_TIMEOUT * multiplier
+
     yield _current_session
 
     cleanup_session(_current_session)
@@ -202,6 +211,14 @@ def url(server_config):
 
 
 @pytest.fixture
+def modifier_key(session):
+    if session.capabilities["platformName"] == "mac":
+        return Keys.META
+    else:
+        return Keys.CONTROL
+
+
+@pytest.fixture
 def inline(url):
     """Take a source extract and produces well-formed documents.
 
@@ -238,14 +255,14 @@ def iframe(inline):
     return iframe
 
 
-
 @pytest.fixture
 def get_test_page(iframe, inline):
     def get_test_page(
         as_frame=False,
         frame_doc=None,
         shadow_doc=None,
-        nested_shadow_dom=False
+        nested_shadow_dom=False,
+        shadow_root_mode="open"
     ):
         if frame_doc is None:
             frame_doc = """<div id="in-frame"><input type="checkbox"/></div>"""
@@ -260,7 +277,7 @@ def get_test_page(iframe, inline):
                     class extends HTMLElement {{
                         constructor() {{
                             super();
-                            this.attachShadow({{mode: "open"}}).innerHTML = `
+                            this.attachShadow({{mode: "{shadow_root_mode}"}}).innerHTML = `
                                 {shadow_doc}
                             `;
                         }}
@@ -308,7 +325,11 @@ def get_test_page(iframe, inline):
                     class extends HTMLElement {{
                         constructor() {{
                             super();
-                            this.attachShadow({{mode: "open"}}).innerHTML = `{shadow_doc}`;
+                            const shadowRoot = this.attachShadow({{mode: "{shadow_root_mode}"}});
+                            shadowRoot.innerHTML = `{shadow_doc}`;
+
+                            // Save shadow root on window to access it in case of `closed` mode.
+                            window._shadowRoot = shadowRoot;
                         }}
                     }}
                 );
@@ -321,6 +342,53 @@ def get_test_page(iframe, inline):
             return inline(page_data)
 
     return get_test_page
+
+
+@pytest.fixture
+def test_origin(url):
+    return url("")
+
+
+@pytest.fixture
+def test_alt_origin(url):
+    return url("", domain="alt")
+
+
+@pytest.fixture
+def test_page(inline):
+    return inline("<div>foo</div>")
+
+
+@pytest.fixture
+def test_page2(inline):
+    return inline("<div>bar</div>")
+
+
+@pytest.fixture
+def test_page_cross_origin(inline):
+    return inline("<div>bar</div>", domain="alt")
+
+
+@pytest.fixture
+def test_page_multiple_frames(inline, test_page, test_page2):
+    return inline(
+        f"<iframe src='{test_page}'></iframe><iframe src='{test_page2}'></iframe>"
+    )
+
+
+@pytest.fixture
+def test_page_nested_frames(inline, test_page_same_origin_frame):
+    return inline(f"<iframe src='{test_page_same_origin_frame}'></iframe>")
+
+
+@pytest.fixture
+def test_page_cross_origin_frame(inline, test_page_cross_origin):
+    return inline(f"<iframe src='{test_page_cross_origin}'></iframe>")
+
+
+@pytest.fixture
+def test_page_same_origin_frame(inline, test_page):
+    return inline(f"<iframe src='{test_page}'></iframe>")
 
 
 @pytest.fixture

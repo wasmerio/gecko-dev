@@ -15,6 +15,7 @@ import {
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
   SearchSuggestionController:
     "resource://gre/modules/SearchSuggestionController.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
@@ -317,13 +318,32 @@ class ProviderSearchSuggestions extends UrlbarProvider {
     }
   }
 
+  onEngagement(isPrivate, state, queryContext, details) {
+    let { result } = details;
+    if (result?.providerName != this.name) {
+      return;
+    }
+
+    if (details.selType == "dismiss" && queryContext.formHistoryName) {
+      lazy.FormHistory.update({
+        op: "remove",
+        fieldname: queryContext.formHistoryName,
+        value: result.payload.suggestion,
+      }).catch(error =>
+        console.error(`Removing form history failed: ${error}`)
+      );
+      queryContext.view.controller.removeResult(result);
+    }
+  }
+
   async _fetchSearchSuggestions(queryContext, engine, searchString, alias) {
     if (!engine) {
       return null;
     }
 
-    this._suggestionsController = new lazy.SearchSuggestionController();
-    this._suggestionsController.formHistoryParam = queryContext.formHistoryName;
+    this._suggestionsController = new lazy.SearchSuggestionController(
+      queryContext.formHistoryName
+    );
 
     // If there's a form history entry that equals the search string, the search
     // suggestions controller will include it, and we'll make a result for it.
@@ -340,6 +360,24 @@ class ProviderSearchSuggestions extends UrlbarProvider {
     this._suggestionsController.maxRemoteResults = allowRemote
       ? queryContext.maxResults + 1
       : 0;
+
+    if (allowRemote && this.#shouldFetchTrending(queryContext)) {
+      if (
+        queryContext.searchMode &&
+        lazy.UrlbarPrefs.get("trending.maxResultsSearchMode") != -1
+      ) {
+        this._suggestionsController.maxRemoteResults = lazy.UrlbarPrefs.get(
+          "trending.maxResultsSearchMode"
+        );
+      } else if (
+        !queryContext.searchMode &&
+        lazy.UrlbarPrefs.get("trending.maxResultsNoSearchMode") != -1
+      ) {
+        this._suggestionsController.maxRemoteResults = lazy.UrlbarPrefs.get(
+          "trending.maxResultsNoSearchMode"
+        );
+      }
+    }
 
     this._suggestionsFetchCompletePromise = this._suggestionsController.fetch(
       searchString,

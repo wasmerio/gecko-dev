@@ -48,6 +48,9 @@ window.addEventListener("message", async (event) => {
       // script-with-cookie-header.py.
       reply(httpCookies);
       break;
+    case "cors fetch":
+      reply(await fetch(event.data.url, {mode: 'cors', credentials: 'include'}).then((resp) => resp.text()));
+      break;
     default:
   }
 });

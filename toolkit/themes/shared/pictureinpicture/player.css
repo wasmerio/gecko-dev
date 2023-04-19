@@ -84,10 +84,28 @@ browser {
 
 .controls-bottom-lower {
   display: grid;
-  grid-template-columns: 16ch auto repeat(3, minmax(16px, 32px)) auto repeat(3, minmax(16px, 32px));
-  grid-template-areas:
-      "timestamp . seekbackward playpause seekforward . audio closedcaption fullscreen";
+  grid-template-columns: repeat(3, 1fr);
   margin: 0 24px;
+}
+
+.start-controls {
+  display: grid;
+  justify-self: start;
+}
+
+.center-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-areas: "seekbackward playpause seekforward";
+  justify-self: center;
+  gap: 8px;
+}
+
+.end-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-areas: "audio closedcaption fullscreen";
+  justify-self: end;
   gap: 8px;
 }
 
@@ -121,7 +139,10 @@ browser {
   background-color: rgba(255, 255, 255, .25);
 }
 
-#controls:is(:hover, [keying], [showing]) .control-button:disabled {
+#controls:is([keying], [showing]) .control-button:disabled,
+/* Only change opacity on hover events for non-fullscreen mode.
+ * Fullscreen mode uses the `showing` attribute instead. */
+body:not(:fullscreen) #controls:hover .control-button:disabled {
   /* Set `fill-opacity` to the desired opacity in addition to full `opacity`
    * to allow having the button's tooltip in full opacity even if the button is disabled. */
   fill-opacity: 0.4;
@@ -141,6 +162,14 @@ browser {
   pointer-events: none;
 }
 
+/* Since #controls is set to LTR, button tooltips would normally appear
+ * as LTR also for RTL locales. To fix this, set the .control-item's ::after
+ * to RTL based on the root directionality.
+ * Because of that, don't set logical properties for the next set of rules. */
+:root:dir(rtl) .control-item::after {
+  direction: rtl;
+}
+
 /* Set the tooltip position for different playback controls */
 
 .tooltip-under-controls:focus-visible::after,
@@ -152,7 +181,7 @@ browser {
 #close:hover::after,
 #unpip[mac="true"]:focus-visible::after,
 #unpip[mac="true"]:hover::after {
-  float: inline-end;
+  float: right;
   transform: translateX(1em);
 }
 
@@ -160,7 +189,7 @@ browser {
 #unpip:hover::after,
 #close[mac="true"]:focus-visible::after,
 #close[mac="true"]:hover::after {
-  float: inline-start;
+  float: left;
   transform: translateX(-1em);
 }
 
@@ -171,19 +200,19 @@ browser {
 
 .inline-end-tooltip:focus-visible::after,
 .inline-end-tooltip:hover::after {
-  float: inline-end;
-  inset-inline-end: -1em;
+  float: right;
+  right: -1em;
 }
 
 .inline-start-tooltip:focus-visible::after,
 .inline-start-tooltip:hover::after {
-  float: inline-start;
-  inset-inline-start: -1em;
+  float: left;
+  left: -1em;
 }
 
 .center-tooltip:focus-visible::after,
 .center-tooltip:hover::after {
-  inset-inline-end: 0.8em;
+  right: 0.8em;
   translate: calc(-50% + var(--player-control-item-half-width));
 }
 
@@ -343,6 +372,11 @@ body:not(:fullscreen) #fullscreen {
   direction: rtl;
 }
 
+.a11y-only {
+  visibility: hidden;
+  position: absolute;
+}
+
 .hide {
   display: none;
 }
@@ -357,11 +391,13 @@ body:not(:fullscreen) #fullscreen {
 }
 
 .box label:not(.switch) {
-  display: flex;
-  align-items: center;
   color: white;
-  padding: 8px;
   font-family: sans-serif;
+}
+
+#subtitles-toggle-label {
+  width: fit-content;
+  padding: 8px;
 }
 
 .panel {
@@ -369,6 +405,19 @@ body:not(:fullscreen) #fullscreen {
   bottom: 40px;
   user-select: none;
   right: 24px;
+}
+
+.panel-fieldset {
+  border: none;
+  margin-top: 8px;
+  padding-inline-start: 0;
+}
+
+.panel-legend {
+  font-family: sans-serif;
+  color: white;
+  margin-top: 8px;
+  padding-inline-start: 0;
 }
 
 .arrow {
@@ -380,22 +429,29 @@ body:not(:fullscreen) #fullscreen {
   position: relative;
 }
 
-.font-size-selection {
-  padding: 8px;
-}
-
 .grey-line {
   width: 100%;
   height: 1px;
   background: #8F8F9D;
 }
 
-.font-size-selection > label {
+.font-size-selection {
+  margin-inline-start: 8px;
+  padding-inline-start: 8px;
+}
+
+.font-size-selection-radio {
+  display: flex;
   width: fit-content;
+  cursor: pointer;
+  padding-block: 8px;
+}
+
+.font-size-selection-radio label {
   cursor: pointer;
 }
 
-.font-size-selection > label > input[type="radio"] {
+.font-size-selection-radio > input[type="radio"] {
   appearance: none;
   width: 16px;
   height: 16px;
@@ -405,7 +461,7 @@ body:not(:fullscreen) #fullscreen {
   margin-inline-end: 6px;
 }
 
-.font-size-selection > label > input[type="radio"]:checked {
+.font-size-selection-radio > input[type="radio"]:checked {
   border: 4px solid #00ddff;
 }
 
@@ -539,34 +595,26 @@ input:checked + .slider::before {
     display: none;
   }
 
-  .controls-bottom-lower {
-    grid-template-columns: 16ch auto repeat(3, minmax(16px, 32px)) auto repeat(2, minmax(16px, 32px));
-    grid-template-areas:
-        "timestamp . seekbackward playpause seekforward . audio fullscreen";
+  .end-controls {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-areas: "audio fullscreen";
   }
 }
 
-@media (width <= 400px) {
-  #fullscreen {
+@media (width <= 440px) {
+  #timestamp {
     display: none;
-  }
-
-  .controls-bottom-lower {
-    grid-template-columns: 16ch repeat(3, minmax(16px, 32px)) auto minmax(16px, 32px);
-    grid-template-areas:
-        "timestamp seekbackward playpause seekforward . audio";
   }
 }
 
 @media (width <= 350px) {
-  #timestamp {
+  #fullscreen {
     display: none;
   }
 
-  .controls-bottom-lower {
-    grid-template-columns: auto repeat(3, minmax(16px, 32px)) auto minmax(16px, 32px);
-    grid-template-areas:
-        ". seekbackward playpause seekforward . audio";
+  .end-controls {
+    grid-template-columns: repeat(1, 1fr);
+    grid-template-areas: "audio";
   }
 }
 
@@ -579,13 +627,21 @@ input:checked + .slider::before {
 @media (width <= 300px) {
   .scrubber-no-drag,
   #seekForward,
-  #seekBackward {
+  #seekBackward,
+  .start-controls {
     display: none;
   }
 
   .controls-bottom-lower {
-    grid-template-columns: auto minmax(16px, 32px) auto minmax(16px, 32px) auto;
-    grid-template-areas:
-        ". playpause . audio .";
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .center-controls {
+    grid-template-columns: repeat(1, 1fr);
+    grid-template-areas: "playpause";
+  }
+
+  .end-controls {
+    justify-self: center;
   }
 }

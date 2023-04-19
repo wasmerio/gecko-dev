@@ -400,7 +400,7 @@ identity-clear-site-data =
 identity-connection-not-secure-security-view = You are not securely connected to this site.
 identity-connection-verified = You are securely connected to this site.
 identity-ev-owner-label = Certificate issued to:
-identity-description-custom-root = Mozilla does not recognize this certificate issuer. It may have been added from your operating system or by an administrator. <label data-l10n-name="link">Learn More</label>
+identity-description-custom-root2 = Mozilla does not recognize this certificate issuer. It may have been added from your operating system or by an administrator.
 identity-remove-cert-exception =
     .label = Remove Exception
     .accesskey = R
@@ -408,14 +408,12 @@ identity-description-insecure = Your connection to this site is not private. Inf
 identity-description-insecure-login-forms = The login information you enter on this page is not secure and could be compromised.
 identity-description-weak-cipher-intro = Your connection to this website uses weak encryption and is not private.
 identity-description-weak-cipher-risk = Other people can view your information or modify the website’s behavior.
-identity-description-active-blocked = { -brand-short-name } has blocked parts of this page that are not secure. <label data-l10n-name="link">Learn More</label>
+identity-description-active-blocked2 = { -brand-short-name } has blocked parts of this page that are not secure.
 identity-description-passive-loaded = Your connection is not private and information you share with the site could be viewed by others.
-identity-description-passive-loaded-insecure = This website contains content that is not secure (such as images). <label data-l10n-name="link">Learn More</label>
-identity-description-passive-loaded-mixed = Although { -brand-short-name } has blocked some content, there is still content on the page that is not secure (such as images). <label data-l10n-name="link">Learn More</label>
+identity-description-passive-loaded-insecure2 = This website contains content that is not secure (such as images).
+identity-description-passive-loaded-mixed2 = Although { -brand-short-name } has blocked some content, there is still content on the page that is not secure (such as images).
 identity-description-active-loaded = This website contains content that is not secure (such as scripts) and your connection to it is not private.
 identity-description-active-loaded-insecure = Information you share with this site could be viewed by others (like passwords, messages, credit cards, etc.).
-identity-learn-more =
-    .value = Learn More
 identity-disable-mixed-content-blocking =
     .label = Disable protection for now
     .accesskey = D
@@ -660,6 +658,16 @@ reader-view-enter-button =
 # This should match menu-view-close-readerview in menubar.ftl
 reader-view-close-button =
     .aria-label = Close Reader View
+
+## Picture-in-Picture urlbar button
+## Variables:
+##   $shortcut (String) - Keyboard shortcut to execute the command.
+
+picture-in-picture-urlbar-button-open =
+ .tooltiptext = Open Picture-in-Picture ({ $shortcut })
+
+picture-in-picture-urlbar-button-close =
+ .tooltiptext = Close Picture-in-Picture ({ $shortcut })
 
 ## Full Screen and Pointer Lock UI
 
@@ -971,3 +979,7 @@ firefox-relay-offer-how-we-integrate = By continuing, you’ll be able to genera
 #  $sitename (String): name of the site where user enters their Relay mask
 #  $useremail (String): user email that will receive messages
 firefox-relay-offer-what-relay-does = We’ll forward all emails from <strong>{ $sitename }</strong> to <strong>{ $useremail }</strong>.
+
+## Popup Notification
+
+popup-notification-xpinstall-prompt-learn-more = Learn more about installing add-ons safely

@@ -2,9 +2,6 @@
 
 const ExecutionArray = ['sync', 'async'];
 
-// https://webmachinelearning.github.io/webnn/#enumdef-mldevicetype
-const DeviceTypeArray = ['cpu', 'gpu'];
-
 // https://webmachinelearning.github.io/webnn/#enumdef-mloperandtype
 const TypedArrayDict = {
   float32: Float32Array,
@@ -272,10 +269,12 @@ const PrecisionMetrics = {
   gemm: {ULP: {float32: getGemmPrecisionTolerance, float16: getGemmPrecisionTolerance}},
   leakyRelu: {ULP: {float32: 1, float16: 1}},
   matmul: {ULP: {float32: getMatmulPrecisionTolerance, float16: getMatmulPrecisionTolerance}},
+  pad: {ULP: {float32: 0, float16: 0}},
   // Begin Pooling operations
   averagePool2d: {ULP: {float32: getAveragePool2dPrecisionTolerance, float16: getAveragePool2dPrecisionTolerance}},
   maxPool2d: {ULP: {float32: 0, float16: 0}},
   // End Pooling operations
+  prelu: {ULP: {float32: 1, float16: 1}},
   // Begin Reduction operations
   reduceMax: {ULP: {float32: 0, float16: 0}},
   reduceMean: {ULP: {float32: getReductionPrecisionTolerance, float16: getReductionPrecisionTolerance}},
@@ -604,33 +603,29 @@ const testWebNNOperation = (operationName, buildFunc) => {
       // test sync
       operationNameArray.forEach((subOperationName) => {
         const tests = loadTests(subOperationName);
-        DeviceTypeArray.forEach(deviceType => {
-          setup(() => {
-            context = navigator.ml.createContextSync({deviceType});
-            builder = new MLGraphBuilder(context);
-          });
-          for (const subTest of tests) {
-            test(() => {
-              runSync(subOperationName, context, builder, subTest, buildFunc);
-            }, `${subTest.name} / ${deviceType} / ${executionType}`);
-          }
+        setup(() => {
+          context = navigator.ml.createContextSync();
+          builder = new MLGraphBuilder(context);
         });
+        for (const subTest of tests) {
+          test(() => {
+            runSync(subOperationName, context, builder, subTest, buildFunc);
+          }, `${subTest.name} / ${executionType}`);
+        }
       });
     } else {
       // test async
       operationNameArray.forEach((subOperationName) => {
         const tests = loadTests(subOperationName);
-        DeviceTypeArray.forEach(deviceType => {
-          promise_setup(async () => {
-            context = await navigator.ml.createContext({deviceType});
-            builder = new MLGraphBuilder(context);
-          });
-          for (const subTest of tests) {
-            promise_test(async () => {
-              await run(subOperationName, context, builder, subTest, buildFunc);
-            }, `${subTest.name} / ${deviceType} / ${executionType}`);
-          }
+        promise_setup(async () => {
+          context = await navigator.ml.createContext();
+          builder = new MLGraphBuilder(context);
         });
+        for (const subTest of tests) {
+          promise_test(async () => {
+            await run(subOperationName, context, builder, subTest, buildFunc);
+          }, `${subTest.name} / ${executionType}`);
+        }
       });
     }
   });

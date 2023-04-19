@@ -16,10 +16,24 @@ import {
 const TRANSITION_OUT_TIME = 1000;
 
 export const MultiStageAboutWelcome = props => {
-  let { screens } = props;
+  let { defaultScreens } = props;
+  const [screens, setScreens] = useState(defaultScreens);
 
   const [index, setScreenIndex] = useState(props.startScreen);
   const [previousOrder, setPreviousOrder] = useState(props.startScreen - 1);
+
+  useEffect(() => {
+    (async () => {
+      // Evaluate targeting and update screens on load of about:welcome
+      let filteredScreens = await window.AWEvaluateScreenTargeting(
+        defaultScreens
+      );
+      if (filteredScreens) {
+        setScreens(filteredScreens);
+      }
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const screenInitials = screens
       .map(({ id }) => id?.split("_")[1]?.[0])
@@ -147,7 +161,9 @@ export const MultiStageAboutWelcome = props => {
     setScreenIndex
   );
 
-  screens = languageFilteredScreens;
+  useEffect(() => {
+    setScreens(languageFilteredScreens);
+  }, [languageFilteredScreens]);
 
   return (
     <React.Fragment>
@@ -185,6 +201,8 @@ export const MultiStageAboutWelcome = props => {
               autoAdvance={screen.auto_advance}
               negotiatedLanguage={negotiatedLanguage}
               langPackInstallPhase={langPackInstallPhase}
+              defaultScreens={defaultScreens}
+              setScreens={setScreens}
             />
           ) : null;
         })}
@@ -330,13 +348,10 @@ export class WelcomeScreen extends React.PureComponent {
     } else if (action.type) {
       AboutWelcomeUtils.handleUserAction(action);
       // Wait until migration closes to complete the action
-      if (
-        action.type === "SHOW_MIGRATION_WIZARD" ||
-        (action.type === "MULTI_ACTION" &&
-          action?.data?.actions.find(
-            subAction => subAction.type === "SHOW_MIGRATION_WIZARD"
-          ))
-      ) {
+      const hasMigrate = a =>
+        a.type === "SHOW_MIGRATION_WIZARD" ||
+        (a.type === "MULTI_ACTION" && a.data?.actions?.some(hasMigrate));
+      if (hasMigrate(action)) {
         await window.AWWaitForMigrationClose();
         AboutWelcomeUtils.sendActionTelemetry(props.messageId, "migrate_close");
       }
@@ -357,6 +372,13 @@ export class WelcomeScreen extends React.PureComponent {
     // so that it can be reverted to in the event that the user navigates away from the screen
     if (action.persistActiveTheme) {
       this.props.setInitialTheme(this.props.activeTheme);
+    }
+
+    // Set screens based on dynamic targeting evaluations
+    if (action.isDynamic) {
+      props.setScreens(
+        await window.AWEvaluateScreenTargeting(props.defaultScreens)
+      );
     }
 
     if (action.navigate) {

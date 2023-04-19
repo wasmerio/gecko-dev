@@ -14,8 +14,14 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserTestUtils: "resource://testing-common/BrowserTestUtils.sys.mjs",
+  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
+  ExperimentFakes: "resource://testing-common/NimbusTestUtils.sys.mjs",
+  ExperimentManager: "resource://nimbus/lib/ExperimentManager.sys.mjs",
+
   FormHistoryTestUtils:
     "resource://testing-common/FormHistoryTestUtils.sys.mjs",
+
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   TestUtils: "resource://testing-common/TestUtils.sys.mjs",
   UrlbarController: "resource:///modules/UrlbarController.sys.mjs",
@@ -28,10 +34,6 @@ XPCOMUtils.defineLazyModuleGetters(lazy, {
   AddonTestUtils: "resource://testing-common/AddonTestUtils.jsm",
   BrowserUIUtils: "resource:///modules/BrowserUIUtils.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-  ExperimentAPI: "resource://nimbus/ExperimentAPI.jsm",
-  ExperimentFakes: "resource://testing-common/NimbusTestUtils.jsm",
-  ExperimentManager: "resource://nimbus/lib/ExperimentManager.jsm",
-  NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
 });
 
 export var UrlbarTestUtils = {
@@ -116,7 +118,7 @@ export var UrlbarTestUtils = {
     window,
     value,
     waitForFocus,
-    fireInputEvent = false,
+    fireInputEvent = true,
     selectionStart = -1,
     selectionEnd = -1,
   } = {}) {
@@ -1050,6 +1052,22 @@ export var UrlbarTestUtils = {
     });
 
     return doCleanup;
+  },
+
+  /**
+   * Simulate that user clicks URLBar and inputs text into it.
+   *
+   * @param {object} win
+   *   The browser window containing target gURLBar.
+   * @param {string} text
+   *   The text to be input.
+   */
+  async inputIntoURLBar(win, text) {
+    this.EventUtils.synthesizeMouseAtCenter(win.gURLBar.inputField, {}, win);
+    await lazy.BrowserTestUtils.waitForCondition(
+      () => win.document.activeElement === win.gURLBar.inputField
+    );
+    this.EventUtils.sendString(text, win);
   },
 };
 

@@ -25,8 +25,7 @@ const actorModuleURI =
 const subframeURI =
   getRootDirectory(gTestPath).replace(
     "chrome://mochitests/content",
-    // eslint-disable-next-line @microsoft/sdl/no-insecure-url
-    "http://example.com"
+    "https://example.com"
   ) + "file_empty.html";
 
 // Set this to true only for debugging purpose; it makes the output noisy.
@@ -65,7 +64,7 @@ const intermittently_loaded_scripts = {
     "resource://gre/modules/nsAsyncShutdown.sys.mjs",
 
     // Cookie banner handling.
-    "resource://gre/actors/CookieBannerChild.jsm",
+    "resource://gre/actors/CookieBannerChild.sys.mjs",
     "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
 
     // Test related

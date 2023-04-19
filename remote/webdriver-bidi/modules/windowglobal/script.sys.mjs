@@ -12,20 +12,22 @@ ChromeUtils.defineESModuleGetters(lazy, {
   getFramesFromStack: "chrome://remote/content/shared/Stack.sys.mjs",
   isChromeFrame: "chrome://remote/content/shared/Stack.sys.mjs",
   serialize: "chrome://remote/content/webdriver-bidi/RemoteValue.sys.mjs",
+  setDefaultSerializationOptions:
+    "chrome://remote/content/webdriver-bidi/RemoteValue.sys.mjs",
   stringify: "chrome://remote/content/webdriver-bidi/RemoteValue.sys.mjs",
   WindowRealm: "chrome://remote/content/webdriver-bidi/Realm.sys.mjs",
 });
 
 /**
  * @typedef {string} EvaluationStatus
- **/
+ */
 
 /**
  * Enum of possible evaluation states.
  *
  * @readonly
  * @enum {EvaluationStatus}
- **/
+ */
 const EvaluationStatus = {
   Normal: "normal",
   Throw: "throw",
@@ -76,13 +78,7 @@ class ScriptModule extends Module {
     }
   }
 
-  #buildExceptionDetails(
-    exception,
-    stack,
-    realm,
-    resultOwnership,
-    serializeOptions
-  ) {
+  #buildExceptionDetails(exception, stack, realm, resultOwnership, options) {
     exception = this.#toRawObject(exception);
     const frames = lazy.getFramesFromStack(stack) || [];
 
@@ -104,11 +100,11 @@ class ScriptModule extends Module {
       columnNumber: stack.column - 1,
       exception: lazy.serialize(
         exception,
-        1,
+        lazy.setDefaultSerializationOptions(),
         resultOwnership,
         new Map(),
         realm,
-        serializeOptions
+        options
       ),
       lineNumber: stack.line - 1,
       stackTrace: { callFrames },
@@ -121,7 +117,8 @@ class ScriptModule extends Module {
     realm,
     awaitPromise,
     resultOwnership,
-    serializeOptions
+    serializationOptions,
+    options
   ) {
     let evaluationStatus, exception, result, stack;
 
@@ -163,11 +160,11 @@ class ScriptModule extends Module {
           evaluationStatus,
           result: lazy.serialize(
             this.#toRawObject(result),
-            1,
+            serializationOptions,
             resultOwnership,
             new Map(),
             realm,
-            serializeOptions
+            options
           ),
           realmId: realm.id,
         };
@@ -179,7 +176,7 @@ class ScriptModule extends Module {
             stack,
             realm,
             resultOwnership,
-            serializeOptions
+            options
           ),
           realmId: realm.id,
         };
@@ -288,24 +285,27 @@ class ScriptModule extends Module {
   /**
    * Call a function in the current window global.
    *
-   * @param {Object} options
-   * @param {boolean} awaitPromise
+   * @param {object} options
+   * @param {boolean} options.awaitPromise
    *     Determines if the command should wait for the return value of the
    *     expression to resolve, if this return value is a Promise.
-   * @param {Array<RemoteValue>=} commandArguments
+   * @param {Array<RemoteValue>=} options.commandArguments
    *     The arguments to pass to the function call.
-   * @param {string} functionDeclaration
+   * @param {string} options.functionDeclaration
    *     The body of the function to call.
-   * @param {string=} realmId
+   * @param {string=} options.realmId
    *     The id of the realm.
-   * @param {OwnershipModel} resultOwnership
+   * @param {OwnershipModel} options.resultOwnership
    *     The ownership model to use for the results of this evaluation.
-   * @param {string=} sandbox
+   * @param {string=} options.sandbox
    *     The name of the sandbox.
-   * @param {RemoteValue=} thisParameter
+   * @param {SerializationOptions=} options.serializationOptions
+   *     An object which holds the information of how the result of evaluation
+   *     in case of ECMAScript objects should be serialized.
+   * @param {RemoteValue=} options.thisParameter
    *     The value of the this keyword for the function call.
    *
-   * @return {Object}
+   * @returns {object}
    *     - evaluationStatus {EvaluationStatus} One of "normal", "throw".
    *     - exceptionDetails {ExceptionDetails=} the details of the exception if
    *     the evaluation status was "throw".
@@ -320,6 +320,7 @@ class ScriptModule extends Module {
       realmId = null,
       resultOwnership,
       sandbox: sandboxName = null,
+      serializationOptions,
       thisParameter = null,
     } = options;
 
@@ -344,21 +345,28 @@ class ScriptModule extends Module {
       deserializedThis
     );
 
-    return this.#buildReturnValue(rv, realm, awaitPromise, resultOwnership, {
-      nodeCache,
-    });
+    return this.#buildReturnValue(
+      rv,
+      realm,
+      awaitPromise,
+      resultOwnership,
+      serializationOptions,
+      {
+        nodeCache,
+      }
+    );
   }
 
   /**
    * Delete the provided handles from the realm corresponding to the provided
    * sandbox name.
    *
-   * @param {Object=} options
-   * @param {Array<string>} handles
+   * @param {object=} options
+   * @param {Array<string>} options.handles
    *     Array of handle ids to disown.
-   * @param {string=} realmId
+   * @param {string=} options.realmId
    *     The id of the realm.
-   * @param {string=} sandbox
+   * @param {string=} options.sandbox
    *     The name of the sandbox.
    */
   disownHandles(options) {
@@ -372,20 +380,20 @@ class ScriptModule extends Module {
   /**
    * Evaluate a provided expression in the current window global.
    *
-   * @param {Object} options
-   * @param {boolean} awaitPromise
+   * @param {object} options
+   * @param {boolean} options.awaitPromise
    *     Determines if the command should wait for the return value of the
    *     expression to resolve, if this return value is a Promise.
-   * @param {string} expression
+   * @param {string} options.expression
    *     The expression to evaluate.
-   * @param {string=} realmId
+   * @param {string=} options.realmId
    *     The id of the realm.
-   * @param {OwnershipModel} resultOwnership
+   * @param {OwnershipModel} options.resultOwnership
    *     The ownership model to use for the results of this evaluation.
-   * @param {string=} sandbox
+   * @param {string=} options.sandbox
    *     The name of the sandbox.
    *
-   * @return {Object}
+   * @returns {object}
    *     - evaluationStatus {EvaluationStatus} One of "normal", "throw".
    *     - exceptionDetails {ExceptionDetails=} the details of the exception if
    *     the evaluation status was "throw".
@@ -399,6 +407,7 @@ class ScriptModule extends Module {
       realmId = null,
       resultOwnership,
       sandbox: sandboxName = null,
+      serializationOptions,
     } = options;
 
     const realm = this.#getRealm(realmId, sandboxName);
@@ -406,15 +415,22 @@ class ScriptModule extends Module {
 
     const rv = realm.executeInGlobal(expression);
 
-    return this.#buildReturnValue(rv, realm, awaitPromise, resultOwnership, {
-      nodeCache,
-    });
+    return this.#buildReturnValue(
+      rv,
+      realm,
+      awaitPromise,
+      resultOwnership,
+      serializationOptions,
+      {
+        nodeCache,
+      }
+    );
   }
 
   /**
    * Get realms for the current window global.
    *
-   * @return {Array<Object>}
+   * @returns {Array<object>}
    *     - context {BrowsingContext} The browsing context, associated with the realm.
    *     - id {string} The realm unique identifier.
    *     - origin {string} The serialization of an origin.

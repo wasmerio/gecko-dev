@@ -18,6 +18,7 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/SpinEventLoopUntil.h"
+#include "MediaConduitInterface.h"
 #include "MediaPipeline.h"
 #include "MediaPipelineFilter.h"
 #include "MediaTrackGraph.h"
@@ -134,9 +135,8 @@ class FakeAudioTrack : public ProcessedMediaTrack {
 
 template <typename Function>
 void RunOnSts(Function&& aFunction) {
-  MOZ_ALWAYS_SUCCEEDS(test_utils->sts_target()->Dispatch(
-      NS_NewRunnableFunction(__func__, [&] { aFunction(); }),
-      nsISerialEventTarget::DISPATCH_SYNC));
+  MOZ_ALWAYS_SUCCEEDS(test_utils->SyncDispatchToSTS(
+      NS_NewRunnableFunction(__func__, [&] { aFunction(); })));
 }
 
 class LoopbackTransport : public MediaTransportHandler {
@@ -305,9 +305,7 @@ class TestAgent {
       audio_track_ = nullptr;
     }
 
-    test_utils->sts_target()->Dispatch(
-        WrapRunnable(this, &TestAgent::Shutdown_s),
-        nsISerialEventTarget::DISPATCH_SYNC);
+    test_utils->SyncDispatchToSTS(WrapRunnable(this, &TestAgent::Shutdown_s));
   }
 
   uint32_t GetRemoteSSRC() {
@@ -460,9 +458,8 @@ class MediaPipelineTest : public ::testing::Test {
 
   // Setup transport.
   void InitTransports() {
-    test_utils->sts_target()->Dispatch(
-        WrapRunnableNM(&TestAgent::Connect, &p2_, &p1_),
-        nsISerialEventTarget::DISPATCH_SYNC);
+    test_utils->SyncDispatchToSTS(
+        WrapRunnableNM(&TestAgent::Connect, &p2_, &p1_));
   }
 
   // Verify RTP and RTCP

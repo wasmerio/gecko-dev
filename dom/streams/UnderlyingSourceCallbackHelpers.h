@@ -27,6 +27,7 @@ enum class nsresult : uint32_t;
 
 namespace mozilla::dom {
 
+class StrongWorkerRef;
 class BodyStreamHolder;
 class ReadableStreamController;
 class ReadableStream;
@@ -145,7 +146,7 @@ class UnderlyingSourceAlgorithmsWrapper
       JSContext* aCx, const Optional<JS::Handle<JS::Value>>& aReason,
       ErrorResult& aRv) final;
 
-  virtual already_AddRefed<Promise> PullCallbackImpl(
+  MOZ_CAN_RUN_SCRIPT virtual already_AddRefed<Promise> PullCallbackImpl(
       JSContext* aCx, ReadableStreamController& aController, ErrorResult& aRv) {
     // pullAlgorithm is optional, return null by default
     return nullptr;
@@ -159,6 +160,48 @@ class UnderlyingSourceAlgorithmsWrapper
   }
 };
 
+class InputToReadableStreamAlgorithms;
+
+// This class exists to isolate InputToReadableStreamAlgorithms from the
+// nsIAsyncInputStream.  If we call AsyncWait(this,...), it holds a
+// reference to 'this' which can't be cc'd, and we can leak the stream,
+// causing a Worker to assert with globalScopeAlive.  By isolating
+// ourselves from the inputstream, we can safely be CC'd if needed and
+// will inform the inputstream to shut down.
+class InputStreamHolder final : public nsIInputStreamCallback {
+ public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSIINPUTSTREAMCALLBACK
+
+  InputStreamHolder(JSContext* aCx, InputToReadableStreamAlgorithms* aCallback,
+                    nsIAsyncInputStream* aInput);
+
+  // This MUST be called before we're destroyed
+  void Shutdown();
+
+  // These just proxy the calls to the nsIAsyncInputStream
+  nsresult AsyncWait(uint32_t aFlags, uint32_t aRequestedCount,
+                     nsIEventTarget* aEventTarget);
+  nsresult Available(uint64_t* aSize) { return mInput->Available(aSize); }
+  nsresult Read(char* aBuffer, uint32_t aLength, uint32_t* aWritten) {
+    return mInput->Read(aBuffer, aLength, aWritten);
+  }
+  nsresult CloseWithStatus(nsresult aStatus) {
+    return mInput->CloseWithStatus(aStatus);
+  }
+
+ private:
+  ~InputStreamHolder();
+
+  // Purposely rawptr to avoid cycles.  Must be cleared with Shutdown() before
+  // destruction
+  InputToReadableStreamAlgorithms* mCallback;
+  // To ensure the worker sticks around
+  RefPtr<StrongWorkerRef> mAsyncWaitWorkerRef;
+  RefPtr<StrongWorkerRef> mWorkerRef;
+  nsCOMPtr<nsIAsyncInputStream> mInput;
+};
+
 class InputToReadableStreamAlgorithms final
     : public UnderlyingSourceAlgorithmsWrapper,
       public nsIInputStreamCallback {
@@ -167,11 +210,10 @@ class InputToReadableStreamAlgorithms final
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(InputToReadableStreamAlgorithms,
                                            UnderlyingSourceAlgorithmsWrapper)
 
-  InputToReadableStreamAlgorithms(nsIAsyncInputStream* aInput,
+  InputToReadableStreamAlgorithms(JSContext* aCx, nsIAsyncInputStream* aInput,
                                   ReadableStream* aStream)
-      : mState(eInitializing),
-        mOwningEventTarget(GetCurrentSerialEventTarget()),
-        mInput(aInput),
+      : mOwningEventTarget(GetCurrentSerialEventTarget()),
+        mInput(new InputStreamHolder(aCx, this, aInput)),
         mStream(aStream) {}
 
   // Streams algorithms
@@ -183,7 +225,11 @@ class InputToReadableStreamAlgorithms final
   void ReleaseObjects() override;
 
  private:
-  ~InputToReadableStreamAlgorithms() override = default;
+  ~InputToReadableStreamAlgorithms() {
+    if (mInput) {
+      mInput->Shutdown();
+    }
+  }
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY void CloseAndReleaseObjects(
       JSContext* aCx, ReadableStream* aStream);
@@ -200,34 +246,16 @@ class InputToReadableStreamAlgorithms final
 
   // Common methods
 
-  enum State {
-    // This is the beginning state before any reading operation.
-    eInitializing,
-
-    // RequestDataCallback has not been called yet. We haven't started to read
-    // data from the stream yet.
-    eWaiting,
-
-    // We are reading data in a separate I/O thread.
-    eReading,
-
-    // We are ready to write something in the JS Buffer.
-    eWriting,
-
-    // After a writing, we want to check if the stream is closed. After the
-    // check, we go back to eWaiting. If a reading request happens in the
-    // meantime, we move to eReading state.
-    eChecking,
-
-    // Operation completed.
-    eClosed,
-  };
-
-  State mState;
+  bool IsClosed() { return !mInput; }
 
   nsCOMPtr<nsIEventTarget> mOwningEventTarget;
 
-  nsCOMPtr<nsIAsyncInputStream> mInput;
+  // This promise is created by PullCallback and resolved when
+  // OnInputStreamReady succeeds. No need to try hard to settle it though, see
+  // also ReleaseObjects() for the reason.
+  RefPtr<Promise> mPullPromise;
+
+  RefPtr<InputStreamHolder> mInput;
   RefPtr<ReadableStream> mStream;
 };
 

@@ -124,15 +124,14 @@ xpcAccessibleHyperText::GetCharacterAtOffset(int32_t aOffset,
 
   if (!mIntl) return NS_ERROR_FAILURE;
 
-  if (mIntl->IsLocal()) {
-    *aCharacter = IntlLocal()->CharAt(aOffset);
-  } else {
 #if defined(XP_WIN)
+  if (mIntl->IsRemote() &&
+      !StaticPrefs::accessibility_cache_enabled_AtStartup()) {
     return NS_ERROR_NOT_IMPLEMENTED;
-#else
-    *aCharacter = mIntl->AsRemote()->CharAt(aOffset);
-#endif
   }
+#endif
+
+  *aCharacter = Intl()->CharAt(aOffset);
   return NS_OK;
 }
 
@@ -389,11 +388,7 @@ xpcAccessibleHyperText::ScrollSubstringTo(int32_t aStartOffset,
                                           uint32_t aScrollType) {
   if (!mIntl) return NS_ERROR_FAILURE;
 
-  if (mIntl->IsLocal()) {
-    IntlLocal()->ScrollSubstringTo(aStartOffset, aEndOffset, aScrollType);
-  } else {
-    mIntl->AsRemote()->ScrollSubstringTo(aStartOffset, aEndOffset, aScrollType);
-  }
+  Intl()->ScrollSubstringTo(aStartOffset, aEndOffset, aScrollType);
   return NS_OK;
 }
 

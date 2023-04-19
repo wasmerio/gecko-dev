@@ -6,15 +6,16 @@
 
 #include "TimelineManager.h"
 
-#include "mozilla/AnimationUtils.h"
 #include "mozilla/ElementAnimationData.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScrollTimeline.h"
+#include "mozilla/dom/ViewTimeline.h"
 #include "nsPresContext.h"
 
 namespace mozilla {
 using dom::Element;
 using dom::ScrollTimeline;
+using dom::ViewTimeline;
 
 template <typename TimelineType>
 void TryDestroyTimeline(Element* aElement, PseudoStyleType aPseudoType) {
@@ -55,7 +56,14 @@ void TimelineManager::UpdateTimelines(Element* aElement,
       break;
 
     case ProgressTimelineType::View:
-      // TODO: Bug 1737920. Support view-timeline.
+      if (shouldDestroyTimelines) {
+        TryDestroyTimeline<ViewTimeline>(aElement, aPseudoType);
+        return;
+      }
+      DoUpdateTimelines<StyleViewTimeline, ViewTimeline>(
+          mPresContext, aElement, aPseudoType,
+          aComputedStyle->StyleUIReset()->mViewTimelines,
+          aComputedStyle->StyleUIReset()->mViewTimelineNameCount);
       break;
   }
 }
@@ -88,11 +96,11 @@ static auto BuildTimelines(nsPresContext* aPresContext, Element* aElement,
 
     RefPtr<TimelineType> dest =
         PopExistingTimeline(timeline.GetName(), aCollection);
-    Element* e = AnimationUtils::GetElementForRestyle(aElement, aPseudoType);
     if (dest) {
-      dest->ReplacePropertiesWith(e, timeline);
+      dest->ReplacePropertiesWith(aElement, aPseudoType, timeline);
     } else {
-      dest = TimelineType::MakeNamed(aPresContext->Document(), e, timeline);
+      dest = TimelineType::MakeNamed(aPresContext->Document(), aElement,
+                                     aPseudoType, timeline);
     }
     MOZ_ASSERT(dest);
 
@@ -110,6 +118,13 @@ template <>
 ScrollTimelineCollection& EnsureTimelineCollection<ScrollTimeline>(
     Element& aElement, PseudoStyleType aPseudoType) {
   return aElement.EnsureAnimationData().EnsureScrollTimelineCollection(
+      aElement, aPseudoType);
+}
+
+template <>
+ViewTimelineCollection& EnsureTimelineCollection<ViewTimeline>(
+    Element& aElement, PseudoStyleType aPseudoType) {
+  return aElement.EnsureAnimationData().EnsureViewTimelineCollection(
       aElement, aPseudoType);
 }
 

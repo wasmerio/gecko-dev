@@ -14,7 +14,12 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   Downloader: "resource://services-settings/Attachments.sys.mjs",
+  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   MacAttribution: "resource:///modules/MacAttribution.sys.mjs",
+  SpecialMessageActions:
+    "resource://messaging-system/lib/SpecialMessageActions.sys.mjs",
+  TargetingContext: "resource://messaging-system/targeting/Targeting.sys.mjs",
+  Utils: "resource://services-settings/Utils.sys.mjs",
 });
 
 XPCOMUtils.defineLazyModuleGetters(lazy, {
@@ -35,14 +40,10 @@ XPCOMUtils.defineLazyModuleGetters(lazy, {
     "resource://activity-stream/lib/ASRouterTriggerListeners.jsm",
   KintoHttpClient: "resource://services-common/kinto-http-client.js",
   RemoteL10n: "resource://activity-stream/lib/RemoteL10n.jsm",
-  ExperimentAPI: "resource://nimbus/ExperimentAPI.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
-  SpecialMessageActions:
-    "resource://messaging-system/lib/SpecialMessageActions.jsm",
-  TargetingContext: "resource://messaging-system/targeting/Targeting.jsm",
-  Utils: "resource://services-settings/Utils.jsm",
 });
+
 XPCOMUtils.defineLazyServiceGetters(lazy, {
   BrowserHandler: ["@mozilla.org/browser/clh;1", "nsIBrowserHandler"],
 });
@@ -97,7 +98,7 @@ const JEXL_PROVIDER_CACHE = new Set(["snippets"]);
 
 // To observe the app locale change notification.
 const TOPIC_INTL_LOCALE_CHANGED = "intl:app-locales-changed";
-const TOPIC_EXPERIMENT_FORCE_ENROLLED = "nimbus:force-enroll";
+const TOPIC_EXPERIMENT_ENROLLMENT_CHANGED = "nimbus:enrollments-updated";
 // To observe the pref that controls if ASRouter should use the remote Fluent files for l10n.
 const USE_REMOTE_L10N_PREF =
   "browser.newtabpage.activity-stream.asrouter.useRemoteL10n";
@@ -627,7 +628,7 @@ class _ASRouter {
     this.isUnblockedMessage = this.isUnblockedMessage.bind(this);
     this.unblockAll = this.unblockAll.bind(this);
     this.forceWNPanel = this.forceWNPanel.bind(this);
-    this._onExperimentForceEnrolled = this._onExperimentForceEnrolled.bind(
+    this._onExperimentEnrollmentsUpdated = this._onExperimentEnrollmentsUpdated.bind(
       this
     );
     this.forcePBWindow = this.forcePBWindow.bind(this);
@@ -1046,8 +1047,8 @@ class _ASRouter {
     lazy.SpecialMessageActions.blockMessageById = this.blockMessageById;
     Services.obs.addObserver(this._onLocaleChanged, TOPIC_INTL_LOCALE_CHANGED);
     Services.obs.addObserver(
-      this._onExperimentForceEnrolled,
-      TOPIC_EXPERIMENT_FORCE_ENROLLED
+      this._onExperimentEnrollmentsUpdated,
+      TOPIC_EXPERIMENT_ENROLLMENT_CHANGED
     );
     Services.prefs.addObserver(USE_REMOTE_L10N_PREF, this);
     // sets .initialized to true and resolves .waitForInitialized promise
@@ -1079,8 +1080,8 @@ class _ASRouter {
       TOPIC_INTL_LOCALE_CHANGED
     );
     Services.obs.removeObserver(
-      this._onExperimentForceEnrolled,
-      TOPIC_EXPERIMENT_FORCE_ENROLLED
+      this._onExperimentEnrollmentsUpdated,
+      TOPIC_EXPERIMENT_ENROLLMENT_CHANGED
     );
     Services.prefs.removeObserver(USE_REMOTE_L10N_PREF, this);
     // If we added any CFR recommendations, they need to be removed
@@ -1146,21 +1147,27 @@ class _ASRouter {
   async getTargetingParameters(environment, localContext) {
     // Resolve objects that may contain promises.
     async function resolve(object) {
-      const target = {};
-
-      for (const param of Object.keys(object)) {
-        target[param] = await object[param];
-
-        if (
-          typeof target[param] === "object" &&
-          target[param] !== null &&
-          !(target[param] instanceof Date)
-        ) {
-          target[param] = await resolve(target[param]);
+      if (typeof object === "object" && object !== null) {
+        if (Array.isArray(object)) {
+          return Promise.all(object.map(async item => resolve(await item)));
         }
+
+        if (object instanceof Date) {
+          return object;
+        }
+
+        const target = {};
+        const promises = Object.entries(object).map(async ([key, value]) => [
+          key,
+          await resolve(await value),
+        ]);
+        for (const [key, value] of await Promise.all(promises)) {
+          target[key] = value;
+        }
+        return target;
       }
 
-      return target;
+      return object;
     }
 
     const targetingParameters = {
@@ -1720,17 +1727,6 @@ class _ASRouter {
     }
   }
 
-  // Ensure we switch to the Onboarding message after RTAMO addon was installed
-  _updateOnboardingState() {
-    let addonInstallObs = (subject, topic) => {
-      Services.obs.removeObserver(
-        addonInstallObs,
-        "webextension-install-notify"
-      );
-    };
-    Services.obs.addObserver(addonInstallObs, "webextension-install-notify");
-  }
-
   _loadSnippetsAllowHosts() {
     let additionalHosts = [];
     const allowPrefValue = Services.prefs.getStringPref(
@@ -2029,14 +2025,13 @@ class _ASRouter {
     await lazy.ToolbarPanelHub._hideToolbarButton(win);
   }
 
-  async _onExperimentForceEnrolled(subject, topic, slug) {
+  async _onExperimentEnrollmentsUpdated() {
     const experimentProvider = this.state.providers.find(
       p => p.id === "messaging-experiments"
     );
-    if (!experimentProvider.enabled) {
+    if (!experimentProvider?.enabled) {
       return;
     }
-
     await this.loadMessagesFromAllProviders([experimentProvider]);
   }
 

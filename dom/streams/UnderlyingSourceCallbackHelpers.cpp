@@ -9,6 +9,9 @@
 #include "mozilla/dom/ReadableStreamDefaultController.h"
 #include "mozilla/dom/UnderlyingSourceCallbackHelpers.h"
 #include "mozilla/dom/UnderlyingSourceBinding.h"
+#include "mozilla/dom/WorkerCommon.h"
+#include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/WorkerRunnable.h"
 #include "js/experimental/TypedData.h"
 
 namespace mozilla::dom {
@@ -128,7 +131,9 @@ already_AddRefed<Promise> UnderlyingSourceAlgorithmsWrapper::PullCallback(
   nsCOMPtr<nsIGlobalObject> global = aController.GetParentObject();
   return PromisifyAlgorithm(
       global,
-      [&](ErrorResult& aRv) { return PullCallbackImpl(aCx, aController, aRv); },
+      [&](ErrorResult& aRv) MOZ_CAN_RUN_SCRIPT_FOR_DEFINITION {
+        return PullCallbackImpl(aCx, aController, aRv);
+      },
       aRv);
 }
 
@@ -146,10 +151,67 @@ already_AddRefed<Promise> UnderlyingSourceAlgorithmsWrapper::CancelCallback(
       aRv);
 }
 
+NS_IMPL_ISUPPORTS(InputStreamHolder, nsIInputStreamCallback)
+
+InputStreamHolder::InputStreamHolder(JSContext* aCx,
+                                     InputToReadableStreamAlgorithms* aCallback,
+                                     nsIAsyncInputStream* aInput)
+    : mCallback(aCallback), mInput(aInput) {
+  if (!NS_IsMainThread()) {
+    // We're in a worker
+    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+    MOZ_ASSERT(workerPrivate);
+
+    workerPrivate->AssertIsOnWorkerThread();
+
+    // Note, this will create a ref-cycle between the holder and the stream.
+    // The cycle is broken when the stream is closed or the worker begins
+    // shutting down.
+    mWorkerRef =
+        StrongWorkerRef::Create(workerPrivate, "InputStreamHolder",
+                                [self = RefPtr{this}]() { self->Shutdown(); });
+    if (NS_WARN_IF(!mWorkerRef)) {
+      return;
+    }
+  }
+}
+
+InputStreamHolder::~InputStreamHolder() { MOZ_ASSERT(!mCallback); }
+
+void InputStreamHolder::Shutdown() {
+  if (mCallback) {
+    mCallback = nullptr;
+    mInput->CloseWithStatus(NS_BASE_STREAM_CLOSED);
+    mWorkerRef = nullptr;
+    // If we have an AsyncWait running, we'll get a callback and clear
+    // the mAsyncWaitWorkerRef
+  }
+}
+
+nsresult InputStreamHolder::AsyncWait(uint32_t aFlags, uint32_t aRequestedCount,
+                                      nsIEventTarget* aEventTarget) {
+  nsresult rv = mInput->AsyncWait(this, aFlags, aRequestedCount, aEventTarget);
+  if (NS_SUCCEEDED(rv)) {
+    mAsyncWaitWorkerRef = mWorkerRef;
+  }
+  return rv;
+}
+
+NS_IMETHODIMP InputStreamHolder::OnInputStreamReady(
+    nsIAsyncInputStream* aStream) {
+  mAsyncWaitWorkerRef = nullptr;
+  // We may get called back after ::Shutdown()
+  if (mCallback) {
+    return mCallback->OnInputStreamReady(aStream);
+  }
+  return NS_ERROR_FAILURE;
+}
+
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(
     InputToReadableStreamAlgorithms, UnderlyingSourceAlgorithmsWrapper)
 NS_IMPL_CYCLE_COLLECTION_INHERITED(InputToReadableStreamAlgorithms,
-                                   UnderlyingSourceAlgorithmsWrapper, mStream)
+                                   UnderlyingSourceAlgorithmsWrapper, mStream,
+                                   mOwningEventTarget, mPullPromise)
 
 already_AddRefed<Promise> InputToReadableStreamAlgorithms::PullCallbackImpl(
     JSContext* aCx, ReadableStreamController& aController, ErrorResult& aRv) {
@@ -159,41 +221,20 @@ already_AddRefed<Promise> InputToReadableStreamAlgorithms::PullCallbackImpl(
 
   MOZ_DIAGNOSTIC_ASSERT(stream->Disturbed());
 
-  MOZ_DIAGNOSTIC_ASSERT(mState == eInitializing || mState == eWaiting ||
-                        mState == eChecking || mState == eReading);
-
-  RefPtr<Promise> resolvedWithUndefinedPromise =
-      Promise::CreateResolvedWithUndefined(aController.GetParentObject(), aRv);
-  if (aRv.Failed()) {
-    return nullptr;
-  }
-
-  if (mState == eReading) {
-    // We are already reading data.
-    return resolvedWithUndefinedPromise.forget();
-  }
-
-  if (mState == eChecking) {
-    // If we are looking for more data, there is nothing else we should do:
-    // let's move this checking operation in a reading.
-    MOZ_ASSERT(mInput);
-    mState = eReading;
-
-    return resolvedWithUndefinedPromise.forget();
-  }
-
-  mState = eReading;
+  MOZ_DIAGNOSTIC_ASSERT(!IsClosed());
+  MOZ_ASSERT(!mPullPromise);
+  mPullPromise = Promise::CreateInfallible(aController.GetParentObject());
 
   MOZ_DIAGNOSTIC_ASSERT(mInput);
 
-  nsresult rv = mInput->AsyncWait(this, 0, 0, mOwningEventTarget);
+  nsresult rv = mInput->AsyncWait(0, 0, mOwningEventTarget);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     ErrorPropagation(aCx, stream, rv);
     return nullptr;
   }
 
   // All good.
-  return resolvedWithUndefinedPromise.forget();
+  return do_AddRef(mPullPromise);
 }
 
 NS_IMETHODIMP
@@ -202,7 +243,7 @@ InputToReadableStreamAlgorithms::OnInputStreamReady(
   MOZ_DIAGNOSTIC_ASSERT(aStream);
 
   // Already closed. We have nothing else to do here.
-  if (mState == eClosed) {
+  if (IsClosed()) {
     return NS_OK;
   }
 
@@ -210,17 +251,12 @@ InputToReadableStreamAlgorithms::OnInputStreamReady(
                       "InputToReadableStream data available");
 
   MOZ_DIAGNOSTIC_ASSERT(mInput);
-  MOZ_DIAGNOSTIC_ASSERT(mState == eReading || mState == eChecking);
 
   JSContext* cx = aes.cx();
 
   uint64_t size = 0;
   nsresult rv = mInput->Available(&size);
-  if (NS_SUCCEEDED(rv) && size == 0) {
-    // In theory this should not happen. If size is 0, the stream should be
-    // considered closed.
-    rv = NS_BASE_STREAM_CLOSED;
-  }
+  MOZ_ASSERT_IF(NS_SUCCEEDED(rv), size > 0);
 
   // No warning for stream closed.
   if (rv == NS_BASE_STREAM_CLOSED || NS_WARN_IF(NS_FAILED(rv))) {
@@ -228,13 +264,15 @@ InputToReadableStreamAlgorithms::OnInputStreamReady(
     return NS_OK;
   }
 
-  // This extra checking is completed. Let's wait for the next read request.
-  if (mState == eChecking) {
-    mState = eWaiting;
+  // Not having a promise means we are pinged by stream closure
+  // (WAIT_CLOSURE_ONLY below), but here we still have more data to read. Let's
+  // wait for the next read request in that case.
+  if (!mPullPromise) {
     return NS_OK;
   }
 
-  mState = eWriting;
+  MOZ_DIAGNOSTIC_ASSERT(mPullPromise->State() ==
+                        Promise::PromiseState::Pending);
 
   ErrorResult errorResult;
   EnqueueChunkWithSizeIntoStream(cx, mStream, size, errorResult);
@@ -242,6 +280,20 @@ InputToReadableStreamAlgorithms::OnInputStreamReady(
   if (errorResult.Failed()) {
     ErrorPropagation(cx, mStream, errorResult.StealNSResult());
     return NS_OK;
+  }
+
+  // Enqueuing triggers read request chunk steps which may execute JS, trigger
+  // another OnInputStreamReady, and close the stream. Let's be careful here.
+  //
+  // XXX(krosylight): But it shouldn't happen, nsIAsyncInputStream
+  // implementations should prevent such synchronous reentrance by nullifying
+  // the callback member first before calling it. (Bug 1827418)
+  // That said, it's generally good to be cautious as there's no guarantee that
+  // the interface is implemented in a safest way.
+  MOZ_DIAGNOSTIC_ASSERT(mPullPromise);
+  if (mPullPromise) {
+    mPullPromise->MaybeResolveWithUndefined();
+    mPullPromise = nullptr;
   }
 
   // The previous call can execute JS (even up to running a nested event
@@ -257,8 +309,9 @@ void InputToReadableStreamAlgorithms::WriteIntoReadRequestBuffer(
   MOZ_DIAGNOSTIC_ASSERT(aBuffer);
   MOZ_DIAGNOSTIC_ASSERT(aByteWritten);
   MOZ_DIAGNOSTIC_ASSERT(mInput);
-  MOZ_DIAGNOSTIC_ASSERT(mState == eWriting);
-  mState = eChecking;
+  MOZ_DIAGNOSTIC_ASSERT(!IsClosed());
+  MOZ_DIAGNOSTIC_ASSERT(mPullPromise->State() ==
+                        Promise::PromiseState::Pending);
 
   uint32_t written;
   nsresult rv;
@@ -291,7 +344,10 @@ void InputToReadableStreamAlgorithms::WriteIntoReadRequestBuffer(
     return;
   }
 
-  rv = mInput->AsyncWait(this, 0, 0, mOwningEventTarget);
+  // Subscribe WAIT_CLOSURE_ONLY so that OnInputStreamReady can be called when
+  // mInput is closed.
+  rv = mInput->AsyncWait(nsIAsyncInputStream::WAIT_CLOSURE_ONLY, 0,
+                         mOwningEventTarget);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     ErrorPropagation(aCx, aStream, rv);
     return;
@@ -345,9 +401,8 @@ void InputToReadableStreamAlgorithms::EnqueueChunkWithSizeIntoStream(
 
 void InputToReadableStreamAlgorithms::CloseAndReleaseObjects(
     JSContext* aCx, ReadableStream* aStream) {
-  MOZ_DIAGNOSTIC_ASSERT(mState != eClosed);
+  MOZ_DIAGNOSTIC_ASSERT(!IsClosed());
 
-  mState = eClosed;
   ReleaseObjects();
 
   if (aStream->State() == ReadableStream::ReaderState::Readable) {
@@ -358,14 +413,23 @@ void InputToReadableStreamAlgorithms::CloseAndReleaseObjects(
 }
 
 void InputToReadableStreamAlgorithms::ReleaseObjects() {
-  mInput->CloseWithStatus(NS_BASE_STREAM_CLOSED);
+  if (mInput) {
+    mInput->CloseWithStatus(NS_BASE_STREAM_CLOSED);
+    mInput->Shutdown();
+    mInput = nullptr;
+  }
+
+  // It's okay to leave a potentially unsettled promise as-is as this is only
+  // used to prevent reentrant to PullCallback. CloseNative() or ErrorNative()
+  // will settle the read requests for us.
+  mPullPromise = nullptr;
 }
 
 void InputToReadableStreamAlgorithms::ErrorPropagation(JSContext* aCx,
                                                        ReadableStream* aStream,
                                                        nsresult aError) {
   // Nothing to do.
-  if (mState == eClosed) {
+  if (IsClosed()) {
     return;
   }
 

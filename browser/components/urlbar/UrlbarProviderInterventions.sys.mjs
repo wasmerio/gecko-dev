@@ -12,6 +12,7 @@ import {
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  AppUpdater: "resource://gre/modules/AppUpdater.sys.mjs",
   NLP: "resource://gre/modules/NLP.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   ResetProfile: "resource://gre/modules/ResetProfile.sys.mjs",
@@ -21,7 +22,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 XPCOMUtils.defineLazyModuleGetters(lazy, {
-  AppUpdater: "resource://gre/modules/AppUpdater.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
 });
@@ -688,14 +688,7 @@ class ProviderInterventions extends UrlbarProvider {
     }
   }
 
-  /**
-   * Called when a result from the provider without a URL is picked, but
-   * currently only for tip results.  The provider should handle the pick.
-   *
-   * @param {UrlbarResult} result
-   *   The result that was picked.
-   */
-  pickResult(result) {
+  #pickResult(result) {
     let tip = result.payload.type;
 
     // Do the tip action.
@@ -723,6 +716,11 @@ class ProviderInterventions extends UrlbarProvider {
   }
 
   onEngagement(isPrivate, state, queryContext, details) {
+    let { result } = details;
+    if (result?.providerName == this.name) {
+      this.#pickResult(result);
+    }
+
     if (["engagement", "abandonment"].includes(state)) {
       for (let tip of this.tipsShownInCurrentEngagement) {
         Services.telemetry.keyedScalarAdd("urlbar.tips", `${tip}-shown`, 1);

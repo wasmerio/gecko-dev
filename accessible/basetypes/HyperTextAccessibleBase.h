@@ -100,6 +100,12 @@ class HyperTextAccessibleBase {
   bool CharAt(int32_t aOffset, nsAString& aChar,
               int32_t* aStartOffset = nullptr, int32_t* aEndOffset = nullptr);
 
+  virtual char16_t CharAt(int32_t aOffset) {
+    nsAutoString charAtOffset;
+    CharAt(aOffset, charAtOffset);
+    return charAtOffset.CharAt(0);
+  }
+
   /**
    * Return a rect (in dev pixels) for character at given offset relative
    * given coordinate system.
@@ -226,6 +232,12 @@ class HyperTextAccessibleBase {
   // TODO: annotate this with `MOZ_CAN_RUN_SCRIPT` instead.
   MOZ_CAN_RUN_SCRIPT_BOUNDARY virtual bool RemoveFromSelection(
       int32_t aSelectionNum) = 0;
+
+  /**
+   * Scroll the given text range into view.
+   */
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY virtual void ScrollSubstringTo(
+      int32_t aStartOffset, int32_t aEndOffset, uint32_t aScrollType);
 
  protected:
   virtual const Accessible* Acc() const = 0;

@@ -6,7 +6,9 @@
 const { Preferences } = ChromeUtils.importESModule(
   "resource://gre/modules/Preferences.sys.mjs"
 );
-const { ctypes } = ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+const { ctypes } = ChromeUtils.importESModule(
+  "resource://gre/modules/ctypes.sys.mjs"
+);
 const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 const MAX_NAME_LENGTH = 64;
@@ -154,6 +156,14 @@ add_task(async function setup() {
     libUnicodePDBHandle = ctypes.open(libUnicodePDBFile);
     libNoPDBHandle = ctypes.open(libNoPDBFile);
   }
+
+  // Pretend the untrustedmodules ping has already been sent now to get it out
+  // of the way and avoid confusing the test with our PingServer receiving two
+  // pings during our test.
+  Services.prefs.setIntPref(
+    "app.update.lastUpdateTime.telemetry_untrustedmodules_ping",
+    Math.round(Date.now() / 1000)
+  );
 
   // Force the timer to fire (using a small interval).
   Cc["@mozilla.org/updates/timer-manager;1"]

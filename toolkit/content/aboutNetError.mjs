@@ -165,8 +165,9 @@ function setupAdvancedButton() {
 
     if (!panel.hidden) {
       // send event to trigger telemetry ping
-      var event = new CustomEvent("AboutNetErrorUIExpanded", { bubbles: true });
-      document.dispatchEvent(event);
+      document.dispatchEvent(
+        new CustomEvent("AboutNetErrorUIExpanded", { bubbles: true })
+      );
     }
   }
 
@@ -212,8 +213,7 @@ function initPage() {
   // format: "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/supportPageSlug",
   // so we can extract the support page slug.
   let baseURL = RPMGetFormatURLPref("app.support.baseURL");
-  let location = document.location.href;
-  if (location.startsWith(baseURL)) {
+  if (document.location.href.startsWith(baseURL)) {
     let supportPageSlug = document.location.pathname.split("/").pop();
     RPMSendAsyncMessage("DisplayOfflineSupportPage", {
       supportPageSlug,
@@ -406,11 +406,13 @@ function initPage() {
         });
       });
 
+      let isTrrServerError = true;
       if (RPMIsSiteSpecificTRRError()) {
         // Only show the exclude button if the failure is specific to this
         // domain. If the TRR server is inaccessible we don't want to allow
         // the user to add an exception just for this domain.
         trrExceptionButton.hidden = false;
+        isTrrServerError = false;
       }
       let trrSettingsButton = document.getElementById("trrSettingsButton");
       trrSettingsButton.addEventListener("click", () => {
@@ -448,7 +450,7 @@ function initPage() {
         skipReason == "TRR_NO_ANSWERS" ||
         skipReason == "TRR_NXDOMAIN"
       ) {
-        descriptionTag = "neterror-dns-not-found-trr-unknown-host";
+        descriptionTag = "neterror-dns-not-found-trr-unknown-host2";
       } else if (
         skipReason == "TRR_DECODE_FAILED" ||
         skipReason == "TRR_SERVER_RESPONSE_ERR"
@@ -466,11 +468,20 @@ function initPage() {
       let trrOnlyLearnMoreLink = document.getElementById(
         "trrOnlylearnMoreLink"
       );
-      // This will be replaced at a later point with a link to an offline support page
-      // https://bugzilla.mozilla.org/show_bug.cgi?id=1806257
-      trrOnlyLearnMoreLink.href =
-        RPMGetFormatURLPref("network.trr_ui.skip_reason_learn_more_url") +
-        skipReason.toLowerCase().replaceAll("_", "-");
+      if (isTrrServerError) {
+        // Go to DoH settings page
+        trrOnlyLearnMoreLink.href = "about:preferences#privacy-doh";
+        trrOnlyLearnMoreLink.addEventListener("click", event => {
+          event.preventDefault();
+          RPMSendAsyncMessage("OpenTRRPreferences");
+        });
+      } else {
+        // This will be replaced at a later point with a link to an offline support page
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=1806257
+        trrOnlyLearnMoreLink.href =
+          RPMGetFormatURLPref("network.trr_ui.skip_reason_learn_more_url") +
+          skipReason.toLowerCase().replaceAll("_", "-");
+      }
 
       let div = document.getElementById("trrOnlyContainer");
       div.hidden = false;
@@ -520,6 +531,15 @@ function showNativeFallbackWarning() {
     retryThis(nativeFallbackIgnoreButton);
   });
 
+  let continueThisTimeButton = document.getElementById(
+    "nativeFallbackContinueThisTimeButton"
+  );
+  continueThisTimeButton.addEventListener("click", () => {
+    RPMSetTRRDisabledLoadFlags();
+    document.location.reload();
+  });
+  continueThisTimeButton.hidden = false;
+
   nativeFallbackIgnoreButton.hidden = false;
   let message = document.getElementById("nativeFallbackMessage");
   document.l10n.setAttributes(
@@ -556,12 +576,12 @@ function showNativeFallbackWarning() {
   div.hidden = false;
 }
 /**
- * Builds HTML elements from `parts` and appends them to `parent`.
+ * Builds HTML elements from `parts` and appends them to `parentElement`.
  *
- * @param {HTMLElement} parent
+ * @param {HTMLElement} parentElement
  * @param {Array<["li" | "p" | "span", string, Record<string, string> | undefined]>} parts
  */
-function setNetErrorMessageFromParts(parent, parts) {
+function setNetErrorMessageFromParts(parentElement, parts) {
   let list = null;
 
   for (let [tag, l10nId, l10nArgs] of parts) {
@@ -574,14 +594,14 @@ function setNetErrorMessageFromParts(parent, parts) {
     if (tag === "li") {
       if (!list) {
         list = document.createElement("ul");
-        parent.appendChild(list);
+        parentElement.appendChild(list);
       }
       list.appendChild(elem);
     } else {
       if (list) {
         list = null;
       }
-      parent.appendChild(elem);
+      parentElement.appendChild(elem);
     }
   }
 }
@@ -929,7 +949,7 @@ function copyPEMToClipboard(e) {
 }
 
 async function getFailedCertificatesAsPEMString() {
-  let location = document.location.href;
+  let locationUrl = document.location.href;
   let failedCertInfo = document.getFailedCertSecurityInfo();
   let errorMessage = failedCertInfo.errorMessage;
   let hasHSTS = failedCertInfo.hasHSTS.toString();
@@ -955,7 +975,7 @@ async function getFailedCertificatesAsPEMString() {
   }
 
   let details =
-    location +
+    locationUrl +
     "\r\n\r\n" +
     errorMessage +
     "\r\n\r\n" +
@@ -1408,8 +1428,7 @@ function setTechnicalDetailsOnCertError(
 function setFocus(selector, position = "afterbegin") {
   if (window.top == window) {
     var button = document.querySelector(selector);
-    var parent = button.parentNode;
-    parent.insertAdjacentElement(position, button);
+    button.parentNode.insertAdjacentElement(position, button);
     // It's possible setFocus was called via the DOMContentLoaded event
     // handler and that the button has no frame. Things without a frame cannot
     // be focused. We use a requestAnimationFrame to queue up the focus to occur
@@ -1429,5 +1448,4 @@ for (let button of document.querySelectorAll(".try-again")) {
 initPage();
 
 // Dispatch this event so tests can detect that we finished loading the error page.
-const event = new CustomEvent("AboutNetErrorLoad", { bubbles: true });
-document.dispatchEvent(event);
+document.dispatchEvent(new CustomEvent("AboutNetErrorLoad", { bubbles: true }));

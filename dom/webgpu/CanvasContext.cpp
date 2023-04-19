@@ -46,6 +46,21 @@ JSObject* CanvasContext::WrapObject(JSContext* aCx,
   return dom::GPUCanvasContext_Binding::Wrap(aCx, this, aGivenProto);
 }
 
+// -
+
+void CanvasContext::GetCanvas(
+    dom::OwningHTMLCanvasElementOrOffscreenCanvas& aRetVal) const {
+  if (mCanvasElement) {
+    aRetVal.SetAsHTMLCanvasElement() = mCanvasElement;
+  } else if (mOffscreenCanvas) {
+    aRetVal.SetAsOffscreenCanvas() = mOffscreenCanvas;
+  } else {
+    MOZ_CRASH(
+        "This should only happen briefly during CC Unlink, and no JS should "
+        "happen then.");
+  }
+}
+
 void CanvasContext::Configure(const dom::GPUCanvasConfiguration& aDesc) {
   Unconfigure();
 
@@ -87,10 +102,6 @@ void CanvasContext::Unconfigure() {
   mBridge = nullptr;
   mTexture = nullptr;
   mGfxFormat = gfx::SurfaceFormat::UNKNOWN;
-}
-
-dom::GPUTextureFormat CanvasContext::GetPreferredFormat(Adapter&) const {
-  return dom::GPUTextureFormat::Bgra8unorm;
 }
 
 RefPtr<Texture> CanvasContext::GetCurrentTexture(ErrorResult& aRv) {
@@ -159,17 +170,21 @@ bool CanvasContext::InitializeCanvasRenderer(
   return true;
 }
 
-mozilla::UniquePtr<uint8_t[]> CanvasContext::GetImageBuffer(int32_t* aFormat) {
+mozilla::UniquePtr<uint8_t[]> CanvasContext::GetImageBuffer(
+    int32_t* out_format, gfx::IntSize* out_imageSize) {
+  *out_format = 0;
+  *out_imageSize = {};
+
   gfxAlphaType any;
   RefPtr<gfx::SourceSurface> snapshot = GetSurfaceSnapshot(&any);
   if (!snapshot) {
-    *aFormat = 0;
     return nullptr;
   }
 
   RefPtr<gfx::DataSourceSurface> dataSurface = snapshot->GetDataSurface();
+  *out_imageSize = dataSurface->GetSize();
   return gfxUtils::GetImageBuffer(dataSurface, /* aIsAlphaPremultiplied */ true,
-                                  aFormat);
+                                  &*out_format);
 }
 
 NS_IMETHODIMP CanvasContext::GetInputStream(const char* aMimeType,

@@ -694,6 +694,7 @@ nsresult AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint) {
 void AccessibleCaretManager::OnScrollStart() {
   AC_LOG("%s", __FUNCTION__);
 
+  nsAutoScriptBlocker scriptBlocker;
   AutoRestore<bool> saveAllowFlushingLayout(mLayoutFlusher.mAllowFlushing);
   mLayoutFlusher.mAllowFlushing = false;
 
@@ -712,6 +713,7 @@ void AccessibleCaretManager::OnScrollStart() {
 }
 
 void AccessibleCaretManager::OnScrollEnd() {
+  nsAutoScriptBlocker scriptBlocker;
   AutoRestore<bool> saveAllowFlushingLayout(mLayoutFlusher.mAllowFlushing);
   mLayoutFlusher.mAllowFlushing = false;
 
@@ -743,6 +745,7 @@ void AccessibleCaretManager::OnScrollEnd() {
 }
 
 void AccessibleCaretManager::OnScrollPositionChanged() {
+  nsAutoScriptBlocker scriptBlocker;
   AutoRestore<bool> saveAllowFlushingLayout(mLayoutFlusher.mAllowFlushing);
   mLayoutFlusher.mAllowFlushing = false;
 
@@ -767,6 +770,7 @@ void AccessibleCaretManager::OnScrollPositionChanged() {
 }
 
 void AccessibleCaretManager::OnReflow() {
+  nsAutoScriptBlocker scriptBlocker;
   AutoRestore<bool> saveAllowFlushingLayout(mLayoutFlusher.mAllowFlushing);
   mLayoutFlusher.mAllowFlushing = false;
 
@@ -1156,8 +1160,9 @@ bool AccessibleCaretManager::RestrictCaretDraggingOffsets(
 
   // Move one character (in the direction of dir) from the inactive caret's
   // position. This is the limit for the active caret's new position.
-  nsPeekOffsetStruct limit(eSelectCluster, dir, offset, nsPoint(0, 0), true,
-                           true, false, false, false);
+  PeekOffsetStruct limit(
+      eSelectCluster, dir, offset, nsPoint(0, 0),
+      {PeekOffsetOption::JumpLines, PeekOffsetOption::ScrollViewStop});
   nsresult rv = frame->PeekOffset(&limit);
   if (NS_FAILED(rv)) {
     limit.mResultContent = content;

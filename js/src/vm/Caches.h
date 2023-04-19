@@ -8,14 +8,17 @@
 #define vm_Caches_h
 
 #include "mozilla/Array.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MruCache.h"
+#include "mozilla/TemplateLib.h"
 
 #include "frontend/ScopeBindingCache.h"
 #include "gc/Tracer.h"
 #include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
 #include "vm/JSScript.h"
+#include "vm/Shape.h"
 #include "vm/StencilCache.h"  // js::StencilCache
 #include "vm/StringType.h"
 
@@ -181,10 +184,15 @@ class MegamorphicCache {
   using Entry = MegamorphicCacheEntry;
 
   static constexpr size_t NumEntries = 1024;
-  // log2(alignof(Shape))
-  static constexpr uint8_t ShapeHashShift1 = 3;
-  // ShapeHashShift1 + log2(NumEntries)
-  static constexpr uint8_t ShapeHashShift2 = ShapeHashShift1 + 10;
+  static constexpr uint8_t ShapeHashShift1 =
+      mozilla::tl::FloorLog2<alignof(Shape)>::value;
+  static constexpr uint8_t ShapeHashShift2 =
+      ShapeHashShift1 + mozilla::tl::FloorLog2<NumEntries>::value;
+
+  static_assert(mozilla::IsPowerOfTwo(alignof(Shape)) &&
+                    mozilla::IsPowerOfTwo(NumEntries),
+                "FloorLog2 is exact because alignof(Shape) and NumEntries are "
+                "both powers of two");
 
  private:
   mozilla::Array<Entry, NumEntries> entries_;
@@ -255,6 +263,9 @@ class MegamorphicSetPropCacheEntry {
   // Slot offset and isFixedSlot flag of the data property.
   TaggedSlotOffset slotOffset_;
 
+  // If slots need to be grown, this is the new capacity we need.
+  uint16_t newCapacity_ = 0;
+
   // This entry is valid iff the generation matches the cache's generation.
   uint16_t generation_ = 0;
 
@@ -262,11 +273,13 @@ class MegamorphicSetPropCacheEntry {
 
  public:
   void init(Shape* beforeShape, Shape* afterShape, PropertyKey key,
-            uint16_t generation, TaggedSlotOffset slotOffset) {
+            uint16_t generation, TaggedSlotOffset slotOffset,
+            uint16_t newCapacity) {
     beforeShape_ = beforeShape;
     afterShape_ = afterShape;
     key_ = key;
     slotOffset_ = slotOffset;
+    newCapacity_ = newCapacity;
     generation_ = generation;
   }
   TaggedSlotOffset slotOffset() const { return slotOffset_; }
@@ -281,6 +294,10 @@ class MegamorphicSetPropCacheEntry {
 
   static constexpr size_t offsetOfKey() {
     return offsetof(MegamorphicSetPropCacheEntry, key_);
+  }
+
+  static constexpr size_t offsetOfNewCapacity() {
+    return offsetof(MegamorphicSetPropCacheEntry, newCapacity_);
   }
 
   static constexpr size_t offsetOfGeneration() {
@@ -299,10 +316,15 @@ class MegamorphicSetPropCache {
   // the sweet spot where we are getting most of the hits we would get with
   // an infinitely sized cache
   static constexpr size_t NumEntries = 256;
-  // log2(alignof(Shape))
-  static constexpr uint8_t ShapeHashShift1 = 3;
-  // ShapeHashShift1 + log2(NumEntries)
-  static constexpr uint8_t ShapeHashShift2 = ShapeHashShift1 + 8;
+  static constexpr uint8_t ShapeHashShift1 =
+      mozilla::tl::FloorLog2<alignof(Shape)>::value;
+  static constexpr uint8_t ShapeHashShift2 =
+      ShapeHashShift1 + mozilla::tl::FloorLog2<NumEntries>::value;
+
+  static_assert(mozilla::IsPowerOfTwo(alignof(Shape)) &&
+                    mozilla::IsPowerOfTwo(NumEntries),
+                "FloorLog2 is exact because alignof(Shape) and NumEntries are "
+                "both powers of two");
 
  private:
   mozilla::Array<Entry, NumEntries> entries_;
@@ -330,9 +352,13 @@ class MegamorphicSetPropCache {
     }
   }
   void set(Shape* beforeShape, Shape* afterShape, PropertyKey key,
-           TaggedSlotOffset slotOffset) {
+           TaggedSlotOffset slotOffset, uint32_t newCapacity) {
+    uint16_t newSlots = (uint16_t)newCapacity;
+    if (newSlots != newCapacity) {
+      return;
+    }
     Entry& entry = getEntry(beforeShape, key);
-    entry.init(beforeShape, afterShape, key, generation_, slotOffset);
+    entry.init(beforeShape, afterShape, key, generation_, slotOffset, newSlots);
   }
 
 #ifdef DEBUG

@@ -220,7 +220,9 @@ void vp9_update_layer_context_change_config(VP9_COMP *const cpi,
         RATE_CONTROL *const lrc = &lc->rc;
 
         lc->spatial_layer_target_bandwidth = spatial_layer_target;
-        bitrate_alloc = (float)lc->target_bandwidth / target_bandwidth;
+        if (target_bandwidth != 0) {
+          bitrate_alloc = (float)lc->target_bandwidth / target_bandwidth;
+        }
         lrc->starting_buffer_level =
             (int64_t)(rc->starting_buffer_level * bitrate_alloc);
         lrc->optimal_buffer_level =
@@ -252,7 +254,9 @@ void vp9_update_layer_context_change_config(VP9_COMP *const cpi,
 
       lc->target_bandwidth = oxcf->layer_target_bitrate[layer];
 
-      bitrate_alloc = (float)lc->target_bandwidth / target_bandwidth;
+      if (target_bandwidth != 0) {
+        bitrate_alloc = (float)lc->target_bandwidth / target_bandwidth;
+      }
       // Update buffer-related quantities.
       lrc->starting_buffer_level =
           (int64_t)(rc->starting_buffer_level * bitrate_alloc);
@@ -389,6 +393,8 @@ void vp9_save_layer_context(VP9_COMP *const cpi) {
   lc->twopass = cpi->twopass;
   lc->target_bandwidth = (int)oxcf->target_bandwidth;
   lc->alt_ref_source = cpi->alt_ref_source;
+  lc->frame_qp = cpi->common.base_qindex;
+  lc->MBs = cpi->common.MBs;
 
   // For spatial-svc, allow cyclic-refresh to be applied on the spatial layers,
   // for the base temporal layer.
@@ -408,6 +414,9 @@ void vp9_save_layer_context(VP9_COMP *const cpi) {
     lc->actual_num_seg1_blocks = cr->actual_num_seg1_blocks;
     lc->actual_num_seg2_blocks = cr->actual_num_seg2_blocks;
     lc->counter_encode_maxq_scene_change = cr->counter_encode_maxq_scene_change;
+    lc->qindex_delta[0] = cr->qindex_delta[0];
+    lc->qindex_delta[1] = cr->qindex_delta[1];
+    lc->qindex_delta[2] = cr->qindex_delta[2];
   }
 }
 

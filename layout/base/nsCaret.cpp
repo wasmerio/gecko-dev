@@ -604,7 +604,7 @@ void nsCaret::ResetBlinking() {
   }
 
   auto blinkRate =
-      uint32_t(LookAndFeel::GetInt(IntID::CaretBlinkTime, kDefaultBlinkRate));
+      LookAndFeel::GetInt(IntID::CaretBlinkTime, kDefaultBlinkRate);
 
   if (blinkRate > 0) {
     // Make sure to reset the remaining blink count even if the blink rate
@@ -750,9 +750,10 @@ nsIFrame* nsCaret::GetCaretFrameForNodeOffset(nsFrameSelection* aFrameSelection,
                 // be in. We have to find the visually first frame on the line.
                 BidiEmbeddingLevel baseLevel = frameAfter->GetBaseLevel();
                 if (baseLevel != levelAfter) {
-                  nsPeekOffsetStruct pos(eSelectBeginLine, eDirPrevious, 0,
-                                         nsPoint(0, 0), false, true, false,
-                                         true, false);
+                  PeekOffsetStruct pos(eSelectBeginLine, eDirPrevious, 0,
+                                       nsPoint(0, 0),
+                                       {PeekOffsetOption::ScrollViewStop,
+                                        PeekOffsetOption::Visual});
                   if (NS_SUCCEEDED(frameAfter->PeekOffset(&pos))) {
                     theFrame = pos.mResultFrame;
                     theFrameOffset = pos.mContentOffset;
@@ -781,9 +782,10 @@ nsIFrame* nsCaret::GetCaretFrameForNodeOffset(nsFrameSelection* aFrameSelection,
                 // frame on the line.
                 BidiEmbeddingLevel baseLevel = frameBefore->GetBaseLevel();
                 if (baseLevel != levelBefore) {
-                  nsPeekOffsetStruct pos(eSelectEndLine, eDirNext, 0,
-                                         nsPoint(0, 0), false, true, false,
-                                         true, false);
+                  PeekOffsetStruct pos(eSelectEndLine, eDirNext, 0,
+                                       nsPoint(0, 0),
+                                       {PeekOffsetOption::ScrollViewStop,
+                                        PeekOffsetOption::Visual});
                   if (NS_SUCCEEDED(frameBefore->PeekOffset(&pos))) {
                     theFrame = pos.mResultFrame;
                     theFrameOffset = pos.mContentOffset;

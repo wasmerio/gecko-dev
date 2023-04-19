@@ -25,7 +25,9 @@ var { FileTestUtils } = ChromeUtils.importESModule(
 var { MockDocument } = ChromeUtils.importESModule(
   "resource://testing-common/MockDocument.sys.mjs"
 );
-var { sinon } = ChromeUtils.import("resource://testing-common/Sinon.jsm");
+var { sinon } = ChromeUtils.importESModule(
+  "resource://testing-common/Sinon.sys.mjs"
+);
 var { TestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/TestUtils.sys.mjs"
 );
@@ -147,8 +149,8 @@ async function initProfileStorage(
   records,
   collectionName = "addresses"
 ) {
-  let { FormAutofillStorage } = ChromeUtils.import(
-    "resource://autofill/FormAutofillStorage.jsm"
+  let { FormAutofillStorage } = ChromeUtils.importESModule(
+    "resource://autofill/FormAutofillStorage.sys.mjs"
   );
   let path = getTempFile(fileName).path;
   let profileStorage = new FormAutofillStorage(path);
@@ -214,11 +216,15 @@ var AddressDataLoader, FormAutofillUtils;
 
 async function runHeuristicsTest(patterns, fixturePathPrefix) {
   add_setup(async () => {
-    ({ FormAutofillHeuristics } = ChromeUtils.import(
-      "resource://autofill/FormAutofillHeuristics.jsm"
+    ({ FormAutofillHeuristics } = ChromeUtils.importESModule(
+      "resource://autofill/FormAutofillHeuristics.sys.mjs"
     ));
-    ({ AddressDataLoader, FormAutofillUtils, LabelUtils } = ChromeUtils.import(
-      "resource://autofill/FormAutofillUtils.jsm"
+    ({
+      AddressDataLoader,
+      FormAutofillUtils,
+      LabelUtils,
+    } = ChromeUtils.importESModule(
+      "resource://autofill/FormAutofillUtils.sys.mjs"
     ));
   });
 

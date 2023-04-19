@@ -11,6 +11,7 @@
 #include "nsTArray.h"
 #include "nsISupports.h"
 #include "nsWrapperCache.h"
+#include "nsPIDOMWindow.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/WebTransportBinding.h"
 #include "mozilla/dom/WebTransportChild.h"
@@ -26,9 +27,18 @@ class WebTransportDatagramDuplexStream;
 class WebTransportIncomingStreamsAlgorithms;
 class ReadableStream;
 class WritableStream;
-
 using BidirectionalPair = std::pair<RefPtr<mozilla::ipc::DataPipeReceiver>,
                                     RefPtr<mozilla::ipc::DataPipeSender>>;
+
+struct DatagramEntry {
+  DatagramEntry(nsTArray<uint8_t>&& aData, const mozilla::TimeStamp& aTimeStamp)
+      : mBuffer(std::move(aData)), mTimeStamp(aTimeStamp) {}
+  DatagramEntry(Span<uint8_t>& aData, const mozilla::TimeStamp& aTimeStamp)
+      : mBuffer(aData), mTimeStamp(aTimeStamp) {}
+
+  nsTArray<uint8_t> mBuffer;
+  mozilla::TimeStamp mTimeStamp;
+};
 
 class WebTransport final : public nsISupports, public nsWrapperCache {
   friend class WebTransportIncomingStreamsAlgorithms;
@@ -43,6 +53,10 @@ class WebTransport final : public nsISupports, public nsWrapperCache {
   NS_DECL_CYCLE_COLLECTION_WRAPPERCACHE_CLASS(WebTransport)
 
   enum class WebTransportState { CONNECTING, CONNECTED, CLOSED, FAILED };
+
+  static void NotifyBFCacheOnMainThread(nsPIDOMWindowInner* aInner,
+                                        bool aCreated);
+  void NotifyToWindow(bool aCreated) const;
 
   // this calls CreateReadableStream(), which in this case doesn't actually run
   // script.   See also bug 1810942
@@ -67,6 +81,9 @@ class WebTransport final : public nsISupports, public nsWrapperCache {
 
   void NewUnidirectionalStream(
       const RefPtr<mozilla::ipc::DataPipeReceiver>& aStream);
+
+  void NewDatagramReceived(nsTArray<uint8_t>&& aData,
+                           const mozilla::TimeStamp& aTimeStamp);
 
   void RemoteClosed(bool aCleanly, const uint32_t& aCode,
                     const nsACString& aReason);

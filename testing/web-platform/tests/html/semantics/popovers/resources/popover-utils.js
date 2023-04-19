@@ -90,7 +90,7 @@ function showDefaultopenPopoversOnLoad() {
           return;
         switch (p.popover) {
           case 'auto':
-            if (!document.querySelector('[popover]:open'))
+            if (!document.querySelector('[popover]:popover-open'))
               p.showPopover();
             return;
           case 'manual':
@@ -121,35 +121,33 @@ function assertPopoverVisibility(popover, isPopover, expectedVisibility, message
   // Check other things related to being visible or not:
   if (isVisible) {
     assert_not_equals(window.getComputedStyle(popover).display,'none');
-    assert_equals(popover.matches(':open'),isPopover,`${message}: Visible popovers should match :open`);
-    assert_false(popover.matches(':closed'),`${message}: Visible popovers and *all* non-popovers should *not* match :closed`);
+    assert_equals(popover.matches(':popover-open'),isPopover,`${message}: Visible popovers should match :popover-open`);
   } else {
     assert_equals(window.getComputedStyle(popover).display,'none',`${message}: Non-showing popovers should have display:none`);
-    assert_false(popover.matches(':open'),`${message}: Non-showing popovers should *not* match :open`);
-    assert_true(popover.matches(':closed'),`${message}: Non-showing popovers should match :closed`);
+    assert_false(popover.matches(':popover-open'),`${message}: Non-showing popovers should *not* match :popover-open`);
   }
 }
 
-function assertIsFunctionalPopover(popover) {
+function assertIsFunctionalPopover(popover, checkVisibility) {
   assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'A popover should start out hidden');
   popover.showPopover();
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After showPopover(), a popover should be visible');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After showPopover(), a popover should be visible');
   assert_throws_dom("InvalidStateError",() => popover.showPopover(),'Calling showPopover on a showing popover should throw InvalidStateError');
   popover.hidePopover();
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After hidePopover(), a popover should be hidden');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After hidePopover(), a popover should be hidden');
   assert_throws_dom("InvalidStateError",() => popover.hidePopover(),'Calling hidePopover on a hidden popover should throw InvalidStateError');
   popover.togglePopover();
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After togglePopover() on hidden popover, it should be visible');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After togglePopover() on hidden popover, it should be visible');
   popover.togglePopover();
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After togglePopover() on visible popover, it should be hidden');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After togglePopover() on visible popover, it should be hidden');
   popover.togglePopover(/*force=*/true);
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After togglePopover(true) on hidden popover, it should be visible');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After togglePopover(true) on hidden popover, it should be visible');
   popover.togglePopover(/*force=*/true);
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After togglePopover(true) on visible popover, it should be visible');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/true, 'After togglePopover(true) on visible popover, it should be visible');
   popover.togglePopover(/*force=*/false);
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After togglePopover(false) on visible popover, it should be hidden');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After togglePopover(false) on visible popover, it should be hidden');
   popover.togglePopover(/*force=*/false);
-  assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After togglePopover(false) on hidden popover, it should be hidden');
+  if (checkVisibility) assertPopoverVisibility(popover, /*isPopover*/true, /*expectedVisibility*/false, 'After togglePopover(false) on hidden popover, it should be hidden');
   const parent = popover.parentElement;
   popover.remove();
   assert_throws_dom("InvalidStateError",() => popover.showPopover(),'Calling showPopover on a disconnected popover should throw InvalidStateError');

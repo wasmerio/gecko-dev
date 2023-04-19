@@ -3,9 +3,7 @@
 const { getAddonAndLocalAPIsMocker } = ChromeUtils.import(
   "resource://testing-common/LangPackMatcherTestUtils.jsm"
 );
-const { AboutWelcomeDefaults } = ChromeUtils.import(
-  "resource://activity-stream/aboutwelcome/lib/AboutWelcomeDefaults.jsm"
-);
+
 const { AWScreenUtils } = ChromeUtils.import(
   "resource://activity-stream/lib/AWScreenUtils.jsm"
 );
@@ -54,18 +52,18 @@ async function openAboutWelcome() {
 
   // Stub out the doesAppNeedPin to false so the about:welcome pages do not attempt
   // to pin the app.
-  const { ShellService } = ChromeUtils.import(
-    "resource:///modules/ShellService.jsm"
+  const { ShellService } = ChromeUtils.importESModule(
+    "resource:///modules/ShellService.sys.mjs"
   );
   sandbox.stub(ShellService, "doesAppNeedPin").returns(false);
 
-  const data = await AboutWelcomeDefaults.getDefaults();
-  const defaultMRArray = data.screens.filter(
-    screen => screen.id !== "AW_EASY_SETUP"
-  );
   sandbox
-    .stub(AWScreenUtils, "evaluateTargetingAndRemoveScreens")
-    .resolves(defaultMRArray);
+    .stub(AWScreenUtils, "evaluateScreenTargeting")
+    .resolves(true)
+    .withArgs(
+      "os.windowsBuildNumber >= 15063 && !isDefaultBrowser && !doesAppNeedPin"
+    )
+    .resolves(false);
 
   info("Opening about:welcome");
   let tab = await BrowserTestUtils.openNewForegroundTab(
@@ -235,6 +233,7 @@ add_task(async function test_aboutwelcome_languageSwitcher_accept() {
   );
 
   info("Clicking the primary button to view language switching page.");
+
   await clickVisibleButton(browser, "button.primary");
 
   await testScreenContent(

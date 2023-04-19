@@ -2,20 +2,23 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-### TODO (Bug 1814257) - This file should be moved from /browser/locales-preview folder
-### to an appropriate place in /toolkit when it is no longer preview.
+# The button for "Firefox Translations" in the url bar.
+urlbar-translations-button =
+    .tooltiptext = { -translations-brand-name }
 
-# The title of the about:translations page, referencing the translations feature.
-about-translations-title = Translations
-about-translations-header = { -translations-brand-name }
-about-translations-results-placeholder = Translation
-# Text displayed on from-language dropdown when no language is selected
-about-translations-detect = Detect language
-# Text displayed on from-language dropdown when a language is detected
-# Variables:
-#   $language (string) - The localized display name of the detected language
-about-translations-detect-lang = Detect language ({ $language })
-# Text displayed on to-language dropdown when no language is selected
-about-translations-select = Select language
-about-translations-textarea =
-  .placeholder = Add text to translate
+## The translation panel appears from the url bar, and this view is the "dual" translate
+## view that lets you choose a source language and target language for translation
+
+translations-panel-dual-header = Translate this page?
+translations-panel-dual-from-label = Choose the current page language
+translations-panel-dual-to-label = Choose the language to translate into
+translations-panel-dual-translate-button = Translate
+
+## The translation panel appears from the url bar, and this view is the "restore" view
+## that lets a user restore a page to the original language.
+
+translations-panel-restore-header = Change the language?
+# $fromLanguage (string) - The original language of the document.
+# $toLanguage (string) - The target language of the translation.
+translations-panel-restore-label = The page is being translated from { $fromLanguage } to { $toLanguage }.
+translations-panel-restore-button = Restore the page
