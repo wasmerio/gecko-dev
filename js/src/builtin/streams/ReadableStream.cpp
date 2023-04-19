@@ -114,7 +114,7 @@ bool ReadableStream::constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
   // Implicit in the spec: argument default values.
   Rooted<Value> underlyingSource(cx, args.get(0));
   if (underlyingSource.isUndefined()) {
-    JSObject* emptyObj = NewPlainObject(cx);
+    JSObject* emptyObj = NewPlainObjectWithProto(cx, nullptr);
     if (!emptyObj) {
       return false;
     }
@@ -123,7 +123,7 @@ bool ReadableStream::constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
 
   Rooted<Value> strategy(cx, args.get(1));
   if (strategy.isUndefined()) {
-    JSObject* emptyObj = NewPlainObject(cx);
+    JSObject* emptyObj = NewPlainObjectWithProto(cx, nullptr);
     if (!emptyObj) {
       return false;
     }
