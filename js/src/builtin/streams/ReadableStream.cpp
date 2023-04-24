@@ -20,7 +20,7 @@
 #include "builtin/streams/ReadableStreamInternals.h"  // js::ReadableStreamCancel
 #include "builtin/streams/ReadableStreamOperations.h"  // js::ReadableStream{PipeTo,Tee}
 #include "builtin/streams/ReadableStreamReader.h"  // js::CreateReadableStream{BYOB,Default}Reader, js::ForAuthorCodeBool
-// #include "builtin/streams/WritableStream.h"  // js::WritableStream
+#include "builtin/streams/WritableStream.h"  // js::WritableStream
 #include "js/CallArgs.h"                     // JS::CallArgs{,FromVp}
 #include "js/Class.h"        // JSCLASS_SLOT0_IS_NSISUPPORTS, JS_NULL_CLASS_OPS
 #include "js/Conversions.h"  // JS::ToBoolean
@@ -56,14 +56,14 @@ using js::NewBuiltinClassInstance;
 using js::NewDenseFullyAllocatedArray;
 using js::PlainObject;
 using js::ReadableStream;
-// using js::ReadableStreamPipeTo;
+using js::ReadableStreamPipeTo;
 using js::ReadableStreamTee;
 using js::ReturnPromiseRejectedWithPendingError;
 using js::ToString;
 using js::UnwrapAndTypeCheckArgument;
 using js::UnwrapAndTypeCheckThis;
 using js::UnwrapAndTypeCheckValue;
-// using js::WritableStream;
+using js::WritableStream;
 
 using JS::CallArgs;
 using JS::CallArgsFromVp;
@@ -552,7 +552,7 @@ static const JSPropertySpec ReadableStream_properties[] = {
     JS_STRING_SYM_PS(toStringTag, "ReadableStream", JSPROP_READONLY),
     JS_PS_END};
 
-// static bool FinishReadableStreamClassInit(JSContext* cx, Handle<JSObject*> ctor,
+static bool FinishReadableStreamClassInit(JSContext* cx, Handle<JSObject*> ctor,
                                           Handle<JSObject*> proto) {
   // This function and everything below should be replaced with
   //
