@@ -521,6 +521,16 @@ option(
 set_define("JS_MASM_VERBOSE", depends_if("--enable-masm-verbose")(lambda _: True))
 set_config("JS_MASM_VERBOSE", depends_if("--enable-masm-verbose")(lambda _: True))
 
+# Portable Baseline Inteprreter
+# =======================================================
+option(
+    "--enable-portable-baseline-interp",
+    default=False,
+    help="{Enable|Disable} the portable baseline interpreter.",
+)
+set_define("ENABLE_PORTABLE_BASELINE_INTERP", depends_if("--enable-portable-baseline-interp")(lambda _: True))
+set_config("ENABLE_PORTABLE_BASELINE_INTERP", depends_if("--enable-portable-baseline-interp")(lambda _: True))
+
 # Architecture feature flags
 # =======================================================
 

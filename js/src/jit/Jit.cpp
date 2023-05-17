@@ -15,6 +15,7 @@
 #include "vm/Interpreter.h"
 #include "vm/JitActivation.h"
 #include "vm/JSContext.h"
+#include "vm/PortableBaselineInterpret.h"
 #include "vm/Realm.h"
 
 #include "vm/Activation-inl.h"
@@ -131,13 +132,14 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
 // Call the per-script interpreter entry trampoline.
 bool js::jit::EnterInterpreterEntryTrampoline(uint8_t* code, JSContext* cx,
                                               RunState* state) {
-  using EnterTrampolineCodePtr = bool (*)(JSContext * cx, RunState*);
+  using EnterTrampolineCodePtr = bool (*)(JSContext* cx, RunState*);
   auto funcPtr = JS_DATA_TO_FUNC_PTR(EnterTrampolineCodePtr, code);
   return CALL_GENERATED_2(funcPtr, cx, state);
 }
 
 EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
-  if (!IsBaselineInterpreterEnabled()) {
+  if (!IsBaselineInterpreterEnabled() &&
+      !IsPortableBaselineInterpreterEnabled()) {
     // All JITs are disabled.
     return EnterJitStatus::NotEntered;
   }
@@ -159,7 +161,7 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
   do {
     // Make sure we can enter Baseline Interpreter code. Note that the prologue
     // has warm-up checks to tier up if needed.
-    if (script->hasJitScript()) {
+    if (script->hasJitScript() && code) {
       break;
     }
 
@@ -200,6 +202,14 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
       if (status == jit::Method_Compiled) {
         code = script->jitCodeRaw();
         break;
+      }
+    }
+
+    // Try to enter the Portable Baseline Interpreter.
+    if (IsPortableBaselineInterpreterEnabled()) {
+      if (CanEnterPortableBaselineInterpreter(cx, script)) {
+        return PortableBaselineInterpret(cx, state) ? EnterJitStatus::Ok
+                                                    : EnterJitStatus::Error;
       }
     }
 

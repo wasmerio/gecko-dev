@@ -129,6 +129,11 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether the Baseline Interpreter is enabled.
   SET_DEFAULT(baselineInterpreter, true);
 
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
+  // Whether the Portable Baseline Interpreter is enabled.
+  SET_DEFAULT(portableBaselineInterpreter, true);
+#endif
+
   // Emit baseline interpreter and interpreter entry frames to distinguish which
   // JSScript is being interpreted by external profilers.
   // Enabled by default under --enable-perf, otherwise disabled.
@@ -173,6 +178,12 @@ DefaultJitOptions::DefaultJitOptions() {
   // How many invocations or loop iterations are needed before functions
   // enter the Baseline Interpreter.
   SET_DEFAULT(baselineInterpreterWarmUpThreshold, 10);
+
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
+  // How many invocations or loop iterations are needed before functions
+  // enter the Porable Baseline Interpreter.
+  SET_DEFAULT(portableBaselineInterpreterWarmUpThreshold, 10);
+#endif
 
   // How many invocations or loop iterations are needed before functions
   // are compiled with the baseline compiler.
@@ -387,6 +398,12 @@ bool DefaultJitOptions::isSmallFunction(JSScript* script) const {
 }
 
 void DefaultJitOptions::enableGvn(bool enable) { disableGvn = !enable; }
+
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
+void DefaultJitOptions::setEagerPortableBaselineInterpreter() {
+  portableBaselineInterpreterWarmUpThreshold = 0;
+}
+#endif
 
 void DefaultJitOptions::setEagerBaselineCompilation() {
   baselineInterpreterWarmUpThreshold = 0;
