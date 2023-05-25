@@ -790,8 +790,13 @@ class InterpreterStack {
   LifoAlloc allocator_;
 
   // Number of interpreter frames on the stack, for over-recursion checks.
+#ifndef ENABLE_JS_INTERP_NATIVE_CALLSTACK
   static const size_t MAX_FRAMES = 50 * 1000;
   static const size_t MAX_FRAMES_TRUSTED = MAX_FRAMES + 1000;
+#else
+  static const size_t MAX_FRAMES = 5 * 1000;
+  static const size_t MAX_FRAMES_TRUSTED = MAX_FRAMES + 1000;
+#endif
   size_t frameCount_;
 
   inline uint8_t* allocateFrame(JSContext* cx, size_t size);
