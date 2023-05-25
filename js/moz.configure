@@ -1217,6 +1217,47 @@ def is_wasi_target(os):
 set_define("_WASI_EMULATED_PROCESS_CLOCKS", True, when=is_wasi_target)
 set_define("_WASI_EMULATED_GETPID", True, when=is_wasi_target)
 
+# JS C++ interpreter options
+# ===================================================
+
+option(
+    "--enable-js-interp-native-callstack",
+    default=False,
+    help="{Enable|Disable} use of native C++ calls in interpreter for each JS call",
+)
+
+set_define(
+    "ENABLE_JS_INTERP_NATIVE_CALLSTACK",
+    depends_if("--enable-js-interp-native-callstack")(lambda x: True),
+)
+
+option(
+    "--enable-js-interp-specialization",
+    default=False,
+    help="{Enable|Disable} separate C++ activations for portion of JS interpretation where PC is statically known",
+)
+
+set_define(
+    "ENABLE_JS_INTERP_SPECIALIZATION",
+    depends_if("--enable-js-interp-specialization")(lambda x: True),
+)
+
+
+option(
+    "--enable-js-interp-weval",
+    default=False,
+    help="{Enable|Disable} annotations for weval, the WebAssembly partial evaluator",
+)
+
+set_define(
+    "ENABLE_JS_INTERP_WEVAL",
+    depends_if("--enable-js-interp-weval")(lambda x: True),
+)
+set_config(
+    "ENABLE_JS_INTERP_WEVAL",
+    depends_if("--enable-js-interp-weval")(lambda x: True),
+)
+
 # Enable change-array-by-copy
 # ===================================================
 
