@@ -2595,6 +2595,7 @@ initial_dispatch:
             cx->leaveRealm(callerScript->realm());
           }
           SET_SCRIPT(callerScript);
+          isd = ictx.script->immutableScriptData();
           pc = REGS.pc;
         }
 
@@ -3607,10 +3608,14 @@ initial_dispatch:
           goto error;
 #ifndef ENABLE_JS_INTERP_WEVAL
         case InterpretCallResult::SuccessZeroAdvance:
+          pc = REGS.pc;
+          isd = ictx.script->immutableScriptData();
           ADVANCE_AND_DISPATCH(0);
         case InterpretCallResult::PrologueError:
+          pc = REGS.pc;
           goto prologue_error;
         case InterpretCallResult::JitReturn:
+          pc = REGS.pc;
           goto jit_return;
 #endif
       }
@@ -4585,6 +4590,7 @@ initial_dispatch:
           cx->enterRealmOf(generatorScript);
         }
         SET_SCRIPT(generatorScript);
+        isd = generatorScript->immutableScriptData();
 
         if (!probes::EnterScript(cx, generatorScript,
                                  generatorScript->function(), REGS.fp())) {

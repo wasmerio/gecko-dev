@@ -69,6 +69,8 @@ using mozilla::EnsureUtf16ValiditySpan;
 using mozilla::IsAsciiHexDigit;
 using mozilla::PodCopy;
 using mozilla::RangedPtr;
+using mozilla::Span;
+using mozilla::Utf16ValidUpTo;
 
 using JS::AutoCheckCannotGC;
 using JS::AutoStableStringChars;
