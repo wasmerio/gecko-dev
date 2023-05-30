@@ -977,6 +977,35 @@ inline bool FillArgumentsFromArraylike(JSContext* cx, Args& args,
   return true;
 }
 
+struct PortableBaselineStack {
+  // Default size in Values (8 bytes each); hence, 512KiB.
+  static const size_t DEFAULT_SIZE = 64 * 1024;
+
+  Value* base;
+  Value* top;
+
+  bool valid() { return base != nullptr; }
+
+  PortableBaselineStack() {
+    base = reinterpret_cast<Value*>(js_calloc(sizeof(Value) * DEFAULT_SIZE));
+    top = base + DEFAULT_SIZE;
+  }
+  ~PortableBaselineStack() { js_free(base); }
+};
+
+struct PortableBaselineStackExit {
+  Value** top;
+  Value* prevTop;
+
+  PortableBaselineStackExit(PortableBaselineStack& stack, Value* curTop)
+      : top(&stack.top) {
+    prevTop = *top;
+    *top = curTop;
+  }
+
+  ~PortableBaselineStackExit() { *top = prevTop; }
+};
+
 }  // namespace js
 
 namespace mozilla {

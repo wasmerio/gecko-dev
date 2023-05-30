@@ -97,14 +97,24 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
     AssertRealmUnchanged aru(cx);
     ActivationEntryMonitor entryMonitor(cx, calleeToken);
     JitActivation activation(cx);
+
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
     EnterJitCode enter = cx->runtime()->jitRuntime()->enterJit();
 
-#ifdef DEBUG
+#  ifdef DEBUG
     nogc.reset();
-#endif
+#  endif
     CALL_GENERATED_CODE(enter, code, maxArgc, maxArgv, /* osrFrame = */ nullptr,
                         calleeToken, envChain, /* osrNumStackValues = */ 0,
                         result.address());
+#else   // !ENABLE_PORTABLE_BASELINE_INTERP
+    (void)code;
+    Value* portableBaselineStack = cx->portableBaselineStack().top;
+    Value* portableBaselineStackBase = cx->portableBaselineStack().base;
+    PortableBaselineTrampoline(maxArgc, maxArgv, calleeToken, envChain,
+                               result.address(), portableBaselineStack,
+                               portableBaselineStackBase);
+#endif  // ENABLE_PORTABLE_BASELINE_INTERP
   }
 
   // Ensure the counter was reset to zero after exiting from JIT code.
@@ -167,6 +177,7 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
 
     script->incWarmUpCounter();
 
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
     // Try to Ion-compile.
     if (jit::IsIonEnabled(cx)) {
       jit::MethodStatus status = jit::CanEnterIon(cx, state);
@@ -191,6 +202,7 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
         break;
       }
     }
+#endif  // !ENABLE_PORTABLE_BASELINE_INTERP
 
     // Try to enter the Baseline Interpreter.
     if (IsBaselineInterpreterEnabled()) {
@@ -207,9 +219,11 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
 
     // Try to enter the Portable Baseline Interpreter.
     if (IsPortableBaselineInterpreterEnabled()) {
-      if (CanEnterPortableBaselineInterpreter(cx, script)) {
-        return PortableBaselineInterpret(cx, state) ? EnterJitStatus::Ok
-                                                    : EnterJitStatus::Error;
+      if (CanEnterPortableBaselineInterpreter(cx, state)) {
+        code = script->jitCodeRaw();
+        break;
+      } else {
+        return EnterJitStatus::Error;
       }
     }
 

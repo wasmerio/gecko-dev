@@ -20,8 +20,13 @@
 
 namespace js {
 
-bool PortableBaselineInterpret(JSContext* cx, RunState& state);
-bool CanEnterPortableBaselineInterpreter(JSContext* cx, JSScript* script);
+void PortableBaselineTrampoline(size_t argc, Value* argv,
+                                jit::CalleeToken calleeToken,
+                                JSObject* envChain, Value* result, Value* sp,
+                                Value* spBase);
+void PortableBaselineInterpret(JSContext* cx, Value* sp, Value* spBase,
+                               Value* fp);
+bool CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
 static inline bool IsPortableBaselineInterpreterEnabled() { return true; }
