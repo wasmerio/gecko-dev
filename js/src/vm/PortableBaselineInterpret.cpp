@@ -27,12 +27,11 @@ using namespace js::jit;
 void js::PortableBaselineTrampoline(size_t argc, Value* argv,
                                     jit::CalleeToken calleeToken,
                                     JSObject* envChain, Value* result,
-                                    Value* sp, Value* spBase) {
+                                    uint8_t* sp) {
   result->setUndefined();
 }
 
-void js::PortableBaselineInterpret(JSContext* cx, Value* sp, Value* spBase,
-                                   Value* fp) {}
+void js::PortableBaselineInterpret(JSContext* cx, uint8_t* sp, uint8_t* fp) {}
 
 bool js::CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state) {
   if (!JitOptions.portableBaselineInterpreter) {
