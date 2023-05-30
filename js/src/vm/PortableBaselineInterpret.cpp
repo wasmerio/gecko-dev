@@ -24,19 +24,36 @@
 using namespace js;
 using namespace js::jit;
 
-bool js::PortableBaselineInterpret(JSContext* cx, RunState& state) { return false; }
+void js::PortableBaselineTrampoline(size_t argc, Value* argv,
+                                    jit::CalleeToken calleeToken,
+                                    JSObject* envChain, Value* result,
+                                    Value* sp, Value* spBase) {
+  result->setUndefined();
+}
 
-bool js::CanEnterPortableBaselineInterpreter(JSContext* cx, JSScript* script) {
+void js::PortableBaselineInterpret(JSContext* cx, Value* sp, Value* spBase,
+                                   Value* fp) {}
+
+bool js::CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state) {
   if (!JitOptions.portableBaselineInterpreter) {
     return false;
   }
-  if (script->hasJitScript()) {
+  if (state.script()->hasJitScript()) {
     return true;
   }
-  if (script->hasForceInterpreterOp()) {
+  if (state.script()->hasForceInterpreterOp()) {
     return false;
   }
-  if (script->getWarmUpCount() <=
+  if (state.script()->nslots() > BaselineMaxScriptSlots) {
+    return false;
+  }
+  if (state.isInvoke()) {
+    InvokeState& invoke = *state.asInvoke();
+    if (TooManyActualArguments(invoke.args().length())) {
+      return false;
+    }
+  }
+  if (state.script()->getWarmUpCount() <=
       JitOptions.portableBaselineInterpreterWarmUpThreshold) {
     return false;
   }
@@ -45,8 +62,9 @@ bool js::CanEnterPortableBaselineInterpreter(JSContext* cx, JSScript* script) {
   }
 
   AutoKeepJitScripts keepJitScript(cx);
-  if (!script->ensureHasJitScript(cx, keepJitScript)) {
+  if (!state.script()->ensureHasJitScript(cx, keepJitScript)) {
     return false;
   }
+  state.script()->updateJitCodeRaw(cx->runtime());
   return true;
 }

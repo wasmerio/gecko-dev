@@ -71,6 +71,7 @@
 #include "vm/JSObject.h"
 #include "vm/JSONPrinter.h"  // JSONPrinter
 #include "vm/Opcodes.h"
+#include "vm/PortableBaselineInterpret.h"
 #include "vm/Scope.h"  // Scope
 #include "vm/SharedImmutableStringsCache.h"
 #include "vm/StencilEnums.h"  // TryNote, TryNoteKind, ScopeNote
@@ -3242,6 +3243,11 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
     if (!usingEntryTrampoline) {
       setJitCodeRaw(rt->jitRuntime()->baselineInterpreter().codeRaw());
     }
+  } else if (hasJitScript() && js::IsPortableBaselineInterpreterEnabled()) {
+    // The portable baseline interpreter does not dispatch on this
+    // pointer, but it needs to be non-null to trigger the appropriate
+    // code-paths, so we set it to the entry trampoline itself here.
+    setJitCodeRaw(reinterpret_cast<uint8_t*>(&js::PortableBaselineTrampoline));
   } else {
     setJitCodeRaw(rt->jitRuntime()->interpreterStub().value);
   }
