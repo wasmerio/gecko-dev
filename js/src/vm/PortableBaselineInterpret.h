@@ -20,10 +20,10 @@
 
 namespace js {
 
-void PortableBaselineTrampoline(size_t argc, Value* argv,
+bool PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                 jit::CalleeToken calleeToken,
-                                JSObject* envChain, Value* result, uint8_t* sp);
-void PortableBaselineInterpret(JSContext* cx, uint8_t* sp, uint8_t* fp);
+                                JSObject* envChain, Value* result, uint64_t* sp,
+                                uint64_t* spBase);
 bool CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
