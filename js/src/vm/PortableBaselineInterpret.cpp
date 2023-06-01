@@ -13,9 +13,12 @@
 
 #include "jsapi.h"
 
+#include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
 #include "jit/JitFrames.h"
 #include "jit/JitScript.h"
+#include "jit/JSJitFrameIter.h"
+#include "vm/JitActivation.h"
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
 
@@ -30,55 +33,111 @@ struct StackValue {
 
   explicit StackValue(uint64_t v) : value(v) {}
   explicit StackValue(Value v) : value(v.asRawBits()) {}
-  explicit StackValue(jit::CalleeToken v)
-      : value(reinterpret_cast<uint64_t>(v)) {}
+  explicit StackValue(void* v) : value(reinterpret_cast<uint64_t>(v)) {}
 
   uint64_t asUInt64() const { return value; }
   Value asValue() const { return Value::fromRawBits(value); }
-  jit::CalleeToken asCalleeToken() const {
-    return reinterpret_cast<jit::CalleeToken>(value);
+  void* asVoidPtr() const { return reinterpret_cast<void*>(value); }
+  CalleeToken asCalleeToken() const {
+    return reinterpret_cast<CalleeToken>(value);
   }
 };
 
 struct Stack {
-  StackValue* sp;
+  StackValue** sp;
+  StackValue* fp;
   StackValue* base;
 
-  Stack(uint64_t* sp_, uint64_t* base_)
-      : sp(reinterpret_cast<StackValue*>(sp_)),
-        base(reinterpret_cast<StackValue*>(base_)) {}
+  Stack(PortableBaselineStack& pbs)
+      : sp(reinterpret_cast<StackValue**>(&pbs.top)),
+        fp(nullptr),
+        base(reinterpret_cast<StackValue*>(pbs.base)) {}
 
+  StackValue* allocate(size_t size) {
+    if (reinterpret_cast<uintptr_t>(base) + size > reinterpret_cast<uintptr_t>(*sp)) {
+      return nullptr;
+    }
+    (*sp) = reinterpret_cast<StackValue*>(reinterpret_cast<uintptr_t>(*sp) - size);
+    return *sp;
+  }
+  
   bool push(StackValue v) {
-    if (sp <= base) {
+    StackValue* elem = allocate(sizeof(StackValue));
+    if (!elem) {
       return false;
     }
-    *--sp = v;
+    *elem = v;
     return true;
   }
-  StackValue pop() { return *sp++; }
+  StackValue pop() { return *(*sp)++; }
+
+  StackValue* cur() { return *sp; }
+  void restore(StackValue* s) { *sp = s; }
+
+  BaselineFrame* pushFrame(JSContext* cx, void* retAddr, JSObject* envChain) {
+    if (!push(StackValue(retAddr))) {
+      return nullptr;
+    }
+    if (!push(StackValue(fp))) {
+      return nullptr;
+    }
+    fp = cur();
+
+    BaselineFrame* frame = reinterpret_cast<BaselineFrame*>(allocate(BaselineFrame::Size()));
+    if (!frame) {
+      return nullptr;
+    }
+
+    frame->setFlags(BaselineFrame::Flags::RUNNING_IN_INTERPRETER);
+    frame->setEnvironmentChain(envChain);
+    frame->setInterpreterFields(frame->script()->code());
+
+    cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(fp));
+
+    return frame;
+  }
+
+  void popFrame(JSContext* cx, void** retAddr) {
+    StackValue* newTOS = &fp[2];
+    *retAddr = fp[1].asVoidPtr();
+    fp = reinterpret_cast<StackValue*>(fp[0].asVoidPtr());
+
+    cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(fp));
+
+    restore(newTOS);
+  }
+
+  BaselineFrame* frameFromFP() {
+    return reinterpret_cast<BaselineFrame*>(reinterpret_cast<uintptr_t>(fp) - BaselineFrame::Size());
+  }
 };
 
 // TODO:
-// - put SP state in PortableBaselineStack and update it in trampoline
-//   (pre + post).
 // - update GC scanning to scan PortableBaselineStack.
 // - create a BaselineFrame in PortableBaselineInterpret, and root
 //   everything on that (JSScript, JitScript).
 // - opcode dispatch based on current interpreter PC in BaselineFrame.
 // - IC interpreter state (current stub and IC PC).
 
-static bool js::PortableBaselineInterpret(JSContext* cx, Stack& stack,
-                                          Value* ret) {
+static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
+  BaselineFrame* frame = stack.frameFromFP();
+  jsbytecode** pc = &frame->interpreterPC();
   
+  while(true) {
+    switch (JSOp(**pc)) {
+    case JSOp::Nop:
+      (*pc)++;
+      break;
+    default:
+      MOZ_CRASH("Bad opcode");
+    }
+  }
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
-                                    jit::CalleeToken calleeToken,
-                                    JSObject* envChain, Value* result,
-                                    // TODO: take PortableBaselineStack
-                                    uint64_t* sp, uint64_t* spBase) {
-  Stack stack(sp, spBase);
-  uint64_t* fp = stack.sp;
+                                    CalleeToken calleeToken,
+                                    JSObject* envChain, Value* result) {
+  Stack stack(cx->portableBaselineStack());
 
   // Expected stack frame:
   // - argN
@@ -94,14 +153,21 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   }
   stack.push(StackValue(calleeToken));
   stack.push(StackValue(
-      jit::MakeFrameDescriptorForJitCall(jit::FrameType::CppToJSJit, argc)));
-  stack.push(0);  // return address
+      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, argc)));
+  const uint64_t ra = 0;  // return address
+  stack.push(StackValue(ra));
+
+  if (!stack.pushFrame(cx, /* retAddr = */ nullptr, envChain)) {
+    return false;
+  }
 
   if (!PortableBaselineInterpret(cx, stack, result)) {
     return false;
   }
 
-  // TODO: save SP in portableBaselineStack.
+  void* dummyRet;
+  stack.popFrame(cx, &dummyRet);
+  MOZ_ASSERT(dummRet == nullptr);
 
   return true;
 }
