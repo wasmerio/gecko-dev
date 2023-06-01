@@ -90,7 +90,9 @@ struct Stack {
 
     frame->setFlags(BaselineFrame::Flags::RUNNING_IN_INTERPRETER);
     frame->setEnvironmentChain(envChain);
-    frame->setInterpreterFields(frame->script()->code());
+    JSScript* script = frame->script();
+    frame->setICScript(script->jitScript()->icScript());
+    frame->setInterpreterFields(script->code());
 
     cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(fp));
 
@@ -153,14 +155,12 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   // - descriptor
   // - "return address" (nullptr for top frame)
 
-  for (ssize_t i = argc; i >= 0; --i) {
-    stack.push(StackValue(argv[argc]));
+  for (size_t i = 0; i < argc; i++) {
+    stack.push(StackValue(argv[argc - 1 - i]));
   }
   stack.push(StackValue(calleeToken));
   stack.push(StackValue(
       MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, argc)));
-  const uint64_t ra = 0;  // return address
-  stack.push(StackValue(ra));
 
   if (!stack.pushFrame(cx, /* retAddr = */ nullptr, envChain)) {
     return false;
