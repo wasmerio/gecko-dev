@@ -126,6 +126,12 @@ struct Stack {
 // - IC interpreter state (current stub and IC PC).
 
 static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
+  // TODO: put all this in a struct, then pass it to RunIC.
+  RootedValue value0(cx), value1(cx), value2(cx);
+  RootedObject obj0(cx), obj1(cx), obj2(cx);
+  RootedScript script0(cx);
+  RootedName name0(cx);
+
   BaselineFrame* frame = stack.frameFromFP();
 
   while (true) {
@@ -323,7 +329,20 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(BindGName);
         NYI_OPCODE(BindName);
         NYI_OPCODE(GetName);
-        NYI_OPCODE(GetGName);
+
+      case JSOp::GetGName: {
+        obj0.set(&cx->global()->lexicalEnvironment());
+        name0.set(script->getName(pc));
+        if (!RunIC(cx, stack, frame, obj0, &obj1)) {
+          return false;
+        }
+        if (!stack.push(StackValue(obj1.get()))) {
+          return false;
+        }
+        pc++;
+        break;
+      }
+
         NYI_OPCODE(GetArg);
         NYI_OPCODE(GetFrameArg);
         NYI_OPCODE(GetLocal);
