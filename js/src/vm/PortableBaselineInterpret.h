@@ -25,12 +25,6 @@ bool PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                 JSObject* envChain, Value* result);
 bool CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state);
 
-#ifdef ENABLE_PORTABLE_BASELINE_INTERP
-static inline bool IsPortableBaselineInterpreterEnabled() { return true; }
-#else
-static inline bool IsPortableBaselineInterpreterEnabled() { return false; }
-#endif
-
 } /* namespace js */
 
 #endif /* vm_PortableBaselineInterpret_h */

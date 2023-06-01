@@ -172,6 +172,12 @@ inline bool IsBaselineInterpreterEnabled() {
   return HasJitBackend() && JitOptions.baselineInterpreter;
 }
 
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
+inline bool IsPortableBaselineInterpreterEnabled() {
+  return JitOptions.portableBaselineInterpreter;
+}
+#endif
+
 inline bool TooManyActualArguments(size_t nargs) {
   return nargs > JitOptions.maxStackArgs;
 }
