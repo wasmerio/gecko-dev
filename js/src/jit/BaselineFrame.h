@@ -225,6 +225,19 @@ class BaselineFrame {
     MOZ_ASSERT(runningInInterpreter());
     return interpreterPC_;
   }
+  jsbytecode*& interpreterPC() {
+    MOZ_ASSERT(runningInInterpreter());
+    return interpreterPC_;
+  }
+
+  ICEntry* interpreterICEntry() const {
+    MOZ_ASSERT(runningInInterpreter());
+    return interpreterICEntry_;
+  }
+  ICEntry*& interpreterICEntry() {
+    MOZ_ASSERT(runningInInterpreter());
+    return interpreterICEntry_;
+  }
 
   void setInterpreterFields(JSScript* script, jsbytecode* pc);
 

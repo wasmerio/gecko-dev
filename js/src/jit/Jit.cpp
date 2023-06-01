@@ -109,11 +109,8 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
                         result.address());
 #else   // !ENABLE_PORTABLE_BASELINE_INTERP
     (void)code;
-    auto* portableBaselineStack = cx->portableBaselineStack().top;
-    auto* portableBaselineStackBase = cx->portableBaselineStack().base;
     if (!PortableBaselineTrampoline(cx, maxArgc, maxArgv, calleeToken, envChain,
-                                    result.address(), portableBaselineStack,
-                                    portableBaselineStackBase)) {
+                                    result.address())) {
       return EnterJitStatus::Error;
     }
 #endif  // ENABLE_PORTABLE_BASELINE_INTERP
