@@ -221,8 +221,6 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
       if (CanEnterPortableBaselineInterpreter(cx, state)) {
         code = script->jitCodeRaw();
         break;
-      } else {
-        return EnterJitStatus::Error;
       }
     }
 

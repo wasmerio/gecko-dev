@@ -124,6 +124,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
   jsbytecode** pc = &frame->interpreterPC();
   
   while(true) {
+    printf("pc = %p: %d\n", *pc, **pc);
     switch (JSOp(**pc)) {
     case JSOp::Nop:
       (*pc)++;
@@ -132,12 +133,16 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
       MOZ_CRASH("Bad opcode");
     }
   }
+
+  return true;
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                     CalleeToken calleeToken,
                                     JSObject* envChain, Value* result) {
   Stack stack(cx->portableBaselineStack());
+
+  printf("Trampoline: argc %zu argv %p calleeToken %p\n", argc, argv, calleeToken);
 
   // Expected stack frame:
   // - argN
