@@ -14,6 +14,7 @@
 #include "jsapi.h"
 
 #include "jit/BaselineFrame.h"
+#include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/JitFrames.h"
 #include "jit/JitScript.h"
@@ -125,18 +126,37 @@ struct Stack {
 // - opcode dispatch based on current interpreter PC in BaselineFrame.
 // - IC interpreter state (current stub and IC PC).
 
-static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
-  // TODO: put all this in a struct, then pass it to RunIC.
-  RootedValue value0(cx), value1(cx), value2(cx);
-  RootedObject obj0(cx), obj1(cx), obj2(cx);
-  RootedScript script0(cx);
-  RootedName name0(cx);
+struct State {
+  RootedValue value0;
+  RootedValue value1;
+  RootedValue value2;
+  RootedValue res;
+  RootedObject obj0;
+  RootedObject obj1;
+  RootedObject obj2;
+  RootedScript script0;
+  Rooted<PropertyName*> name0;
+  JSOp op;
 
+  State(JSContext* cx)
+      : value0(cx),
+        value1(cx),
+        value2(cx),
+        res(cx),
+        obj0(cx),
+        obj1(cx),
+        obj2(cx),
+        script0(cx),
+        name0(cx) {}
+};
+
+static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
+  State state(cx);
   BaselineFrame* frame = stack.frameFromFP();
 
   while (true) {
+  dispatch:
     jsbytecode*& pc = frame->interpreterPC();
-    printf("pc = %p: %d\n", pc, *pc);
 
 #define NYI_OPCODE(op)                               \
   case JSOp::op:                                     \
@@ -144,12 +164,19 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
     MOZ_CRASH("Bad opcode");                         \
     break;
 
-    switch (JSOp(*pc)) {
-      case JSOp::Nop:
-        pc++;
+    state.op = JSOp(*pc);
+    switch (state.op) {
+      case JSOp::Nop: {
+        pc += JSOpLength_Nop;
         break;
+      }
 
-        NYI_OPCODE(Undefined);
+      case JSOp::Undefined: {
+        stack.push(StackValue(UndefinedValue()));
+        pc += JSOpLength_Undefined;
+        break;
+      }
+
         NYI_OPCODE(Null);
         NYI_OPCODE(False);
         NYI_OPCODE(True);
@@ -161,7 +188,13 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(Uint24);
         NYI_OPCODE(Double);
         NYI_OPCODE(BigInt);
-        NYI_OPCODE(String);
+
+    case JSOp::String: {
+      stack.push(StackValue(frame->script()->getString(pc)));
+      pc += JSOpLength_String;
+      break;
+    }
+        
         NYI_OPCODE(Symbol);
         NYI_OPCODE(Void);
         NYI_OPCODE(Typeof);
@@ -331,16 +364,10 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(GetName);
 
       case JSOp::GetGName: {
-        obj0.set(&cx->global()->lexicalEnvironment());
-        name0.set(script->getName(pc));
-        if (!RunIC(cx, stack, frame, obj0, &obj1)) {
-          return false;
-        }
-        if (!stack.push(StackValue(obj1.get()))) {
-          return false;
-        }
-        pc++;
-        break;
+        state.obj0.set(&cx->global()->lexicalEnvironment());
+        state.name0.set(frame->script()->getName(pc));
+        pc += JSOpLength_GetGName;
+        goto ic_GetName;
       }
 
         NYI_OPCODE(GetArg);
@@ -397,6 +424,19 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
     }
   }
 
+ic_GetName:
+  // operand 0: envChain in state.obj0
+  // payload: name in name0
+  if (!DoGetNameFallback(cx, frame,
+                         static_cast<ICFallbackStub*>(
+                             frame->interpreterICEntry()->firstStub()),
+                         state.obj0, &state.res)) {
+    return false;
+  }
+  frame->interpreterICEntry()++;
+  stack.push(StackValue(state.res.get()));
+  goto dispatch;
+
   return true;
 }
 
@@ -404,9 +444,6 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                     CalleeToken calleeToken, JSObject* envChain,
                                     Value* result) {
   Stack stack(cx->portableBaselineStack());
-
-  printf("Trampoline: argc %zu argv %p calleeToken %p\n", argc, argv,
-         calleeToken);
 
   // Expected stack frame:
   // - argN
