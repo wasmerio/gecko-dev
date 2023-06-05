@@ -1565,7 +1565,8 @@ function $TypedArrayValues() {
   IsTypedArrayEnsuringArrayBuffer(O);
 
   // Step 7.
-  return CreateArrayIterator(O, ITEM_KIND_VALUE);
+  var iterator = CreateArrayIterator(O, ITEM_KIND_VALUE);
+  return iterator;
 }
 SetCanonicalName($TypedArrayValues, "values");
 
