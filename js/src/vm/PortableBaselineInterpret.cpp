@@ -73,6 +73,7 @@ struct Stack {
     return true;
   }
   StackValue pop() { return *(*sp)++; }
+  void popn(size_t len) { (*sp) += len; }
 
   StackValue* cur() { return *sp; }
   void restore(StackValue* s) { *sp = s; }
@@ -153,83 +154,25 @@ struct State {
         name0(cx) {}
 };
 
-class PC {
-  enum class Kind {
-    JS = 0,
-    IC = 1,
-  };
-  Kind kind;
-  uintptr_t ptr;
+struct PC {
+  jsbytecode* pc;
 
-  PC() : kind(Kind::JS), ptrBits(0) {}
+  explicit PC(BaselineFrame* frame) : pc(frame->interpreterPC()) {}
 
- public:
-  static PC JS(jsbytecode* pc)
-      : kind(Kind::JS), ptrBits(reinterpret_cast<uintptr_t>(pc)) {}
-  static PC IC(uint8_t* pc)
-      : kind(Kind::IC), ptrBits(reinterpret_cast<uintptr_t>(pc)) {}
-
-  bool isJS() const { return kind == Kind::JS; }
-  bool isIC() const { return kind == Kind::IC; }
-  jsbytecode* asJS() const { return reinterpret_cast<jsbytecode*>(ptrBits); }
-  uint8_t* asIC() const { return reinterpret_cast<jsbytecode*>(ptrBits); }
-
-  uint64_t asRawBits() const {
-    uint64_t tag = static_cast<uint64_t>(kind) << 63;
-    uint64_t ptr = static_cast<uint64_t>(ptrBits);
-    return tag | ptr;
+  void advance(BaselineFrame* frame, intptr_t delta) {
+    pc += delta;
+    frame->interpreterPC() = pc;
   }
-  static PC fromRawBits(uint64_t bits) const {
-    Kind kind = (bits >> 63) != 0 ? Kind::IC : Kind::JS;
-    uintptr_t ptr = static_cast<uintptr_t>(bits & ((1 << 63) - 1));
-    return PC{kind, ptr};
-  }
-
-  bool inc(intptr_t delta) { ptr += delta; }
 };
-
-struct PCManager {
-  PC pc;
-
-  explicit PCManager(BaselineFrame* frame)
-      : pc(PC::JS(frame->interpreterPC())) {}
-  bool call(Stack& stack, PC newPC) {
-    if (!stack.push(StackValue(pc.asRawBits()))) {
-      return false;
-    }
-    pc = newPC;
-  }
-  void ret(Stack& stack) { pc = PC::fromRawBits(stack.pop().asUInt64()); }
-
-  void updateJS(BaselineFrame* frame, intptr_t delta) {
-    MOZ_ASSERT(pc.isJS());
-    pc.inc(delta);
-    frame->interpreterPC() = pc.asJS();
-  }
-
-  void updateIC(intptr_t delta) {
-    MOZ_ASSERT(pc.isIC());
-    pc.inc(delta);
-  }
-}
 
 static bool
 PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
   State state(cx);
   BaselineFrame* frame = stack.frameFromFP();
-  PCManager pc(frame);
-
-  goto dispatch_js;
+  PC pc(frame);
 
   while (true) {
   dispatch:
-    if (pc.pc.isJS()) {
-      goto dispatch_js;
-    } else {
-      goto dispatch_ic;
-    }
-
-  dispatch_js:
 
 #define NYI_OPCODE(op)                               \
   case JSOp::op:                                     \
@@ -237,15 +180,16 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
     MOZ_CRASH("Bad opcode");                         \
     break;
 
-#define ADVANCE(delta) pc.updateJS((delta));
+#define ADVANCE(delta) pc.advance(frame, (delta));
 #define ADVANCE_AND_DISPATCH(delta) \
   ADVANCE(delta);                   \
-  goto dispatch_js;
+  goto dispatch;
+#define NEXT_IC() \
+    frame->interpreterICEntry()++;
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
-    jsbytecode* jspc = pc.pc.asJS();
-    state.op = JSOp(*jspc);
+    state.op = JSOp(*pc.pc);
     switch (state.op) {
       case JSOp::Nop: {
         END_OP(Nop);
@@ -269,7 +213,7 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(BigInt);
 
       case JSOp::String: {
-        stack.push(StackValue(frame->script()->getString(jspc)));
+        stack.push(StackValue(frame->script()->getString(pc.pc)));
         END_OP(String);
       }
 
@@ -374,8 +318,8 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(BuiltinObject);
 
       case JSOp::Call: {
-        state.argc = GET_ARGC(jspc);
-        ADVANCE(Call);
+        state.argc = GET_ARGC(pc.pc);
+        ADVANCE(JSOpLength_Call);
         goto ic_Call;
       }
 
@@ -449,8 +393,8 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
 
       case JSOp::GetGName: {
         state.obj0.set(&cx->global()->lexicalEnvironment());
-        state.name0.set(frame->script()->getName(jspc));
-        ADVANCE(GetGName);
+        state.name0.set(frame->script()->getName(pc.pc));
+        ADVANCE(JSOpLength_GetGName);
         goto ic_GetName;
       }
 
@@ -519,19 +463,32 @@ ic_GetName:
   }
   frame->interpreterICEntry()++;
   stack.push(StackValue(state.res.get()));
-  goto dispatch_js;
+  NEXT_IC();
+  goto dispatch;
 
 ic_Call:
-  // operand 0: argc in state.argc
+  do {
+    // operand 0: argc in state.argc
+    uint32_t argc = state.argc;
 
-  // Reverse order of args on stack.
-  for (int i = 0; i < state.argc / 2; i++) {
-    std::swap(stack[i], stack[state.argc - 1 - i]);
-  }
+    // Reverse order of args on stack.
+    for (int i = 0; i < state.argc / 2; i++) {
+      std::swap(stack[i], stack[state.argc - 1 - i]);
+    }
 
-  goto dispatch_js;
+    if (!DoCallFallback(cx, frame,
+                        static_cast<ICFallbackStub*>(
+                            frame->interpreterICEntry()->firstStub()),
+                        state.argc, reinterpret_cast<Value*>(&stack[0]),
+                        &state.value0)) {
+      return false;
+    }
+    stack.popn(argc);
+    stack.push(StackValue(state.value0));
+  } while (false);
 
-dispatch_ic:;
+  NEXT_IC();
+  goto dispatch;
 
   return true;
 }
