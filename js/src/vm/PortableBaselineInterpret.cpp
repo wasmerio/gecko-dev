@@ -117,6 +117,8 @@ struct Stack {
     return reinterpret_cast<BaselineFrame*>(reinterpret_cast<uintptr_t>(fp) -
                                             BaselineFrame::Size());
   }
+
+  StackValue& operator[](size_t index) { return (*sp)[index]; }
 };
 
 // TODO:
@@ -137,6 +139,7 @@ struct State {
   RootedScript script0;
   Rooted<PropertyName*> name0;
   JSOp op;
+  int argc;
 
   State(JSContext* cx)
       : value0(cx),
@@ -150,13 +153,83 @@ struct State {
         name0(cx) {}
 };
 
-static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
+class PC {
+  enum class Kind {
+    JS = 0,
+    IC = 1,
+  };
+  Kind kind;
+  uintptr_t ptr;
+
+  PC() : kind(Kind::JS), ptrBits(0) {}
+
+ public:
+  static PC JS(jsbytecode* pc)
+      : kind(Kind::JS), ptrBits(reinterpret_cast<uintptr_t>(pc)) {}
+  static PC IC(uint8_t* pc)
+      : kind(Kind::IC), ptrBits(reinterpret_cast<uintptr_t>(pc)) {}
+
+  bool isJS() const { return kind == Kind::JS; }
+  bool isIC() const { return kind == Kind::IC; }
+  jsbytecode* asJS() const { return reinterpret_cast<jsbytecode*>(ptrBits); }
+  uint8_t* asIC() const { return reinterpret_cast<jsbytecode*>(ptrBits); }
+
+  uint64_t asRawBits() const {
+    uint64_t tag = static_cast<uint64_t>(kind) << 63;
+    uint64_t ptr = static_cast<uint64_t>(ptrBits);
+    return tag | ptr;
+  }
+  static PC fromRawBits(uint64_t bits) const {
+    Kind kind = (bits >> 63) != 0 ? Kind::IC : Kind::JS;
+    uintptr_t ptr = static_cast<uintptr_t>(bits & ((1 << 63) - 1));
+    return PC{kind, ptr};
+  }
+
+  bool inc(intptr_t delta) { ptr += delta; }
+};
+
+struct PCManager {
+  PC pc;
+
+  explicit PCManager(BaselineFrame* frame)
+      : pc(PC::JS(frame->interpreterPC())) {}
+  bool call(Stack& stack, PC newPC) {
+    if (!stack.push(StackValue(pc.asRawBits()))) {
+      return false;
+    }
+    pc = newPC;
+  }
+  void ret(Stack& stack) { pc = PC::fromRawBits(stack.pop().asUInt64()); }
+
+  void updateJS(BaselineFrame* frame, intptr_t delta) {
+    MOZ_ASSERT(pc.isJS());
+    pc.inc(delta);
+    frame->interpreterPC() = pc.asJS();
+  }
+
+  void updateIC(intptr_t delta) {
+    MOZ_ASSERT(pc.isIC());
+    pc.inc(delta);
+  }
+}
+
+static bool
+PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
   State state(cx);
   BaselineFrame* frame = stack.frameFromFP();
+  PCManager pc(frame);
+
+  goto dispatch_js;
 
   while (true) {
   dispatch:
-    jsbytecode*& pc = frame->interpreterPC();
+    if (pc.pc.isJS()) {
+      goto dispatch_js;
+    } else {
+      goto dispatch_ic;
+    }
+
+  dispatch_js:
 
 #define NYI_OPCODE(op)                               \
   case JSOp::op:                                     \
@@ -164,17 +237,23 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
     MOZ_CRASH("Bad opcode");                         \
     break;
 
-    state.op = JSOp(*pc);
+#define ADVANCE(delta) pc.updateJS((delta));
+#define ADVANCE_AND_DISPATCH(delta) \
+  ADVANCE(delta);                   \
+  goto dispatch_js;
+
+#define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
+
+    jsbytecode* jspc = pc.pc.asJS();
+    state.op = JSOp(*jspc);
     switch (state.op) {
       case JSOp::Nop: {
-        pc += JSOpLength_Nop;
-        break;
+        END_OP(Nop);
       }
 
       case JSOp::Undefined: {
         stack.push(StackValue(UndefinedValue()));
-        pc += JSOpLength_Undefined;
-        break;
+        END_OP(Undefined);
       }
 
         NYI_OPCODE(Null);
@@ -189,12 +268,11 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(Double);
         NYI_OPCODE(BigInt);
 
-    case JSOp::String: {
-      stack.push(StackValue(frame->script()->getString(pc)));
-      pc += JSOpLength_String;
-      break;
-    }
-        
+      case JSOp::String: {
+        stack.push(StackValue(frame->script()->getString(jspc)));
+        END_OP(String);
+      }
+
         NYI_OPCODE(Symbol);
         NYI_OPCODE(Void);
         NYI_OPCODE(Typeof);
@@ -294,7 +372,13 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(CheckClassHeritage);
         NYI_OPCODE(FunWithProto);
         NYI_OPCODE(BuiltinObject);
-        NYI_OPCODE(Call);
+
+      case JSOp::Call: {
+        state.argc = GET_ARGC(jspc);
+        ADVANCE(Call);
+        goto ic_Call;
+      }
+
         NYI_OPCODE(CallContent);
         NYI_OPCODE(CallIter);
         NYI_OPCODE(CallContentIter);
@@ -365,8 +449,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
 
       case JSOp::GetGName: {
         state.obj0.set(&cx->global()->lexicalEnvironment());
-        state.name0.set(frame->script()->getName(pc));
-        pc += JSOpLength_GetGName;
+        state.name0.set(frame->script()->getName(jspc));
+        ADVANCE(GetGName);
         goto ic_GetName;
       }
 
@@ -435,7 +519,19 @@ ic_GetName:
   }
   frame->interpreterICEntry()++;
   stack.push(StackValue(state.res.get()));
-  goto dispatch;
+  goto dispatch_js;
+
+ic_Call:
+  // operand 0: argc in state.argc
+
+  // Reverse order of args on stack.
+  for (int i = 0; i < state.argc / 2; i++) {
+    std::swap(stack[i], stack[state.argc - 1 - i]);
+  }
+
+  goto dispatch_js;
+
+dispatch_ic:;
 
   return true;
 }
