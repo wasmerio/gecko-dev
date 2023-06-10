@@ -161,13 +161,14 @@ struct PC {
   }
 };
 
-static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, JSObject* envChain, Value* ret) {
+static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
+                                      JSObject* envChain, Value* ret) {
   State state(cx);
 
   if (!stack.pushFrame(cx, envChain)) {
     return false;
   }
-  
+
   BaselineFrame* frame = stack.frameFromFP();
   PC pc(frame);
 
@@ -193,22 +194,51 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, JSObject* env
       case JSOp::Nop: {
         END_OP(Nop);
       }
-
       case JSOp::Undefined: {
         stack.push(StackValue(UndefinedValue()));
         END_OP(Undefined);
       }
+      case JSOp::Null: {
+        stack.push(StackValue(NullValue()));
+        END_OP(Null);
+      }
+      case JSOp::False: {
+        stack.push(StackValue(BooleanValue(false)));
+        END_OP(False);
+      }
+      case JSOp::True: {
+        stack.push(StackValue(BooleanValue(true)));
+        END_OP(True);
+      }
+      case JSOp::Int32: {
+        stack.push(StackValue(Int32Value(GET_INT32(pc.pc))));
+        END_OP(Int32);
+      }
+      case JSOp::Zero: {
+        stack.push(StackValue(Int32Value(0)));
+        END_OP(Zero);
+      }
+      case JSOp::One: {
+        stack.push(StackValue(Int32Value(1)));
+        END_OP(One);
+      }
+      case JSOp::Int8: {
+        stack.push(StackValue(Int32Value(GET_INT8(pc.pc))));
+        END_OP(Int8);
+      }
+      case JSOp::Uint16: {
+        stack.push(StackValue(Int32Value(GET_UINT16(pc.pc))));
+        END_OP(Uint16);
+      }
+      case JSOp::Uint24: {
+        stack.push(StackValue(Int32Value(GET_UINT24(pc.pc))));
+        END_OP(Uint24);
+      }
+      case JSOp::Double: {
+        stack.push(StackValue(GET_INLINE_VALUE(pc.pc)));
+        END_OP(Double);
+      }
 
-        NYI_OPCODE(Null);
-        NYI_OPCODE(False);
-        NYI_OPCODE(True);
-        NYI_OPCODE(Int32);
-        NYI_OPCODE(Zero);
-        NYI_OPCODE(One);
-        NYI_OPCODE(Int8);
-        NYI_OPCODE(Uint16);
-        NYI_OPCODE(Uint24);
-        NYI_OPCODE(Double);
         NYI_OPCODE(BigInt);
 
       case JSOp::String: {
@@ -500,7 +530,7 @@ ic_Call:
   // operand 0: argc in state.argc
   ICLOOP({
     uint32_t argc = state.argc;
-    uint32_t totalArgs = argc + 2; // this, callee, func args
+    uint32_t totalArgs = argc + 2;  // this, callee, func args
     Value* args = reinterpret_cast<Value*>(&stack[0]);
     // Reverse values on the stack.
     for (uint32_t i = 0; i < totalArgs / 2; i++) {
