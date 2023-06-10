@@ -78,10 +78,7 @@ struct Stack {
   StackValue* cur() { return *sp; }
   void restore(StackValue* s) { *sp = s; }
 
-  BaselineFrame* pushFrame(JSContext* cx, void* retAddr, JSObject* envChain) {
-    if (!push(StackValue(retAddr))) {
-      return nullptr;
-    }
+  BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
     if (!push(StackValue(fp))) {
       return nullptr;
     }
@@ -104,10 +101,9 @@ struct Stack {
     return frame;
   }
 
-  void popFrame(JSContext* cx, void** retAddr) {
-    StackValue* newTOS = &fp[2];
-    *retAddr = fp[1].asVoidPtr();
-    fp = reinterpret_cast<StackValue*>(fp[0].asVoidPtr());
+  void popFrame(JSContext* cx) {
+    StackValue* newTOS = fp + 1;
+    fp = reinterpret_cast<StackValue*>(fp->asVoidPtr());
 
     cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(fp));
 
@@ -165,9 +161,13 @@ struct PC {
   }
 };
 
-static bool
-PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
+static bool PortableBaselineInterpret(JSContext* cx, Stack& stack, JSObject* envChain, Value* ret) {
   State state(cx);
+
+  if (!stack.pushFrame(cx, envChain)) {
+    return false;
+  }
+  
   BaselineFrame* frame = stack.frameFromFP();
   PC pc(frame);
 
@@ -184,8 +184,7 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
 #define ADVANCE_AND_DISPATCH(delta) \
   ADVANCE(delta);                   \
   goto dispatch;
-#define NEXT_IC() \
-    frame->interpreterICEntry()++;
+#define NEXT_IC() frame->interpreterICEntry()++;
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
@@ -213,7 +212,7 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(BigInt);
 
       case JSOp::String: {
-        stack.push(StackValue(frame->script()->getString(pc.pc)));
+        stack.push(StackValue(StringValue(frame->script()->getString(pc.pc))));
         END_OP(String);
       }
 
@@ -368,10 +367,30 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
         NYI_OPCODE(Case);
         NYI_OPCODE(Default);
         NYI_OPCODE(TableSwitch);
-        NYI_OPCODE(Return);
-        NYI_OPCODE(GetRval);
-        NYI_OPCODE(SetRval);
-        NYI_OPCODE(RetRval);
+
+      case JSOp::Return: {
+        *ret = stack.pop().asValue();
+        stack.popFrame(cx);
+        stack.pop();  // fake return address
+        return true;
+      }
+
+      case JSOp::GetRval: {
+        stack.push(StackValue(*ret));
+        END_OP(GetRval);
+      }
+
+      case JSOp::SetRval: {
+        *ret = stack.pop().asValue();
+        END_OP(SetRval);
+      }
+
+      case JSOp::RetRval: {
+        stack.popFrame(cx);
+        stack.pop();  // fake return address
+        return true;
+      }
+
         NYI_OPCODE(CheckReturn);
         NYI_OPCODE(Throw);
         NYI_OPCODE(ThrowMsg);
@@ -452,41 +471,47 @@ PortableBaselineInterpret(JSContext* cx, Stack& stack, Value* ret) {
     }
   }
 
+#define ICLOOP(fallback_body)                                         \
+  for (ICStub* stub = frame->interpreterICEntry()->firstStub(); stub; \
+       stub = stub->maybeNext()) {                                    \
+    if (stub->isFallback()) {                                         \
+      ICFallbackStub* fallback = stub->toFallbackStub();              \
+      fallback_body;                                                  \
+      break;                                                          \
+    } else {                                                          \
+      ICCacheIRStub* cacheir = stub->toCacheIRStub();                 \
+      MOZ_CRASH("CacheIR interpreter");                               \
+    }                                                                 \
+  }
+
 ic_GetName:
   // operand 0: envChain in state.obj0
   // payload: name in name0
-  if (!DoGetNameFallback(cx, frame,
-                         static_cast<ICFallbackStub*>(
-                             frame->interpreterICEntry()->firstStub()),
-                         state.obj0, &state.res)) {
-    return false;
-  }
-  frame->interpreterICEntry()++;
+  ICLOOP({
+    if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
+      return false;
+    }
+  });
   stack.push(StackValue(state.res.get()));
   NEXT_IC();
   goto dispatch;
 
 ic_Call:
-  do {
-    // operand 0: argc in state.argc
+  // operand 0: argc in state.argc
+  ICLOOP({
     uint32_t argc = state.argc;
-
-    // Reverse order of args on stack.
-    for (int i = 0; i < state.argc / 2; i++) {
-      std::swap(stack[i], stack[state.argc - 1 - i]);
+    uint32_t totalArgs = argc + 2; // this, callee, func args
+    Value* args = reinterpret_cast<Value*>(&stack[0]);
+    // Reverse values on the stack.
+    for (uint32_t i = 0; i < totalArgs / 2; i++) {
+      std::swap(args[i], args[totalArgs - 1 - i]);
     }
-
-    if (!DoCallFallback(cx, frame,
-                        static_cast<ICFallbackStub*>(
-                            frame->interpreterICEntry()->firstStub()),
-                        state.argc, reinterpret_cast<Value*>(&stack[0]),
-                        &state.value0)) {
+    if (!DoCallFallback(cx, frame, fallback, argc, args, &state.res)) {
       return false;
     }
-    stack.popn(argc);
-    stack.push(StackValue(state.value0));
-  } while (false);
-
+    stack.popn(totalArgs);
+    stack.push(StackValue(state.res));
+  });
   NEXT_IC();
   goto dispatch;
 
@@ -513,18 +538,14 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   stack.push(StackValue(calleeToken));
   stack.push(
       StackValue(MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, argc)));
+  stack.push(StackValue(nullptr));  // Fake return address.
 
-  if (!stack.pushFrame(cx, /* retAddr = */ nullptr, envChain)) {
+  if (!PortableBaselineInterpret(cx, stack, envChain, result)) {
     return false;
   }
 
-  if (!PortableBaselineInterpret(cx, stack, result)) {
-    return false;
-  }
-
-  void* dummyRet;
-  stack.popFrame(cx, &dummyRet);
-  MOZ_ASSERT(dummRet == nullptr);
+  // Pop the descriptor, calleeToken, this, and args.
+  stack.popn(3 + argc);
 
   return true;
 }
