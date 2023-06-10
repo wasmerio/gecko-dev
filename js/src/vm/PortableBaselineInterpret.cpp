@@ -238,9 +238,10 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         stack.push(StackValue(GET_INLINE_VALUE(pc.pc)));
         END_OP(Double);
       }
-
-        NYI_OPCODE(BigInt);
-
+      case JSOp::BigInt: {
+        stack.push(StackValue(JS::BigIntValue(frame->script()->getBigInt(pc.pc))));
+        END_OP(BigInt);
+      }
       case JSOp::String: {
         stack.push(StackValue(StringValue(frame->script()->getString(pc.pc))));
         END_OP(String);
