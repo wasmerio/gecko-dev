@@ -302,7 +302,14 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(Add);
         NYI_OPCODE(Sub);
         NYI_OPCODE(Mul);
-        NYI_OPCODE(Div);
+
+      case JSOp::Div: {
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_Div);
+        goto ic_BinaryArith;
+      }
+
         NYI_OPCODE(Mod);
         NYI_OPCODE(Pow);
         NYI_OPCODE(ToPropertyKey);
@@ -372,7 +379,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(FunWithProto);
         NYI_OPCODE(BuiltinObject);
 
-      case JSOp::Call: {
+      case JSOp::Call:
+      case JSOp::CallIgnoresRv: {
         state.argc = GET_ARGC(pc.pc);
         ADVANCE(JSOpLength_Call);
         goto ic_Call;
@@ -381,7 +389,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(CallContent);
         NYI_OPCODE(CallIter);
         NYI_OPCODE(CallContentIter);
-        NYI_OPCODE(CallIgnoresRv);
         NYI_OPCODE(SpreadCall);
         NYI_OPCODE(OptimizeSpreadCall);
         NYI_OPCODE(Eval);
@@ -473,7 +480,16 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_GetName;
       }
 
-        NYI_OPCODE(GetArg);
+      case JSOp::GetArg: {
+        unsigned i = GET_ARGNO(pc.pc);
+        if (frame->script()->argsObjAliasesFormals()) {
+          stack.push(StackValue(frame->argsObj().arg(i)));
+        } else {
+          stack.push(StackValue(frame->unaliasedFormal(i)));
+        }
+        END_OP(GetArg);
+      }
+
         NYI_OPCODE(GetFrameArg);
         NYI_OPCODE(GetLocal);
         NYI_OPCODE(ArgumentsLength);
@@ -520,12 +536,39 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(Arguments);
         NYI_OPCODE(Rest);
         NYI_OPCODE(FunctionThis);
-        NYI_OPCODE(Pop);
-        NYI_OPCODE(PopN);
-        NYI_OPCODE(Dup);
-        NYI_OPCODE(Dup2);
-        NYI_OPCODE(DupAt);
-        NYI_OPCODE(Swap);
+
+      case JSOp::Pop: {
+        stack.pop();
+        END_OP(Pop);
+      }
+      case JSOp::PopN: {
+        uint32_t n = GET_UINT16(pc.pc);
+        stack.popn(n);
+        END_OP(PopN);
+      }
+      case JSOp::Dup: {
+        StackValue value = stack[0];
+        stack.push(value);
+        END_OP(Dup);
+      }
+      case JSOp::Dup2: {
+        StackValue value1 = stack[0];
+        StackValue value2 = stack[1];
+        stack.push(value2);
+        stack.push(value1);
+        END_OP(Dup2);
+      }
+      case JSOp::DupAt: {
+        unsigned i = GET_UINT24(pc.pc);
+        StackValue value = stack[i];
+        stack.push(value);
+        END_OP(DupAt);
+      }
+      case JSOp::Swap: {
+        std::swap(stack[0], stack[1]);
+        END_OP(Swap);
+      }
+
         NYI_OPCODE(Pick);
         NYI_OPCODE(Unpick);
         NYI_OPCODE(Lineno);
@@ -602,6 +645,19 @@ ic_UnaryArith:
   printf("ic_UnaryArith\n");
   ICLOOP({
     if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
+      return false;
+    }
+  });
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_BinaryArith:
+  // operand 0: value in state.value0
+  // operand 1: value in state.value1
+  ICLOOP({
+    if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
+                               &state.res)) {
       return false;
     }
   });
