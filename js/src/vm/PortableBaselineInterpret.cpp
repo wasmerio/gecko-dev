@@ -239,18 +239,31 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(Double);
       }
       case JSOp::BigInt: {
-        stack.push(StackValue(JS::BigIntValue(frame->script()->getBigInt(pc.pc))));
+        stack.push(
+            StackValue(JS::BigIntValue(frame->script()->getBigInt(pc.pc))));
         END_OP(BigInt);
       }
       case JSOp::String: {
         stack.push(StackValue(StringValue(frame->script()->getString(pc.pc))));
         END_OP(String);
       }
+      case JSOp::Symbol: {
+        stack.push(StackValue(cx->wellKnownSymbols().get(GET_UINT8(pc.pc))));
+        END_OP(Symbol);
+      }
+      case JSOp::Void: {
+        stack[0] = StackValue(JS::UndefinedValue());
+        END_OP(Symbol);
+      }
 
-        NYI_OPCODE(Symbol);
-        NYI_OPCODE(Void);
-        NYI_OPCODE(Typeof);
-        NYI_OPCODE(TypeofExpr);
+      case JSOp::Typeof:
+      case JSOp::TypeofExpr: {
+        static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
+        ADVANCE(JSOpLength_Typeof);
+        state.value0 = stack.pop().asValue();
+        goto ic_Typeof;
+      }
+
         NYI_OPCODE(Pos);
         NYI_OPCODE(Neg);
         NYI_OPCODE(BitNot);
@@ -523,7 +536,7 @@ ic_GetName:
       return false;
     }
   });
-  stack.push(StackValue(state.res.get()));
+  stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -543,6 +556,17 @@ ic_Call:
     stack.popn(totalArgs);
     stack.push(StackValue(state.res));
   });
+  NEXT_IC();
+  goto dispatch;
+
+ic_Typeof:
+  // operand 0: value in state.value0
+  ICLOOP({
+    if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
+      return false;
+    }
+  });
+  stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
