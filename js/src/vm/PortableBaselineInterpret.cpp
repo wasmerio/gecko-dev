@@ -19,6 +19,7 @@
 #include "jit/JitFrames.h"
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/JitActivation.h"
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
@@ -190,6 +191,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
     state.op = JSOp(*pc.pc);
+    printf("op: %d\n", (int)state.op);
     switch (state.op) {
       case JSOp::Nop: {
         END_OP(Nop);
@@ -264,9 +266,22 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_Typeof;
       }
 
-        NYI_OPCODE(Pos);
-        NYI_OPCODE(Neg);
-        NYI_OPCODE(BitNot);
+      case JSOp::Pos:
+      case JSOp::Neg:
+      case JSOp::BitNot:
+      case JSOp::Inc:
+      case JSOp::Dec:
+      case JSOp::ToNumeric: {
+        static_assert(JSOpLength_Pos == JSOpLength_Neg);
+        static_assert(JSOpLength_Pos == JSOpLength_BitNot);
+        static_assert(JSOpLength_Pos == JSOpLength_Inc);
+        static_assert(JSOpLength_Pos == JSOpLength_Dec);
+        static_assert(JSOpLength_Pos == JSOpLength_ToNumeric);
+        ADVANCE(JSOpLength_Pos);
+        state.value0 = stack.pop().asValue();
+        goto ic_UnaryArith;
+      }
+
         NYI_OPCODE(Not);
         NYI_OPCODE(BitOr);
         NYI_OPCODE(BitXor);
@@ -286,14 +301,11 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(Ursh);
         NYI_OPCODE(Add);
         NYI_OPCODE(Sub);
-        NYI_OPCODE(Inc);
-        NYI_OPCODE(Dec);
         NYI_OPCODE(Mul);
         NYI_OPCODE(Div);
         NYI_OPCODE(Mod);
         NYI_OPCODE(Pow);
         NYI_OPCODE(ToPropertyKey);
-        NYI_OPCODE(ToNumeric);
         NYI_OPCODE(ToString);
         NYI_OPCODE(IsNullOrUndefined);
         NYI_OPCODE(GlobalThis);
@@ -491,7 +503,19 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(EnterWith);
         NYI_OPCODE(LeaveWith);
         NYI_OPCODE(BindVar);
-        NYI_OPCODE(GlobalOrEvalDeclInstantiation);
+
+      case JSOp::GlobalOrEvalDeclInstantiation: {
+        GCThingIndex lastFun = GET_GCTHING_INDEX(pc.pc);
+        state.script0 = frame->script();
+        state.obj0 = frame->environmentChain();
+        if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
+                                           lastFun)) {
+          // TODO: exception case?
+          return false;
+        }
+        END_OP(GlobalOrEvalDeclInstantiation);
+      }
+
         NYI_OPCODE(DelName);
         NYI_OPCODE(Arguments);
         NYI_OPCODE(Rest);
@@ -529,6 +553,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
   }
 
 ic_GetName:
+  printf("ic_GetName\n");
   // operand 0: envChain in state.obj0
   // payload: name in name0
   ICLOOP({
@@ -541,6 +566,7 @@ ic_GetName:
   goto dispatch;
 
 ic_Call:
+  printf("ic_Call\n");
   // operand 0: argc in state.argc
   ICLOOP({
     uint32_t argc = state.argc;
@@ -560,9 +586,22 @@ ic_Call:
   goto dispatch;
 
 ic_Typeof:
+  printf("ic_Typeof\n");
   // operand 0: value in state.value0
   ICLOOP({
     if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
+      return false;
+    }
+  });
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_UnaryArith:
+  // operand 0: value in state.value0
+  printf("ic_UnaryArith\n");
+  ICLOOP({
+    if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
     }
   });
