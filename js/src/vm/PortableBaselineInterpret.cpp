@@ -138,6 +138,7 @@ struct State {
   Rooted<PropertyName*> name0;
   JSOp op;
   int argc;
+  uint32_t jumpOffset;
 
   State(JSContext* cx)
       : value0(cx),
@@ -191,7 +192,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
     state.op = JSOp(*pc.pc);
-    printf("op: %d\n", (int)state.op);
     switch (state.op) {
       case JSOp::Nop: {
         END_OP(Nop);
@@ -281,8 +281,28 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         state.value0 = stack.pop().asValue();
         goto ic_UnaryArith;
       }
+      case JSOp::Not: {
+        ADVANCE(JSOpLength_Not);
+        state.value0 = stack.pop().asValue();
+        goto ic_ToBool;
+      }
+      case JSOp::And:
+      case JSOp::Or: {
+        static_assert(JSOpLength_And == JSOpLength_Or);
+        state.jumpOffset = GET_JUMP_OFFSET(pc.pc) - JSOpLength_And;
+        ADVANCE(JSOpLength_And);
+        state.value0 = stack[0].asValue();
+        goto ic_ToBool;
+      }
+      case JSOp::JumpIfTrue:
+      case JSOp::JumpIfFalse: {
+        static_assert(JSOpLength_JumpIfTrue == JSOpLength_JumpIfFalse);
+        state.jumpOffset = GET_JUMP_OFFSET(pc.pc) - JSOpLength_JumpIfTrue;
+        ADVANCE(JSOpLength_JumpIfTrue);
+        state.value0 = stack.pop().asValue();
+        goto ic_ToBool;
+      }
 
-        NYI_OPCODE(Not);
         NYI_OPCODE(BitOr);
         NYI_OPCODE(BitXor);
         NYI_OPCODE(BitAnd);
@@ -419,13 +439,20 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(ResumeKind);
         NYI_OPCODE(CheckResumeKind);
         NYI_OPCODE(Resume);
-        NYI_OPCODE(JumpTarget);
-        NYI_OPCODE(LoopHead);
-        NYI_OPCODE(Goto);
-        NYI_OPCODE(JumpIfFalse);
-        NYI_OPCODE(JumpIfTrue);
-        NYI_OPCODE(And);
-        NYI_OPCODE(Or);
+
+      case JSOp::JumpTarget:
+      case JSOp::LoopHead: {
+        int32_t icIndex = GET_INT32(pc.pc);
+        frame->interpreterICEntry() = &frame->icScript()->icEntry(icIndex);
+        END_OP(JumpTarget);
+      }
+
+      case JSOp::Goto: {
+        uint32_t offset = GET_JUMP_OFFSET(pc.pc);
+        ADVANCE(offset);
+        break;
+      }
+
         NYI_OPCODE(Coalesce);
         NYI_OPCODE(Case);
         NYI_OPCODE(Default);
@@ -604,6 +631,7 @@ ic_GetName:
       return false;
     }
   });
+ic_GetName_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
@@ -625,6 +653,7 @@ ic_Call:
     stack.popn(totalArgs);
     stack.push(StackValue(state.res));
   });
+ic_Call_tail:
   NEXT_IC();
   goto dispatch;
 
@@ -636,6 +665,7 @@ ic_Typeof:
       return false;
     }
   });
+ic_Typeof_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
@@ -648,11 +678,13 @@ ic_UnaryArith:
       return false;
     }
   });
+ic_UnaryArith_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
 ic_BinaryArith:
+  printf("ic_BinaryArith\n");
   // operand 0: value in state.value0
   // operand 1: value in state.value1
   ICLOOP({
@@ -661,11 +693,46 @@ ic_BinaryArith:
       return false;
     }
   });
+ic_BinaryArith_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
-  return true;
+ic_ToBool:
+  printf("ic_ToBool\n");
+  // operand 0: value in state.value0
+  // operand 1 (some opcodes): jump offset in state.jumpOffset
+  ICLOOP({
+    if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
+      return false;
+    }
+  });
+ic_ToBool_tail:
+  switch (state.op) {
+    case JSOp::Not:
+      stack.push(StackValue(BooleanValue(!state.res.toBoolean())));
+      break;
+    case JSOp::Or:
+    case JSOp::JumpIfTrue: {
+      bool result = state.res.toBoolean();
+      if (result) {
+        ADVANCE(state.jumpOffset);
+      }
+      break;
+    }
+    case JSOp::And:
+    case JSOp::JumpIfFalse: {
+      bool result = state.res.toBoolean();
+      if (!result) {
+        ADVANCE(state.jumpOffset);
+      }
+      break;
+    }
+  default:
+    MOZ_CRASH("unexpected opcode");
+  }
+
+  goto dispatch;
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
