@@ -303,35 +303,59 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_ToBool;
       }
 
-        NYI_OPCODE(BitOr);
-        NYI_OPCODE(BitXor);
-        NYI_OPCODE(BitAnd);
-        NYI_OPCODE(Eq);
-        NYI_OPCODE(Ne);
-        NYI_OPCODE(StrictEq);
-        NYI_OPCODE(StrictNe);
-        NYI_OPCODE(Lt);
-        NYI_OPCODE(Gt);
-        NYI_OPCODE(Le);
-        NYI_OPCODE(Ge);
-        NYI_OPCODE(Instanceof);
-        NYI_OPCODE(In);
-        NYI_OPCODE(Lsh);
-        NYI_OPCODE(Rsh);
-        NYI_OPCODE(Ursh);
-        NYI_OPCODE(Add);
-        NYI_OPCODE(Sub);
-        NYI_OPCODE(Mul);
-
-      case JSOp::Div: {
+      case JSOp::BitOr:
+      case JSOp::BitXor:
+      case JSOp::BitAnd:
+      case JSOp::Lsh:
+      case JSOp::Rsh:
+      case JSOp::Ursh:
+      case JSOp::Add:
+      case JSOp::Sub:
+      case JSOp::Mul:
+      case JSOp::Div:
+      case JSOp::Mod:
+      case JSOp::Pow: {
+        static_assert(JSOpLength_BitOr == JSOpLength_BitXor);
+        static_assert(JSOpLength_BitOr == JSOpLength_BitAnd);
+        static_assert(JSOpLength_BitOr == JSOpLength_Lsh);
+        static_assert(JSOpLength_BitOr == JSOpLength_Rsh);
+        static_assert(JSOpLength_BitOr == JSOpLength_Ursh);
+        static_assert(JSOpLength_BitOr == JSOpLength_Add);
+        static_assert(JSOpLength_BitOr == JSOpLength_Sub);
+        static_assert(JSOpLength_BitOr == JSOpLength_Mul);
+        static_assert(JSOpLength_BitOr == JSOpLength_Div);
+        static_assert(JSOpLength_BitOr == JSOpLength_Mod);
+        static_assert(JSOpLength_BitOr == JSOpLength_Pow);
         state.value1 = stack.pop().asValue();
         state.value0 = stack.pop().asValue();
         ADVANCE(JSOpLength_Div);
         goto ic_BinaryArith;
       }
 
-        NYI_OPCODE(Mod);
-        NYI_OPCODE(Pow);
+      case JSOp::Eq:
+      case JSOp::Ne:
+      case JSOp::StrictEq:
+      case JSOp::StrictNe:
+      case JSOp::Lt:
+      case JSOp::Gt:
+      case JSOp::Le:
+      case JSOp::Ge: {
+        static_assert(JSOpLength_Eq == JSOpLength_Ne);
+        static_assert(JSOpLength_Eq == JSOpLength_StrictEq);
+        static_assert(JSOpLength_Eq == JSOpLength_StrictNe);
+        static_assert(JSOpLength_Eq == JSOpLength_Lt);
+        static_assert(JSOpLength_Eq == JSOpLength_Gt);
+        static_assert(JSOpLength_Eq == JSOpLength_Le);
+        static_assert(JSOpLength_Eq == JSOpLength_Ge);
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_Eq);
+        goto ic_Compare;
+      }
+
+        NYI_OPCODE(Instanceof);
+        NYI_OPCODE(In);
+
         NYI_OPCODE(ToPropertyKey);
         NYI_OPCODE(ToString);
         NYI_OPCODE(IsNullOrUndefined);
@@ -728,9 +752,26 @@ ic_ToBool_tail:
       }
       break;
     }
-  default:
-    MOZ_CRASH("unexpected opcode");
+    default:
+      MOZ_CRASH("unexpected opcode");
   }
+  NEXT_IC();
+  goto dispatch;
+
+ic_Compare:
+  printf("ic_Compare\n");
+  // operand 0: value in state.value0
+  // operand 1: value in state.value1
+  ICLOOP({
+    if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
+                           &state.res)) {
+      return false;
+    }
+  });
+ic_Compare_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
 
   goto dispatch;
 }
