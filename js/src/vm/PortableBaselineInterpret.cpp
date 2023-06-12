@@ -23,6 +23,7 @@
 #include "vm/JitActivation.h"
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
+#include "vm/PlainObject.h"
 
 #include "jit/JitScript-inl.h"
 #include "vm/JSScript-inl.h"
@@ -353,21 +354,54 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_Compare;
       }
 
-        NYI_OPCODE(Instanceof);
-        NYI_OPCODE(In);
+      case JSOp::Instanceof: {
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_Instanceof);
+        goto ic_InstanceOf;
+      }
+
+      case JSOp::In: {
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_In);
+        goto ic_In;
+      }
 
         NYI_OPCODE(ToPropertyKey);
         NYI_OPCODE(ToString);
         NYI_OPCODE(IsNullOrUndefined);
-        NYI_OPCODE(GlobalThis);
-        NYI_OPCODE(NonSyntacticGlobalThis);
+
+      case JSOp::GlobalThis: {
+        stack.push(StackValue(
+            ObjectValue(*cx->global()->lexicalEnvironment().thisObject())));
+        END_OP(GlobalThis);
+      }
+
+      case JSOp::NonSyntacticGlobalThis: {
+        state.obj0 = frame->environmentChain();
+        js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
+        stack.push(StackValue(state.value0));
+        END_OP(NonSyntacticGlobalThis);
+      }
+
         NYI_OPCODE(NewTarget);
         NYI_OPCODE(DynamicImport);
         NYI_OPCODE(ImportMeta);
         NYI_OPCODE(NewInit);
         NYI_OPCODE(NewObject);
-        NYI_OPCODE(Object);
-        NYI_OPCODE(ObjWithProto);
+
+      case JSOp::Object: {
+        stack.push(StackValue(ObjectValue(*frame->script()->getObject(pc.pc))));
+        END_OP(Object);
+      }
+      case JSOp::ObjWithProto: {
+        state.value0 = stack[0].asValue();
+        JSObject* obj = ObjectWithProtoOperation(cx, state.value0);
+        stack[0] = StackValue(ObjectValue(*obj));
+        END_OP(ObjWithProto);
+      }
+
         NYI_OPCODE(InitProp);
         NYI_OPCODE(InitHiddenProp);
         NYI_OPCODE(InitLockedProp);
@@ -769,6 +803,36 @@ ic_Compare:
     }
   });
 ic_Compare_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_InstanceOf:
+  printf("ic_InstanceOf\n");
+  // operand 0: value in state.value0
+  // operand 1: value in state.value1
+  ICLOOP({
+    if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
+                              &state.res)) {
+      return false;
+    }
+  });
+ic_InstanceOf_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_In:
+  printf("ic_In\n");
+  // operand 0: value in state.value0
+  // operand 1: value in state.value1
+  ICLOOP({
+    if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
+                      &state.res)) {
+      return false;
+    }
+  });
+ic_In_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
