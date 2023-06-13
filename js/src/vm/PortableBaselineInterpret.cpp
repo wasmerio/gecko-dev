@@ -139,7 +139,7 @@ struct State {
   Rooted<PropertyName*> name0;
   JSOp op;
   int argc;
-  uint32_t jumpOffset;
+  int32_t jumpOffset;
 
   State(JSContext* cx)
       : value0(cx),
@@ -192,6 +192,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
+    printf("pc = %p\n", pc.pc);
     state.op = JSOp(*pc.pc);
     switch (state.op) {
       case JSOp::Nop: {
@@ -506,7 +507,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::Goto: {
-        uint32_t offset = GET_JUMP_OFFSET(pc.pc);
+        int32_t offset = GET_JUMP_OFFSET(pc.pc);
         ADVANCE(offset);
         break;
       }
@@ -617,7 +618,11 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(SetIntrinsic);
         NYI_OPCODE(PushLexicalEnv);
         NYI_OPCODE(PopLexicalEnv);
-        NYI_OPCODE(DebugLeaveLexicalEnv);
+
+      case JSOp::DebugLeaveLexicalEnv: {
+        END_OP(DebugLeaveLexicalEnv);
+      }
+
         NYI_OPCODE(RecreateLexicalEnv);
         NYI_OPCODE(FreshenLexicalEnv);
         NYI_OPCODE(PushClassBodyEnv);
@@ -788,12 +793,14 @@ ic_ToBool:
     }
   });
 ic_ToBool_tail:
+  printf("tobool tail: result %d op %d\n", state.res.toBoolean(), (int)state.op);
   switch (state.op) {
     case JSOp::Not:
       stack.push(StackValue(BooleanValue(!state.res.toBoolean())));
       break;
     case JSOp::Or:
     case JSOp::JumpIfTrue: {
+      printf("Or or JumpIfTrue\n");
       bool result = state.res.toBoolean();
       if (result) {
         ADVANCE(state.jumpOffset);
@@ -802,8 +809,10 @@ ic_ToBool_tail:
     }
     case JSOp::And:
     case JSOp::JumpIfFalse: {
+      printf("And or JumpIfFalse\n");
       bool result = state.res.toBoolean();
       if (!result) {
+        printf("jumping by %d\n", state.jumpOffset);
         ADVANCE(state.jumpOffset);
       }
       break;

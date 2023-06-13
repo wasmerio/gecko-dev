@@ -3248,6 +3248,8 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
     // pointer, but it needs to be non-null to trigger the appropriate
     // code-paths, so we set it to the entry trampoline itself here.
     setJitCodeRaw(reinterpret_cast<uint8_t*>(&js::PortableBaselineTrampoline));
+  } else if (!js::jit::IsBaselineInterpreterEnabled()) {
+    setJitCodeRaw(nullptr);
   } else {
     setJitCodeRaw(rt->jitRuntime()->interpreterStub().value);
   }
