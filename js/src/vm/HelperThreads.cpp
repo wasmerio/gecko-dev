@@ -443,6 +443,9 @@ void js::CancelOffThreadIonCompile(const CompilationSelector& selector) {
 
 #ifdef DEBUG
 bool js::HasOffThreadIonCompile(Realm* realm) {
+#  ifdef ENABLE_PORTABLE_BASELINE_INTERP
+  return false;
+#  else
   AutoLockHelperThreadState lock;
 
   if (!HelperThreadState().isInitialized(lock)) {
@@ -484,6 +487,7 @@ bool js::HasOffThreadIonCompile(Realm* realm) {
   }
 
   return false;
+#  endif  //   !ENABLE_PORTABLE_BASELINE_INTERP
 }
 #endif
 

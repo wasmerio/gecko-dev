@@ -496,20 +496,26 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(BuiltinObject);
 
       case JSOp::Call:
-      case JSOp::CallIgnoresRv: {
+      case JSOp::CallIgnoresRv:
+      case JSOp::CallContent:
+      case JSOp::CallIter:
+      case JSOp::CallContentIter:
+      case JSOp::Eval:
+      case JSOp::StrictEval: {
+        static_assert(JSOpLength_Call == JSOpLength_CallIgnoresRv);
+        static_assert(JSOpLength_Call == JSOpLength_CallContent);
+        static_assert(JSOpLength_Call == JSOpLength_CallIter);
+        static_assert(JSOpLength_Call == JSOpLength_CallContentIter);
+        static_assert(JSOpLength_Call == JSOpLength_Eval);
+        static_assert(JSOpLength_Call == JSOpLength_StrictEval);
         state.argc = GET_ARGC(pc.pc);
         ADVANCE(JSOpLength_Call);
         goto ic_Call;
       }
 
-        NYI_OPCODE(CallContent);
-        NYI_OPCODE(CallIter);
-        NYI_OPCODE(CallContentIter);
         NYI_OPCODE(SpreadCall);
         NYI_OPCODE(OptimizeSpreadCall);
-        NYI_OPCODE(Eval);
         NYI_OPCODE(SpreadEval);
-        NYI_OPCODE(StrictEval);
         NYI_OPCODE(StrictSpreadEval);
         NYI_OPCODE(ImplicitThis);
         NYI_OPCODE(CallSiteObj);
