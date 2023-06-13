@@ -120,7 +120,9 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
   MOZ_ASSERT(!cx->isInUnsafeRegion());
 
   // Release temporary buffer used for OSR into Ion.
-  cx->runtime()->jitRuntime()->freeIonOsrTempData();
+  if (cx->runtime()->jitRuntime()) {
+    cx->runtime()->jitRuntime()->freeIonOsrTempData();
+  }
 
   if (result.isMagic()) {
     MOZ_ASSERT(result.isMagic(JS_ION_ERROR));
