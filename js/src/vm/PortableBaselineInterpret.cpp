@@ -676,7 +676,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       break;                                                          \
     } else {                                                          \
       ICCacheIRStub* cacheir = stub->toCacheIRStub();                 \
-      MOZ_CRASH("CacheIR interpreter");                               \
+      (void)cacheir;                                                  \
+      /* nothing */                                                   \
     }                                                                 \
   }
 
@@ -835,8 +836,6 @@ ic_In:
 ic_In_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
-  goto dispatch;
-
   goto dispatch;
 }
 
