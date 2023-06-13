@@ -137,6 +137,7 @@ struct State {
   RootedObject obj2;
   RootedScript script0;
   Rooted<PropertyName*> name0;
+  RootedFunction fun0;
   JSOp op;
   int argc;
   int32_t jumpOffset;
@@ -150,7 +151,8 @@ struct State {
         obj1(cx),
         obj2(cx),
         script0(cx),
-        name0(cx) {}
+        name0(cx),
+        fun0(cx) {}
 };
 
 struct PC {
@@ -418,8 +420,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(InitHiddenElemSetter);
         NYI_OPCODE(GetProp);
         NYI_OPCODE(GetElem);
-        NYI_OPCODE(SetProp);
-        NYI_OPCODE(StrictSetProp);
         NYI_OPCODE(SetElem);
         NYI_OPCODE(StrictSetElem);
         NYI_OPCODE(DelProp);
@@ -450,7 +450,18 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(InitElemInc);
         NYI_OPCODE(Hole);
         NYI_OPCODE(RegExp);
-        NYI_OPCODE(Lambda);
+
+      case JSOp::Lambda: {
+        state.fun0 = frame->script()->getFunction(pc.pc);
+        state.obj0 = frame->environmentChain();
+        JSObject* res = js::Lambda(cx, state.fun0, state.obj0);
+        if (!res) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*res)));
+        END_OP(Lambda);
+      }
+
         NYI_OPCODE(SetFunName);
         NYI_OPCODE(InitHomeObject);
         NYI_OPCODE(CheckClassHeritage);
@@ -563,13 +574,25 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(CheckLexical);
         NYI_OPCODE(CheckAliasedLexical);
         NYI_OPCODE(CheckThis);
-        NYI_OPCODE(BindGName);
-        NYI_OPCODE(BindName);
-        NYI_OPCODE(GetName);
 
-      case JSOp::GetGName: {
+      case JSOp::BindGName: {
         state.obj0.set(&cx->global()->lexicalEnvironment());
         state.name0.set(frame->script()->getName(pc.pc));
+        ADVANCE(JSOpLength_BindGName);
+        goto ic_BindName;
+      }
+      case JSOp::BindName: {
+        state.obj0.set(frame->environmentChain());
+        ADVANCE(JSOpLength_BindName);
+        goto ic_BindName;
+      }
+      case JSOp::GetGName: {
+        state.obj0.set(&cx->global()->lexicalEnvironment());
+        ADVANCE(JSOpLength_GetGName);
+        goto ic_GetName;
+      }
+      case JSOp::GetName: {
+        state.obj0.set(frame->environmentChain());
         ADVANCE(JSOpLength_GetGName);
         goto ic_GetName;
       }
@@ -601,10 +624,24 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(GetIntrinsic);
         NYI_OPCODE(Callee);
         NYI_OPCODE(EnvCallee);
-        NYI_OPCODE(SetName);
-        NYI_OPCODE(StrictSetName);
-        NYI_OPCODE(SetGName);
-        NYI_OPCODE(StrictSetGName);
+
+      case JSOp::SetProp:
+      case JSOp::StrictSetProp:
+      case JSOp::SetName:
+      case JSOp::StrictSetName:
+      case JSOp::SetGName:
+      case JSOp::StrictSetGName: {
+        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetProp);
+        static_assert(JSOpLength_SetProp == JSOpLength_SetName);
+        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetName);
+        static_assert(JSOpLength_SetProp == JSOpLength_SetGName);
+        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        stack.push(StackValue(state.value1));
+        goto ic_SetProp;
+      }
+
         NYI_OPCODE(SetArg);
 
       case JSOp::SetLocal: {
@@ -709,7 +746,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 ic_GetName:
   printf("ic_GetName\n");
   // operand 0: envChain in state.obj0
-  // payload: name in name0
   ICLOOP({
     if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
       return false;
@@ -860,6 +896,32 @@ ic_In:
   });
 ic_In_tail:
   stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_BindName:
+  printf("ic_BindName\n");
+  // operand 0: env chain in state.obj0
+  ICLOOP({
+    if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
+      return false;
+    }
+  });
+ic_BindName_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_SetProp:
+  printf("ic_SetProp: icEntry = %p first = %p\n", frame->interpreterICEntry(),
+         frame->interpreterICEntry()->firstStub());
+  ICLOOP({
+    if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
+                           state.value1)) {
+      return false;
+    }
+  });
+ic_SetProp_tail:
   NEXT_IC();
   goto dispatch;
 }
