@@ -390,9 +390,15 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(NewTarget);
         NYI_OPCODE(DynamicImport);
         NYI_OPCODE(ImportMeta);
-        NYI_OPCODE(NewInit);
-        NYI_OPCODE(NewObject);
 
+      case JSOp::NewInit: {
+        ADVANCE(JSOpLength_NewInit);
+        goto ic_NewObject;
+      }
+      case JSOp::NewObject: {
+        ADVANCE(JSOpLength_NewObject);
+        goto ic_NewObject;
+      }
       case JSOp::Object: {
         stack.push(StackValue(ObjectValue(*frame->script()->getObject(pc.pc))));
         END_OP(Object);
@@ -404,9 +410,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(ObjWithProto);
       }
 
-        NYI_OPCODE(InitProp);
-        NYI_OPCODE(InitHiddenProp);
-        NYI_OPCODE(InitLockedProp);
         NYI_OPCODE(InitElem);
         NYI_OPCODE(InitHiddenElem);
         NYI_OPCODE(InitLockedElem);
@@ -569,7 +572,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(InitLexical);
       }
 
-        NYI_OPCODE(InitGLexical);
         NYI_OPCODE(InitAliasedLexical);
         NYI_OPCODE(CheckLexical);
         NYI_OPCODE(CheckAliasedLexical);
@@ -639,8 +641,26 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         state.value1 = stack.pop().asValue();
         state.value0 = stack.pop().asValue();
         stack.push(StackValue(state.value1));
+        ADVANCE(JSOpLength_SetProp);
         goto ic_SetProp;
       }
+
+      case JSOp::InitProp:
+      case JSOp::InitHiddenProp:
+      case JSOp::InitLockedProp: {
+        static_assert(JSOpLength_InitProp == JSOpLength_InitHiddenProp);
+        static_assert(JSOpLength_InitProp == JSOpLength_InitLockedProp);
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack[0].asValue();
+        ADVANCE(JSOpLength_InitProp);
+        goto ic_SetProp;
+      }
+    case JSOp::InitGLexical: {
+      state.value1 = stack[0].asValue();
+      state.value0.setObject(cx->global()->lexicalEnvironment());
+      ADVANCE(JSOpLength_InitGLexical);
+      goto ic_SetProp;
+    }
 
         NYI_OPCODE(SetArg);
 
@@ -913,8 +933,7 @@ ic_BindName_tail:
   goto dispatch;
 
 ic_SetProp:
-  printf("ic_SetProp: icEntry = %p first = %p\n", frame->interpreterICEntry(),
-         frame->interpreterICEntry()->firstStub());
+  printf("ic_SetProp\n");
   ICLOOP({
     if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
                            state.value1)) {
@@ -922,6 +941,18 @@ ic_SetProp:
     }
   });
 ic_SetProp_tail:
+  NEXT_IC();
+  goto dispatch;
+
+ic_NewObject:
+  printf("ic_NewObject\n");
+  ICLOOP({
+    if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
+      return false;
+    }
+  });
+ic_NewObject_tail:
+  stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 }
