@@ -1471,9 +1471,11 @@ bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
     }
   }
 
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
   // Overwrite the LHS on the stack (pushed for the decompiler) with the RHS.
   MOZ_ASSERT(stack[1] == lhs);
   stack[1] = rhs;
+#endif
 
   if (attached) {
     return true;
