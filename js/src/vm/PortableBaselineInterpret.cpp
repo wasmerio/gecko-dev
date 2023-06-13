@@ -192,7 +192,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
-    printf("pc = %p\n", pc.pc);
     state.op = JSOp(*pc.pc);
     switch (state.op) {
       case JSOp::Nop: {
@@ -793,14 +792,12 @@ ic_ToBool:
     }
   });
 ic_ToBool_tail:
-  printf("tobool tail: result %d op %d\n", state.res.toBoolean(), (int)state.op);
   switch (state.op) {
     case JSOp::Not:
       stack.push(StackValue(BooleanValue(!state.res.toBoolean())));
       break;
     case JSOp::Or:
     case JSOp::JumpIfTrue: {
-      printf("Or or JumpIfTrue\n");
       bool result = state.res.toBoolean();
       if (result) {
         ADVANCE(state.jumpOffset);
@@ -809,10 +806,8 @@ ic_ToBool_tail:
     }
     case JSOp::And:
     case JSOp::JumpIfFalse: {
-      printf("And or JumpIfFalse\n");
       bool result = state.res.toBoolean();
       if (!result) {
-        printf("jumping by %d\n", state.jumpOffset);
         ADVANCE(state.jumpOffset);
       }
       break;
