@@ -2488,6 +2488,9 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
   AutoAssertNoPendingException aanpe(cx);
   JS::AutoCheckCannotGC nogc;
 
+  printf("WARNING: skipping stub attach\n");
+  return ICAttachResult::OOM;
+
   if (writer.tooLarge()) {
     return ICAttachResult::TooLarge;
   }
