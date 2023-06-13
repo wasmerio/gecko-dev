@@ -324,7 +324,8 @@ static constexpr OpToFallbackKindTable FallbackKindTable;
 
 void ICScript::initICEntries(JSContext* cx, JSScript* script) {
   MOZ_ASSERT(cx->realm()->jitRealm());
-  MOZ_ASSERT(jit::IsBaselineInterpreterEnabled());
+  MOZ_ASSERT(jit::IsBaselineInterpreterEnabled() ||
+             jit::IsPortableBaselineInterpreterEnabled());
 
   MOZ_ASSERT(numICEntries() == script->numICEntries());
 
@@ -353,7 +354,9 @@ void ICScript::initICEntries(JSContext* cx, JSScript* script) {
                "Unexpected fallback kind for non-JOF_IC op");
 
     BaselineICFallbackKind kind = BaselineICFallbackKind(tableValue);
-    TrampolinePtr stubCode = fallbackCode.addr(kind);
+    TrampolinePtr stubCode = jit::IsBaselineInterpreterEnabled()
+                                 ? fallbackCode.addr(kind)
+                                 : TrampolinePtr();
 
     // Initialize the ICEntry and ICFallbackStub.
     uint32_t offset = loc.bytecodeToOffset(script);

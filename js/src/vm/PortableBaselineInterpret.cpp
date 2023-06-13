@@ -547,8 +547,17 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(TryDestructuring);
         NYI_OPCODE(Exception);
         NYI_OPCODE(Finally);
-        NYI_OPCODE(Uninitialized);
-        NYI_OPCODE(InitLexical);
+
+      case JSOp::Uninitialized: {
+        stack.push(StackValue(MagicValue(JS_UNINITIALIZED_LEXICAL)));
+        END_OP(Uninitialized);
+      }
+      case JSOp::InitLexical: {
+        uint32_t i = GET_LOCALNO(pc.pc);
+        frame->unaliasedLocal(i) = stack.pop().asValue();
+        END_OP(InitLexical);
+      }
+
         NYI_OPCODE(InitGLexical);
         NYI_OPCODE(InitAliasedLexical);
         NYI_OPCODE(CheckLexical);
@@ -576,7 +585,13 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
         NYI_OPCODE(GetFrameArg);
-        NYI_OPCODE(GetLocal);
+
+      case JSOp::GetLocal: {
+        uint32_t i = GET_LOCALNO(pc.pc);
+        stack.push(StackValue(frame->unaliasedLocal(i)));
+        END_OP(GetLocal);
+      }
+
         NYI_OPCODE(ArgumentsLength);
         NYI_OPCODE(GetActualArg);
         NYI_OPCODE(GetAliasedVar);
@@ -591,7 +606,13 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(SetGName);
         NYI_OPCODE(StrictSetGName);
         NYI_OPCODE(SetArg);
-        NYI_OPCODE(SetLocal);
+
+      case JSOp::SetLocal: {
+        uint32_t i = GET_LOCALNO(pc.pc);
+        frame->unaliasedLocal(i) = stack.pop().asValue();
+        END_OP(SetLocal);
+      }
+
         NYI_OPCODE(SetAliasedVar);
         NYI_OPCODE(SetIntrinsic);
         NYI_OPCODE(PushLexicalEnv);
