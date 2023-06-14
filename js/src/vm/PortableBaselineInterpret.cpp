@@ -128,13 +128,6 @@ struct Stack {
   StackValue& operator[](size_t index) { return (*sp)[index]; }
 };
 
-// TODO:
-// - update GC scanning to scan PortableBaselineStack.
-// - create a BaselineFrame in PortableBaselineInterpret, and root
-//   everything on that (JSScript, JitScript).
-// - opcode dispatch based on current interpreter PC in BaselineFrame.
-// - IC interpreter state (current stub and IC PC).
-
 struct State {
   RootedValue value0;
   RootedValue value1;
@@ -215,11 +208,11 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
     state.op = JSOp(*pc.pc);
-    printf("pc = %p: %s (ic %d)\n", pc.pc, CodeName(state.op),
+    printf("script = %p pc = %p: %s (ic %d)\n", frame->script(), pc.pc, CodeName(state.op),
            (int)(frame->interpreterICEntry() -
                  frame->script()->jitScript()->icScript()->icEntries()));
-    printf("stack[0] = %lx stack[1] = %lx\n", stack[0].asUInt64(),
-           stack[1].asUInt64());
+    printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n", stack[0].asUInt64(),
+           stack[1].asUInt64(), stack[2].asUInt64());
 
     switch (state.op) {
       case JSOp::Nop: {
@@ -619,7 +612,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
       case JSOp::InitLexical: {
         uint32_t i = GET_LOCALNO(pc.pc);
-        frame->unaliasedLocal(i) = stack.pop().asValue();
+        frame->unaliasedLocal(i) = stack[0].asValue();
         END_OP(InitLexical);
       }
 
@@ -729,7 +722,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::SetLocal: {
         uint32_t i = GET_LOCALNO(pc.pc);
-        frame->unaliasedLocal(i) = stack.pop().asValue();
+        frame->unaliasedLocal(i) = stack[0].asValue();
         END_OP(SetLocal);
       }
 
@@ -1044,6 +1037,7 @@ ic_GetElem:
     }
   });
 ic_GetElem_tail:
+  printf("GetElem result: %lx\n", state.res.asRawBits());
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
@@ -1100,6 +1094,8 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   // Pop the descriptor, calleeToken, and args. (Return address is
   // popped in callee.)
   stack.popn(2 + argc);
+
+  printf("result: %lx\n", result->asRawBits());
 
   return true;
 }
