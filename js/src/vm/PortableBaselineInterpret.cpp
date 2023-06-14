@@ -208,11 +208,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
     state.op = JSOp(*pc.pc);
+
+    printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n", stack[0].asUInt64(),
+           stack[1].asUInt64(), stack[2].asUInt64());
     printf("script = %p pc = %p: %s (ic %d)\n", frame->script(), pc.pc, CodeName(state.op),
            (int)(frame->interpreterICEntry() -
                  frame->script()->jitScript()->icScript()->icEntries()));
-    printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n", stack[0].asUInt64(),
-           stack[1].asUInt64(), stack[2].asUInt64());
 
     switch (state.op) {
       case JSOp::Nop: {
@@ -450,8 +451,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::GetElem: {
-        state.value0 = stack.pop().asValue();
         state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
         ADVANCE(JSOpLength_GetElem);
         goto ic_GetElem;
       }
@@ -1031,6 +1032,7 @@ ic_GetProp_tail:
 
 ic_GetElem:
   ICLOOP({
+      printf("getelem fallback: lhs %lx rhs %lx\n", state.value0.asRawBits(), state.value1.asRawBits());
     if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
       return false;
