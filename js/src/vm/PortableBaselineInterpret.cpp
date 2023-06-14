@@ -807,7 +807,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
   }
 
 ic_GetName:
-  printf("ic_GetName\n");
   // operand 0: envChain in state.obj0
   ICLOOP({
     if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
@@ -820,7 +819,6 @@ ic_GetName_tail:
   goto dispatch;
 
 ic_Call:
-  printf("ic_Call\n");
   // operand 0: argc in state.argc
   ICLOOP({
     uint32_t argc = state.argc;
@@ -841,7 +839,6 @@ ic_Call_tail:
   goto dispatch;
 
 ic_Typeof:
-  printf("ic_Typeof\n");
   // operand 0: value in state.value0
   ICLOOP({
     if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -855,7 +852,6 @@ ic_Typeof_tail:
 
 ic_UnaryArith:
   // operand 0: value in state.value0
-  printf("ic_UnaryArith\n");
   ICLOOP({
     if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
@@ -867,7 +863,6 @@ ic_UnaryArith_tail:
   goto dispatch;
 
 ic_BinaryArith:
-  printf("ic_BinaryArith\n");
   // operand 0: value in state.value0
   // operand 1: value in state.value1
   ICLOOP({
@@ -882,7 +877,6 @@ ic_BinaryArith_tail:
   goto dispatch;
 
 ic_ToBool:
-  printf("ic_ToBool\n");
   // operand 0: value in state.value0
   // operand 1 (some opcodes): jump offset in state.jumpOffset
   ICLOOP({
@@ -918,7 +912,6 @@ ic_ToBool_tail:
   goto dispatch;
 
 ic_Compare:
-  printf("ic_Compare\n");
   // operand 0: value in state.value0
   // operand 1: value in state.value1
   ICLOOP({
@@ -933,7 +926,6 @@ ic_Compare_tail:
   goto dispatch;
 
 ic_InstanceOf:
-  printf("ic_InstanceOf\n");
   // operand 0: value in state.value0
   // operand 1: value in state.value1
   ICLOOP({
@@ -948,7 +940,6 @@ ic_InstanceOf_tail:
   goto dispatch;
 
 ic_In:
-  printf("ic_In\n");
   // operand 0: value in state.value0
   // operand 1: value in state.value1
   ICLOOP({
@@ -963,7 +954,6 @@ ic_In_tail:
   goto dispatch;
 
 ic_BindName:
-  printf("ic_BindName\n");
   // operand 0: env chain in state.obj0
   ICLOOP({
     if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
@@ -976,7 +966,6 @@ ic_BindName_tail:
   goto dispatch;
 
 ic_SetProp:
-  printf("ic_SetProp\n");
   ICLOOP({
     if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
                            state.value1)) {
@@ -988,7 +977,6 @@ ic_SetProp_tail:
   goto dispatch;
 
 ic_NewObject:
-  printf("ic_NewObject\n");
   ICLOOP({
     if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
       return false;
@@ -1000,7 +988,6 @@ ic_NewObject_tail:
   goto dispatch;
 
 ic_GetProp:
-  printf("ic_GetProp\n");
   ICLOOP({
     if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
       return false;
@@ -1012,7 +999,6 @@ ic_GetProp_tail:
   goto dispatch;
 
 ic_GetElem:
-  printf("ic_GetElem\n");
   ICLOOP({
     if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
@@ -1025,7 +1011,6 @@ ic_GetElem_tail:
   goto dispatch;
 
 ic_NewArray:
-  printf("ic_NewArray\n");
   ICLOOP({
     if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
       return false;
