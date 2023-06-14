@@ -473,7 +473,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(CheckObjCoercible);
         NYI_OPCODE(ToAsyncIter);
         NYI_OPCODE(MutateProto);
-        NYI_OPCODE(NewArray);
+
+      case JSOp::NewArray: {
+        ADVANCE(JSOpLength_NewArray);
+        goto ic_NewArray;
+      }
+
         NYI_OPCODE(InitElemArray);
         NYI_OPCODE(InitElemInc);
         NYI_OPCODE(Hole);
@@ -1015,6 +1020,18 @@ ic_GetElem:
     }
   });
 ic_GetElem_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_NewArray:
+  printf("ic_NewArray\n");
+  ICLOOP({
+    if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
+      return false;
+    }
+  });
+ic_NewArray_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
