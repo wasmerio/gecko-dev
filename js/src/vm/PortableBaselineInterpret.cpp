@@ -273,7 +273,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(String);
       }
       case JSOp::Symbol: {
-        stack.push(StackValue(cx->wellKnownSymbols().get(GET_UINT8(pc.pc))));
+        stack.push(StackValue(SymbolValue(cx->wellKnownSymbols().get(GET_UINT8(pc.pc)))));
         END_OP(Symbol);
       }
       case JSOp::Void: {
