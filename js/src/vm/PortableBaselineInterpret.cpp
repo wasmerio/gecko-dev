@@ -205,6 +205,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
     state.op = JSOp(*pc.pc);
+    //printf("pc = %p: %s (ic %d)\n", pc.pc, CodeName(state.op), (int)(frame->interpreterICEntry() - &frame->script()->jitScript()->icScript()->icEntry(0)));
     switch (state.op) {
       case JSOp::Nop: {
         END_OP(Nop);
@@ -545,7 +546,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       case JSOp::JumpTarget:
       case JSOp::LoopHead: {
         int32_t icIndex = GET_INT32(pc.pc);
-        frame->interpreterICEntry() = &frame->icScript()->icEntry(icIndex);
+        frame->interpreterICEntry() = &frame->icScript()->icEntry(0) + icIndex;
         END_OP(JumpTarget);
       }
 
@@ -691,7 +692,15 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_SetProp;
       }
 
-        NYI_OPCODE(SetArg);
+      case JSOp::SetArg: {
+        END_OP(SetArg);
+        unsigned i = GET_ARGNO(pc.pc);
+        if (frame->script()->argsObjAliasesFormals()) {
+          frame->argsObj().setArg(i, stack[0].asValue());
+        } else {
+          frame->unaliasedFormal(i) = stack[0].asValue();
+        }
+      }
 
       case JSOp::SetLocal: {
         uint32_t i = GET_LOCALNO(pc.pc);
