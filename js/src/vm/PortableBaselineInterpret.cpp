@@ -50,11 +50,13 @@ struct Stack {
   StackValue** sp;
   StackValue* fp;
   StackValue* base;
+  StackValue* top;
 
   Stack(PortableBaselineStack& pbs)
       : sp(reinterpret_cast<StackValue**>(&pbs.top)),
         fp(nullptr),
-        base(reinterpret_cast<StackValue*>(pbs.base)) {}
+        base(reinterpret_cast<StackValue*>(pbs.base)),
+        top(reinterpret_cast<StackValue*>(pbs.top)) {}
 
   StackValue* allocate(size_t size) {
     if (reinterpret_cast<uintptr_t>(base) + size >
@@ -74,8 +76,14 @@ struct Stack {
     *elem = v;
     return true;
   }
-  StackValue pop() { return *(*sp)++; }
-  void popn(size_t len) { (*sp) += len; }
+  StackValue pop() {
+    MOZ_ASSERT((*sp) + 1 <= top);
+    return *(*sp)++;
+  }
+  void popn(size_t len) {
+    MOZ_ASSERT((*sp) + len <= top);
+    (*sp) += len;
+  }
 
   StackValue* cur() { return *sp; }
   void restore(StackValue* s) { *sp = s; }
@@ -183,6 +191,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       return false;
     }
   }
+  ret->setUndefined();
+
 #ifdef DEBUG
   frame->setDebugFrameSize(BaselineFrame::Size() + nslots * sizeof(Value));
 #endif
@@ -205,7 +215,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
     state.op = JSOp(*pc.pc);
-    //printf("pc = %p: %s (ic %d)\n", pc.pc, CodeName(state.op), (int)(frame->interpreterICEntry() - &frame->script()->jitScript()->icScript()->icEntry(0)));
+    printf("pc = %p: %s (ic %d)\n", pc.pc, CodeName(state.op), (int)(frame->interpreterICEntry() - frame->script()->jitScript()->icScript()->icEntries()));
     switch (state.op) {
       case JSOp::Nop: {
         END_OP(Nop);
@@ -515,6 +525,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         static_assert(JSOpLength_Call == JSOpLength_Eval);
         static_assert(JSOpLength_Call == JSOpLength_StrictEval);
         state.argc = GET_ARGC(pc.pc);
+        printf("argc = %d\n", state.argc);
         ADVANCE(JSOpLength_Call);
         goto ic_Call;
       }
@@ -551,7 +562,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       case JSOp::JumpTarget:
       case JSOp::LoopHead: {
         int32_t icIndex = GET_INT32(pc.pc);
-        frame->interpreterICEntry() = &frame->icScript()->icEntry(0) + icIndex;
+        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
         END_OP(JumpTarget);
       }
 
@@ -1048,8 +1059,9 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
     return false;
   }
 
-  // Pop the descriptor, calleeToken, this, and args.
-  stack.popn(3 + argc);
+  // Pop the descriptor, calleeToken, and args. (Return address is
+  // popped in callee.)
+  stack.popn(2 + argc);
 
   return true;
 }
