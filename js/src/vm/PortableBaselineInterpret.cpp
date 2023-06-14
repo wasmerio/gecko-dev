@@ -215,7 +215,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
     state.op = JSOp(*pc.pc);
-    printf("pc = %p: %s (ic %d)\n", pc.pc, CodeName(state.op), (int)(frame->interpreterICEntry() - frame->script()->jitScript()->icScript()->icEntries()));
+    printf("pc = %p: %s (ic %d)\n", pc.pc, CodeName(state.op),
+           (int)(frame->interpreterICEntry() -
+                 frame->script()->jitScript()->icScript()->icEntries()));
+    printf("stack[0] = %lx stack[1] = %lx\n", stack[0].asUInt64(),
+           stack[1].asUInt64());
+
     switch (state.op) {
       case JSOp::Nop: {
         END_OP(Nop);
@@ -452,8 +457,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::GetElem: {
-        state.value1 = stack.pop().asValue();
         state.value0 = stack.pop().asValue();
+        state.value1 = stack.pop().asValue();
         ADVANCE(JSOpLength_GetElem);
         goto ic_GetElem;
       }
@@ -525,7 +530,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         static_assert(JSOpLength_Call == JSOpLength_Eval);
         static_assert(JSOpLength_Call == JSOpLength_StrictEval);
         state.argc = GET_ARGC(pc.pc);
-        printf("argc = %d\n", state.argc);
         ADVANCE(JSOpLength_Call);
         goto ic_Call;
       }
@@ -669,7 +673,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(GetAliasedVar);
         NYI_OPCODE(GetAliasedDebugVar);
         NYI_OPCODE(GetImport);
-        NYI_OPCODE(GetIntrinsic);
+
+      case JSOp::GetIntrinsic: {
+        ADVANCE(JSOpLength_GetIntrinsic);
+        goto ic_GetIntrinsic;
+      }
+
         NYI_OPCODE(Callee);
         NYI_OPCODE(EnvCallee);
 
@@ -756,7 +765,14 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(DelName);
         NYI_OPCODE(Arguments);
         NYI_OPCODE(Rest);
-        NYI_OPCODE(FunctionThis);
+
+      case JSOp::FunctionThis: {
+        if (!js::GetFunctionThis(cx, frame, &state.res)) {
+          return false;
+        }
+        stack.push(StackValue(state.res));
+        END_OP(FunctionThis);
+      }
 
       case JSOp::Pop: {
         stack.pop();
@@ -792,11 +808,22 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
         NYI_OPCODE(Pick);
         NYI_OPCODE(Unpick);
-        NYI_OPCODE(Lineno);
-        NYI_OPCODE(NopDestructuring);
-        NYI_OPCODE(ForceInterpreter);
-        NYI_OPCODE(DebugCheckSelfHosted);
-        NYI_OPCODE(Debugger);
+
+      case JSOp::DebugCheckSelfHosted: {
+        END_OP(DebugCheckSelfHosted);
+      }
+      case JSOp::Lineno: {
+        END_OP(Lineno);
+      }
+      case JSOp::NopDestructuring: {
+        END_OP(NopDestructuring);
+      }
+      case JSOp::ForceInterpreter: {
+        END_OP(ForceInterpreter);
+      }
+      case JSOp::Debugger: {
+        END_OP(Debugger);
+      }
 
       default:
         MOZ_CRASH("Bad opcode");
@@ -1028,6 +1055,17 @@ ic_NewArray:
     }
   });
 ic_NewArray_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_GetIntrinsic:
+  ICLOOP({
+    if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
+      return false;
+    }
+  });
+ic_GetIntrinsic_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
