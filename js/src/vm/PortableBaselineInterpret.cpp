@@ -209,9 +209,10 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
     state.op = JSOp(*pc.pc);
 
-    printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n", stack[0].asUInt64(),
-           stack[1].asUInt64(), stack[2].asUInt64());
-    printf("script = %p pc = %p: %s (ic %d)\n", frame->script(), pc.pc, CodeName(state.op),
+    printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n",
+           stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
+    printf("script = %p pc = %p: %s (ic %d)\n", frame->script(), pc.pc,
+           CodeName(state.op),
            (int)(frame->interpreterICEntry() -
                  frame->script()->jitScript()->icScript()->icEntries()));
 
@@ -273,7 +274,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(String);
       }
       case JSOp::Symbol: {
-        stack.push(StackValue(SymbolValue(cx->wellKnownSymbols().get(GET_UINT8(pc.pc)))));
+        stack.push(StackValue(
+            SymbolValue(cx->wellKnownSymbols().get(GET_UINT8(pc.pc)))));
         END_OP(Symbol);
       }
       case JSOp::Void: {
@@ -478,7 +480,16 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(IsNoIter);
         NYI_OPCODE(EndIter);
         NYI_OPCODE(CloseIter);
-        NYI_OPCODE(CheckIsObj);
+
+      case JSOp::CheckIsObj: {
+        if (!stack[0].asValue().isObject()) {
+          MOZ_ALWAYS_FALSE(js::ThrowCheckIsObject(
+              cx, js::CheckIsObjectKind(GET_UINT8(pc.pc))));
+          return false;  // TODO: goto error
+        }
+        END_OP(CheckIsObj);
+      }
+
         NYI_OPCODE(CheckObjCoercible);
         NYI_OPCODE(ToAsyncIter);
         NYI_OPCODE(MutateProto);
@@ -524,6 +535,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         static_assert(JSOpLength_Call == JSOpLength_Eval);
         static_assert(JSOpLength_Call == JSOpLength_StrictEval);
         state.argc = GET_ARGC(pc.pc);
+        printf("argc = %d\n", state.argc);
         ADVANCE(JSOpLength_Call);
         goto ic_Call;
       }
@@ -1032,7 +1044,8 @@ ic_GetProp_tail:
 
 ic_GetElem:
   ICLOOP({
-      printf("getelem fallback: lhs %lx rhs %lx\n", state.value0.asRawBits(), state.value1.asRawBits());
+    printf("getelem fallback: lhs %lx rhs %lx\n", state.value0.asRawBits(),
+           state.value1.asRawBits());
     if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
       return false;
