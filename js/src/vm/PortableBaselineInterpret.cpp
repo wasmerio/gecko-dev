@@ -693,13 +693,13 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::SetArg: {
-        END_OP(SetArg);
         unsigned i = GET_ARGNO(pc.pc);
         if (frame->script()->argsObjAliasesFormals()) {
           frame->argsObj().setArg(i, stack[0].asValue());
         } else {
           frame->unaliasedFormal(i) = stack[0].asValue();
         }
+        END_OP(SetArg);
       }
 
       case JSOp::SetLocal: {
