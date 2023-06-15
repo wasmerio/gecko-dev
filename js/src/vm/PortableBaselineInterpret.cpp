@@ -535,7 +535,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         static_assert(JSOpLength_Call == JSOpLength_Eval);
         static_assert(JSOpLength_Call == JSOpLength_StrictEval);
         state.argc = GET_ARGC(pc.pc);
-        printf("argc = %d\n", state.argc);
         ADVANCE(JSOpLength_Call);
         goto ic_Call;
       }
@@ -569,11 +568,15 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(CheckResumeKind);
         NYI_OPCODE(Resume);
 
-      case JSOp::JumpTarget:
-      case JSOp::LoopHead: {
+      case JSOp::JumpTarget: {
         int32_t icIndex = GET_INT32(pc.pc);
         frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
         END_OP(JumpTarget);
+      }
+      case JSOp::LoopHead: {
+        int32_t icIndex = GET_INT32(pc.pc);
+        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+        END_OP(LoopHead);
       }
 
       case JSOp::Goto: {
@@ -1044,15 +1047,12 @@ ic_GetProp_tail:
 
 ic_GetElem:
   ICLOOP({
-    printf("getelem fallback: lhs %lx rhs %lx\n", state.value0.asRawBits(),
-           state.value1.asRawBits());
     if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
       return false;
     }
   });
 ic_GetElem_tail:
-  printf("GetElem result: %lx\n", state.res.asRawBits());
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
@@ -1109,8 +1109,6 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   // Pop the descriptor, calleeToken, and args. (Return address is
   // popped in callee.)
   stack.popn(2 + argc);
-
-  printf("result: %lx\n", result->asRawBits());
 
   return true;
 }
