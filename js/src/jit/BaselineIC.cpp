@@ -896,9 +896,11 @@ bool DoSetElemFallback(JSContext* cx, BaselineFrame* frame,
     }
   }
 
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
   // Overwrite the object on the stack (pushed for the decompiler) with the rhs.
   MOZ_ASSERT(stack[2] == objv);
   stack[2] = rhs;
+#endif
 
   if (attached) {
     return true;

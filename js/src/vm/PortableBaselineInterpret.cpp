@@ -141,6 +141,8 @@ struct State {
   RootedFunction fun0;
   JSOp op;
   int argc;
+  int extraArgs;
+  bool spreadCall;
   int32_t jumpOffset;
 
   State(JSContext* cx)
@@ -392,7 +394,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_In;
       }
 
-        NYI_OPCODE(ToPropertyKey);
+      case JSOp::ToPropertyKey: {
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_ToPropertyKey);
+        goto ic_ToPropertyKey;
+      }
+
         NYI_OPCODE(ToString);
         NYI_OPCODE(IsNullOrUndefined);
 
@@ -432,9 +439,27 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(ObjWithProto);
       }
 
-        NYI_OPCODE(InitElem);
-        NYI_OPCODE(InitHiddenElem);
-        NYI_OPCODE(InitLockedElem);
+      case JSOp::InitElem:
+      case JSOp::InitHiddenElem:
+      case JSOp::InitLockedElem:
+      case JSOp::InitElemInc:
+      case JSOp::SetElem:
+      case JSOp::StrictSetElem: {
+        static_assert(JSOpLength_InitElem == JSOpLength_InitHiddenElem);
+        static_assert(JSOpLength_InitElem == JSOpLength_InitLockedElem);
+        static_assert(JSOpLength_InitElem == JSOpLength_InitElemInc);
+        static_assert(JSOpLength_InitElem == JSOpLength_SetElem);
+        static_assert(JSOpLength_InitElem == JSOpLength_StrictSetElem);
+        state.value2 = stack.pop().asValue();
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack[0].asValue();
+        if (state.op == JSOp::InitElemInc) {
+          stack.push(StackValue(Int32Value(state.value1.toInt32() + 1)));
+        }
+        ADVANCE(JSOpLength_InitElem);
+        goto ic_SetElem;
+      }
+
         NYI_OPCODE(InitPropGetter);
         NYI_OPCODE(InitHiddenPropGetter);
         NYI_OPCODE(InitElemGetter);
@@ -451,6 +476,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         ADVANCE(JSOpLength_GetProp);
         goto ic_GetProp;
       }
+      case JSOp::GetPropSuper: {
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_GetPropSuper);
+        goto ic_GetPropSuper;
+      }
 
       case JSOp::GetElem: {
         state.value1 = stack.pop().asValue();
@@ -459,27 +490,55 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_GetElem;
       }
 
-        NYI_OPCODE(SetElem);
-        NYI_OPCODE(StrictSetElem);
+      case JSOp::GetElemSuper: {
+        state.value2 = stack.pop().asValue();
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_GetElemSuper);
+        goto ic_GetElemSuper;
+      }
+
         NYI_OPCODE(DelProp);
         NYI_OPCODE(StrictDelProp);
         NYI_OPCODE(DelElem);
         NYI_OPCODE(StrictDelElem);
-        NYI_OPCODE(HasOwn);
-        NYI_OPCODE(CheckPrivateField);
+
+      case JSOp::HasOwn: {
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_HasOwn);
+        goto ic_HasOwn;
+      }
+
+      case JSOp::CheckPrivateField: {
+        state.value1 = stack[1].asValue();
+        state.value0 = stack[0].asValue();
+        ADVANCE(JSOpLength_CheckPrivateField);
+        goto ic_CheckPrivateField;
+      }
+
         NYI_OPCODE(NewPrivateName);
         NYI_OPCODE(SuperBase);
-        NYI_OPCODE(GetPropSuper);
-        NYI_OPCODE(GetElemSuper);
         NYI_OPCODE(SetPropSuper);
         NYI_OPCODE(StrictSetPropSuper);
         NYI_OPCODE(SetElemSuper);
         NYI_OPCODE(StrictSetElemSuper);
-        NYI_OPCODE(Iter);
+
+      case JSOp::Iter: {
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_Iter);
+        goto ic_GetIterator;
+      }
+
         NYI_OPCODE(MoreIter);
         NYI_OPCODE(IsNoIter);
         NYI_OPCODE(EndIter);
-        NYI_OPCODE(CloseIter);
+
+      case JSOp::CloseIter: {
+        state.obj0 = &stack.pop().asValue().toObject();
+        ADVANCE(JSOpLength_CloseIter);
+        goto ic_CloseIter;
+      }
 
       case JSOp::CheckIsObj: {
         if (!stack[0].asValue().isObject()) {
@@ -500,7 +559,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
         NYI_OPCODE(InitElemArray);
-        NYI_OPCODE(InitElemInc);
         NYI_OPCODE(Hole);
         NYI_OPCODE(RegExp);
 
@@ -535,22 +593,55 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         static_assert(JSOpLength_Call == JSOpLength_Eval);
         static_assert(JSOpLength_Call == JSOpLength_StrictEval);
         state.argc = GET_ARGC(pc.pc);
+        state.extraArgs = 2;
+        state.spreadCall = false;
         ADVANCE(JSOpLength_Call);
         goto ic_Call;
       }
 
-        NYI_OPCODE(SpreadCall);
-        NYI_OPCODE(OptimizeSpreadCall);
-        NYI_OPCODE(SpreadEval);
-        NYI_OPCODE(StrictSpreadEval);
+      case JSOp::SuperCall:
+      case JSOp::New:
+      case JSOp::NewContent: {
+        static_assert(JSOpLength_SuperCall == JSOpLength_New);
+        static_assert(JSOpLength_SuperCall == JSOpLength_NewContent);
+        state.argc = GET_ARGC(pc.pc);
+        state.extraArgs = 3;
+        state.spreadCall = false;
+        ADVANCE(JSOpLength_SuperCall);
+        goto ic_Call;
+      }
+
+      case JSOp::SpreadCall:
+      case JSOp::SpreadEval:
+      case JSOp::StrictSpreadEval: {
+        static_assert(JSOpLength_SpreadCall == JSOpLength_SpreadEval);
+        static_assert(JSOpLength_SpreadCall == JSOpLength_StrictSpreadEval);
+        state.argc = 1;
+        state.extraArgs = 2;
+        state.spreadCall = true;
+        ADVANCE(JSOpLength_SpreadCall);
+        goto ic_Call;
+      }
+
+      case JSOp::SpreadSuperCall:
+      case JSOp::SpreadNew: {
+        static_assert(JSOpLength_SpreadSuperCall == JSOpLength_SpreadNew);
+        state.argc = 1;
+        state.extraArgs = 3;
+        state.spreadCall = true;
+        ADVANCE(JSOpLength_SpreadSuperCall);
+        goto ic_Call;
+      }
+
+      case JSOp::OptimizeSpreadCall: {
+        state.value0 = stack.pop().asValue();
+        ADVANCE(JSOpLength_OptimizeSpreadCall);
+        goto ic_OptimizeSpreadCall;
+      }
+
         NYI_OPCODE(ImplicitThis);
         NYI_OPCODE(CallSiteObj);
         NYI_OPCODE(IsConstructing);
-        NYI_OPCODE(New);
-        NYI_OPCODE(NewContent);
-        NYI_OPCODE(SuperCall);
-        NYI_OPCODE(SpreadNew);
-        NYI_OPCODE(SpreadSuperCall);
         NYI_OPCODE(SuperFun);
         NYI_OPCODE(CheckThisReinit);
         NYI_OPCODE(Generator);
@@ -669,7 +760,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
       case JSOp::GetName: {
         state.obj0.set(frame->environmentChain());
-        ADVANCE(JSOpLength_GetGName);
+        ADVANCE(JSOpLength_GetName);
         goto ic_GetName;
       }
 
@@ -787,7 +878,11 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
         NYI_OPCODE(DelName);
         NYI_OPCODE(Arguments);
-        NYI_OPCODE(Rest);
+
+      case JSOp::Rest: {
+        ADVANCE(JSOpLength_Rest);
+        goto ic_Rest;
+      }
 
       case JSOp::FunctionThis: {
         if (!js::GetFunctionThis(cx, frame, &state.res)) {
@@ -868,7 +963,6 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
   }
 
 ic_GetName:
-  // operand 0: envChain in state.obj0
   ICLOOP({
     if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
       return false;
@@ -880,17 +974,23 @@ ic_GetName_tail:
   goto dispatch;
 
 ic_Call:
-  // operand 0: argc in state.argc
   ICLOOP({
-    uint32_t argc = state.argc;
-    uint32_t totalArgs = argc + 2;  // this, callee, func args
+    uint32_t totalArgs =
+        state.argc +
+        state.extraArgs;  // this, callee, (cosntructing?), func args
     Value* args = reinterpret_cast<Value*>(&stack[0]);
     // Reverse values on the stack.
     for (uint32_t i = 0; i < totalArgs / 2; i++) {
       std::swap(args[i], args[totalArgs - 1 - i]);
     }
-    if (!DoCallFallback(cx, frame, fallback, argc, args, &state.res)) {
-      return false;
+    if (state.spreadCall) {
+      if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
+        return false;
+      }
+    } else {
+      if (!DoCallFallback(cx, frame, fallback, state.argc, args, &state.res)) {
+        return false;
+      }
     }
     stack.popn(totalArgs);
     stack.push(StackValue(state.res));
@@ -900,7 +1000,6 @@ ic_Call_tail:
   goto dispatch;
 
 ic_Typeof:
-  // operand 0: value in state.value0
   ICLOOP({
     if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
@@ -912,7 +1011,6 @@ ic_Typeof_tail:
   goto dispatch;
 
 ic_UnaryArith:
-  // operand 0: value in state.value0
   ICLOOP({
     if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
@@ -924,8 +1022,6 @@ ic_UnaryArith_tail:
   goto dispatch;
 
 ic_BinaryArith:
-  // operand 0: value in state.value0
-  // operand 1: value in state.value1
   ICLOOP({
     if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
                                &state.res)) {
@@ -938,8 +1034,6 @@ ic_BinaryArith_tail:
   goto dispatch;
 
 ic_ToBool:
-  // operand 0: value in state.value0
-  // operand 1 (some opcodes): jump offset in state.jumpOffset
   ICLOOP({
     if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
@@ -973,8 +1067,6 @@ ic_ToBool_tail:
   goto dispatch;
 
 ic_Compare:
-  // operand 0: value in state.value0
-  // operand 1: value in state.value1
   ICLOOP({
     if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
@@ -987,8 +1079,6 @@ ic_Compare_tail:
   goto dispatch;
 
 ic_InstanceOf:
-  // operand 0: value in state.value0
-  // operand 1: value in state.value1
   ICLOOP({
     if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
                               &state.res)) {
@@ -1001,8 +1091,6 @@ ic_InstanceOf_tail:
   goto dispatch;
 
 ic_In:
-  // operand 0: value in state.value0
-  // operand 1: value in state.value1
   ICLOOP({
     if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
                       &state.res)) {
@@ -1015,7 +1103,6 @@ ic_In_tail:
   goto dispatch;
 
 ic_BindName:
-  // operand 0: env chain in state.obj0
   ICLOOP({
     if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
       return false;
@@ -1059,6 +1146,18 @@ ic_GetProp_tail:
   NEXT_IC();
   goto dispatch;
 
+ic_GetPropSuper:
+  ICLOOP({
+    if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0,
+                                &state.value1, &state.res)) {
+      return false;
+    }
+  });
+ic_GetPropSuper_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
 ic_GetElem:
   ICLOOP({
     if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
@@ -1067,6 +1166,18 @@ ic_GetElem:
     }
   });
 ic_GetElem_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_GetElemSuper:
+  ICLOOP({
+    if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0, state.value1,
+                                state.value2, &state.res)) {
+      return false;
+    }
+  });
+ic_GetElemSuper_tail:
   stack.push(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
@@ -1090,6 +1201,97 @@ ic_GetIntrinsic:
   });
 ic_GetIntrinsic_tail:
   stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_SetElem:
+  ICLOOP({
+    if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
+                           state.value1, state.value2)) {
+      return false;
+    }
+  });
+ic_SetElem_tail:
+  NEXT_IC();
+  goto dispatch;
+
+ic_HasOwn:
+  ICLOOP({
+    if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
+                          &state.res)) {
+      return false;
+    }
+  });
+ic_HasOwn_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_CheckPrivateField:
+  ICLOOP({
+    if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
+                                     state.value1, &state.res)) {
+      return false;
+    }
+  });
+ic_CheckPrivateField_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_GetIterator:
+  ICLOOP({
+    if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
+      return false;
+    }
+  });
+ic_GetIterator_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_ToPropertyKey:
+  ICLOOP({
+    if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0,
+                                 &state.res)) {
+      return false;
+    }
+  });
+ic_ToPropertyKey_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_OptimizeSpreadCall:
+  ICLOOP({
+    if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
+                                      &state.res)) {
+      return false;
+    }
+  });
+ic_OptimizeSpreadCall_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_Rest:
+  ICLOOP({
+    if (!DoRestFallback(cx, frame, fallback, &state.res)) {
+      return false;
+    }
+  });
+ic_Rest_tail:
+  stack.push(StackValue(state.res));
+  NEXT_IC();
+  goto dispatch;
+
+ic_CloseIter:
+  ICLOOP({
+    if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
+      return false;
+    }
+  });
+ic_CloseIter_tail:
   NEXT_IC();
   goto dispatch;
 }
