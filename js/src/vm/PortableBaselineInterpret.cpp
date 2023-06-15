@@ -26,6 +26,7 @@
 #include "vm/PlainObject.h"
 
 #include "jit/JitScript-inl.h"
+#include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
 using namespace js;
@@ -138,6 +139,7 @@ struct State {
   RootedObject obj2;
   RootedScript script0;
   Rooted<PropertyName*> name0;
+  Rooted<JSAtom*> atom0;
   RootedFunction fun0;
   JSOp op;
   int argc;
@@ -155,6 +157,7 @@ struct State {
         obj2(cx),
         script0(cx),
         name0(cx),
+        atom0(cx),
         fun0(cx) {}
 };
 
@@ -178,9 +181,10 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
   }
 
   BaselineFrame* frame = stack.frameFromFP();
+  RootedScript script(cx, frame->script());
   PC pc(frame);
 
-  uint32_t nslots = frame->script()->nslots();
+  uint32_t nslots = script->nslots();
   for (uint32_t i = 0; i < nslots; i++) {
     if (!stack.push(StackValue(UndefinedValue()))) {
       return false;
@@ -213,10 +217,10 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
     printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
-    printf("script = %p pc = %p: %s (ic %d)\n", frame->script(), pc.pc,
+    printf("script = %p pc = %p: %s (ic %d)\n", script.get(), pc.pc,
            CodeName(state.op),
            (int)(frame->interpreterICEntry() -
-                 frame->script()->jitScript()->icScript()->icEntries()));
+                 script->jitScript()->icScript()->icEntries()));
 
     switch (state.op) {
       case JSOp::Nop: {
@@ -267,12 +271,11 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(Double);
       }
       case JSOp::BigInt: {
-        stack.push(
-            StackValue(JS::BigIntValue(frame->script()->getBigInt(pc.pc))));
+        stack.push(StackValue(JS::BigIntValue(script->getBigInt(pc.pc))));
         END_OP(BigInt);
       }
       case JSOp::String: {
-        stack.push(StackValue(StringValue(frame->script()->getString(pc.pc))));
+        stack.push(StackValue(StringValue(script->getString(pc.pc))));
         END_OP(String);
       }
       case JSOp::Symbol: {
@@ -400,8 +403,22 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_ToPropertyKey;
       }
 
-        NYI_OPCODE(ToString);
-        NYI_OPCODE(IsNullOrUndefined);
+      case JSOp::ToString: {
+        state.value0 = stack.pop().asValue();
+        JSString* result = ToString<CanGC>(cx, state.value0);
+        if (!result) {
+          return false;
+        }
+        stack.push(StackValue(StringValue(result)));
+        END_OP(ToString);
+      }
+
+      case JSOp::IsNullOrUndefined: {
+        bool result =
+            stack[0].asValue().isNull() || stack[0].asValue().isUndefined();
+        stack[0] = StackValue(BooleanValue(result));
+        END_OP(IsNullOrUndefined);
+      }
 
       case JSOp::GlobalThis: {
         stack.push(StackValue(
@@ -416,9 +433,31 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(NonSyntacticGlobalThis);
       }
 
-        NYI_OPCODE(NewTarget);
-        NYI_OPCODE(DynamicImport);
-        NYI_OPCODE(ImportMeta);
+      case JSOp::NewTarget: {
+        stack.push(StackValue(frame->newTarget()));
+        END_OP(NewTarget);
+      }
+
+      case JSOp::DynamicImport: {
+        state.value0 = stack.pop().asValue();  // options
+        state.value1 = stack.pop().asValue();  // specifier
+        JSObject* promise =
+            StartDynamicModuleImport(cx, script, state.value1, state.value0);
+        if (!promise) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*promise)));
+        END_OP(DynamicImport);
+      }
+
+      case JSOp::ImportMeta: {
+        JSObject* metaObject = ImportMetaOperation(cx, script);
+        if (!metaObject) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*metaObject)));
+        END_OP(ImportMeta);
+      }
 
       case JSOp::NewInit: {
         ADVANCE(JSOpLength_NewInit);
@@ -429,7 +468,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_NewObject;
       }
       case JSOp::Object: {
-        stack.push(StackValue(ObjectValue(*frame->script()->getObject(pc.pc))));
+        stack.push(StackValue(ObjectValue(*script->getObject(pc.pc))));
         END_OP(Object);
       }
       case JSOp::ObjWithProto: {
@@ -460,14 +499,43 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_SetElem;
       }
 
-        NYI_OPCODE(InitPropGetter);
-        NYI_OPCODE(InitHiddenPropGetter);
-        NYI_OPCODE(InitElemGetter);
-        NYI_OPCODE(InitHiddenElemGetter);
-        NYI_OPCODE(InitPropSetter);
-        NYI_OPCODE(InitHiddenPropSetter);
-        NYI_OPCODE(InitElemSetter);
-        NYI_OPCODE(InitHiddenElemSetter);
+      case JSOp::InitPropGetter:
+      case JSOp::InitHiddenPropGetter:
+      case JSOp::InitPropSetter:
+      case JSOp::InitHiddenPropSetter: {
+        static_assert(JSOpLength_InitPropGetter ==
+                      JSOpLength_InitHiddenPropGetter);
+        static_assert(JSOpLength_InitPropGetter == JSOpLength_InitPropSetter);
+        static_assert(JSOpLength_InitPropGetter ==
+                      JSOpLength_InitHiddenPropSetter);
+        state.obj1 = &stack.pop().asValue().toObject();  // val
+        state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
+        state.name0 = script->getName(pc.pc);
+        if (!InitPropGetterSetterOperation(cx, pc.pc, state.obj0, state.name0,
+                                           state.obj1)) {
+          return false;
+        }
+        END_OP(InitPropGetter);
+      }
+
+      case JSOp::InitElemGetter:
+      case JSOp::InitHiddenElemGetter:
+      case JSOp::InitElemSetter:
+      case JSOp::InitHiddenElemSetter: {
+        static_assert(JSOpLength_InitElemGetter ==
+                      JSOpLength_InitHiddenElemGetter);
+        static_assert(JSOpLength_InitElemGetter == JSOpLength_InitElemSetter);
+        static_assert(JSOpLength_InitElemGetter ==
+                      JSOpLength_InitHiddenElemSetter);
+        state.obj1 = &stack.pop().asValue().toObject();  // val
+        state.value0 = stack.pop().asValue();            // idval
+        state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
+        if (!InitElemGetterSetterOperation(cx, pc.pc, state.obj0, state.value0,
+                                           state.obj1)) {
+          return false;
+        }
+        END_OP(InitElemGetter);
+      }
 
       case JSOp::GetProp:
       case JSOp::GetBoundName: {
@@ -498,10 +566,46 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_GetElemSuper;
       }
 
-        NYI_OPCODE(DelProp);
-        NYI_OPCODE(StrictDelProp);
-        NYI_OPCODE(DelElem);
-        NYI_OPCODE(StrictDelElem);
+      case JSOp::DelProp: {
+        state.value0 = stack.pop().asValue();
+        state.name0 = script->getName(pc.pc);
+        bool res = false;
+        if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
+          return false;
+        }
+        stack.push(StackValue(BooleanValue(res)));
+        END_OP(DelProp);
+      }
+      case JSOp::StrictDelProp: {
+        state.value0 = stack.pop().asValue();
+        state.name0 = script->getName(pc.pc);
+        bool res = false;
+        if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
+          return false;
+        }
+        stack.push(StackValue(BooleanValue(res)));
+        END_OP(StrictDelProp);
+      }
+      case JSOp::DelElem: {
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        bool res = false;
+        if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
+          return false;
+        }
+        stack.push(StackValue(BooleanValue(res)));
+        END_OP(DelElem);
+      }
+      case JSOp::StrictDelElem: {
+        state.value1 = stack.pop().asValue();
+        state.value0 = stack.pop().asValue();
+        bool res = false;
+        if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
+          return false;
+        }
+        stack.push(StackValue(BooleanValue(res)));
+        END_OP(StrictDelElem);
+      }
 
       case JSOp::HasOwn: {
         state.value1 = stack.pop().asValue();
@@ -517,8 +621,31 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_CheckPrivateField;
       }
 
-        NYI_OPCODE(NewPrivateName);
-        NYI_OPCODE(SuperBase);
+      case JSOp::NewPrivateName: {
+        state.atom0 = script->getAtom(pc.pc);
+        auto* symbol = NewPrivateName(cx, state.atom0);
+        if (!symbol) {
+          return false;
+        }
+        stack.push(StackValue(SymbolValue(symbol)));
+        END_OP(NewPrivateName);
+      }
+
+      case JSOp::SuperBase: {
+        JSFunction& superEnvFunc =
+            stack.pop().asValue().toObject().as<JSFunction>();
+        MOZ_ASSERT(superEnvFunc.allowSuperProperty());
+        MOZ_ASSERT(superEnvFunc.baseScript()->needsHomeObject());
+        const Value& homeObjVal = superEnvFunc.getExtendedSlot(
+            FunctionExtended::METHOD_HOMEOBJECT_SLOT);
+
+        JSObject* homeObj = &homeObjVal.toObject();
+        JSObject* superBase = HomeObjectSuperBase(homeObj);
+
+        stack.push(StackValue(ObjectOrNullValue(superBase)));
+        END_OP(SuperBase);
+      }
+
         NYI_OPCODE(SetPropSuper);
         NYI_OPCODE(StrictSetPropSuper);
         NYI_OPCODE(SetElemSuper);
@@ -563,7 +690,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(RegExp);
 
       case JSOp::Lambda: {
-        state.fun0 = frame->script()->getFunction(pc.pc);
+        state.fun0 = script->getFunction(pc.pc);
         state.obj0 = frame->environmentChain();
         JSObject* res = js::Lambda(cx, state.fun0, state.obj0);
         if (!res) {
@@ -744,7 +871,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::BindGName: {
         state.obj0.set(&cx->global()->lexicalEnvironment());
-        state.name0.set(frame->script()->getName(pc.pc));
+        state.name0.set(script->getName(pc.pc));
         ADVANCE(JSOpLength_BindGName);
         goto ic_BindName;
       }
@@ -766,7 +893,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::GetArg: {
         unsigned i = GET_ARGNO(pc.pc);
-        if (frame->script()->argsObjAliasesFormals()) {
+        if (script->argsObjAliasesFormals()) {
           stack.push(StackValue(frame->argsObj().arg(i)));
         } else {
           stack.push(StackValue(frame->unaliasedFormal(i)));
@@ -833,7 +960,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::SetArg: {
         unsigned i = GET_ARGNO(pc.pc);
-        if (frame->script()->argsObjAliasesFormals()) {
+        if (script->argsObjAliasesFormals()) {
           frame->argsObj().setArg(i, stack[0].asValue());
         } else {
           frame->unaliasedFormal(i) = stack[0].asValue();
@@ -866,7 +993,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::GlobalOrEvalDeclInstantiation: {
         GCThingIndex lastFun = GET_GCTHING_INDEX(pc.pc);
-        state.script0 = frame->script();
+        state.script0 = script;
         state.obj0 = frame->environmentChain();
         if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
                                            lastFun)) {

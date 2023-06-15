@@ -268,20 +268,6 @@ bool js::GetImportOperation(JSContext* cx, HandleObject envChain,
   return FetchName<GetNameMode::Normal>(cx, env, pobj, name, prop, vp);
 }
 
-static JSObject* SuperFunOperation(JSObject* callee) {
-  MOZ_ASSERT(callee->as<JSFunction>().isClassConstructor());
-  MOZ_ASSERT(
-      callee->as<JSFunction>().baseScript()->isDerivedClassConstructor());
-
-  return callee->as<JSFunction>().staticPrototype();
-}
-
-static JSObject* HomeObjectSuperBase(JSObject* homeObj) {
-  MOZ_ASSERT(homeObj->is<PlainObject>() || homeObj->is<JSFunction>());
-
-  return homeObj->staticPrototype();
-}
-
 bool js::ReportIsNotFunction(JSContext* cx, HandleValue v, int numToSkip,
                              MaybeConstruct construct) {
   unsigned error = construct ? JSMSG_NOT_CONSTRUCTOR : JSMSG_NOT_FUNCTION;

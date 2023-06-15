@@ -635,6 +635,20 @@ inline JSFunction* ReportIfNotFunction(
   return nullptr;
 }
 
+static inline JSObject* SuperFunOperation(JSObject* callee) {
+  MOZ_ASSERT(callee->as<JSFunction>().isClassConstructor());
+  MOZ_ASSERT(
+      callee->as<JSFunction>().baseScript()->isDerivedClassConstructor());
+
+  return callee->as<JSFunction>().staticPrototype();
+}
+
+static inline JSObject* HomeObjectSuperBase(JSObject* homeObj) {
+  MOZ_ASSERT(homeObj->is<PlainObject>() || homeObj->is<JSFunction>());
+
+  return homeObj->staticPrototype();
+}
+
 } /* namespace js */
 
 #endif /* vm_Interpreter_inl_h */
