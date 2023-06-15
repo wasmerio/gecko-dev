@@ -123,6 +123,17 @@ class BaselineFrame {
     return frameSize / sizeof(Value);
   }
 
+  Value newTarget() const {
+    MOZ_ASSERT(isFunctionFrame());
+    MOZ_ASSERT(!callee()->isArrow());
+
+    if (isConstructing()) {
+      unsigned pushedArgs = std::max(numFormalArgs(), numActualArgs());
+      return argv()[pushedArgs];
+    }
+    return UndefinedValue();
+  }
+
 #ifdef DEBUG
   size_t debugNumValueSlots() const { return numValueSlots(debugFrameSize()); }
 #endif
