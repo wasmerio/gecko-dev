@@ -617,10 +617,24 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(Throw);
         NYI_OPCODE(ThrowMsg);
         NYI_OPCODE(ThrowSetConst);
-        NYI_OPCODE(Try);
-        NYI_OPCODE(TryDestructuring);
-        NYI_OPCODE(Exception);
-        NYI_OPCODE(Finally);
+
+      case JSOp::Try:
+      case JSOp::TryDestructuring: {
+        static_assert(JSOpLength_Try == JSOpLength_TryDestructuring);
+        END_OP(Try);
+      }
+
+      case JSOp::Exception: {
+        if (!GetAndClearException(cx, &state.res)) {
+          return false;
+        }
+        stack.push(StackValue(state.res));
+        END_OP(Exception);
+      }
+
+      case JSOp::Finally: {
+        END_OP(Finally);
+      }
 
       case JSOp::Uninitialized: {
         stack.push(StackValue(MagicValue(JS_UNINITIALIZED_LEXICAL)));
