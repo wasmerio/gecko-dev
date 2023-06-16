@@ -809,8 +809,29 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(Lambda);
       }
 
-        NYI_OPCODE(SetFunName);
-        NYI_OPCODE(InitHomeObject);
+      case JSOp::SetFunName: {
+        // fun, name => fun
+        state.value0 = stack.pop().asValue();  // name
+        state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
+        FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc.pc));
+        if (!SetFunctionName(cx, state.fun0, state.value0, prefixKind)) {
+          return false;
+        }
+        END_OP(SetFunName);
+      }
+
+      case JSOp::InitHomeObject: {
+        // fun, homeObject => fun
+        state.obj0 = &stack.pop().asValue().toObject();  // homeObject
+        state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
+        MOZ_ASSERT(state.fun0->allowSuperProperty());
+        MOZ_ASSERT(state.obj0->is<PlainObject>() ||
+                   state.obj0->is<JSFunction>());
+        state.fun0->setExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT,
+                                    ObjectValue(*state.obj0));
+        END_OP(InitHomeObject);
+      }
+
         NYI_OPCODE(CheckClassHeritage);
         NYI_OPCODE(FunWithProto);
         NYI_OPCODE(BuiltinObject);
