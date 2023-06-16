@@ -925,7 +925,15 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_OptimizeSpreadCall;
       }
 
-        NYI_OPCODE(ImplicitThis);
+      case JSOp::ImplicitThis: {
+        state.obj0 = frame->environmentChain();
+        state.name0 = script->getName(pc.pc);
+        if (!ImplicitThisOperation(cx, state.obj0, state.name0, &state.res)) {
+          return false;
+        }
+        stack.push(StackValue(state.res));
+        END_OP(ImplicitThis);
+      }
 
       case JSOp::CallSiteObj: {
         JSObject* cso = script->getObject(pc.pc);
@@ -955,18 +963,47 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(CheckThisReinit);
       }
 
-        NYI_OPCODE(Generator);
+      case JSOp::Generator: {
+        JSObject* generator = CreateGeneratorFromFrame(cx, frame);
+        if (!generator) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*generator)));
+        END_OP(Generator);
+      }
+
         NYI_OPCODE(InitialYield);
-        NYI_OPCODE(AfterYield);
         NYI_OPCODE(FinalYieldRval);
         NYI_OPCODE(Yield);
-        NYI_OPCODE(IsGenClosing);
+
+      case JSOp::IsGenClosing: {
+        stack.push(StackValue(MagicValue(JS_GENERATOR_CLOSING)));
+        END_OP(IsGenClosing);
+      }
+
         NYI_OPCODE(AsyncAwait);
         NYI_OPCODE(AsyncResolve);
         NYI_OPCODE(Await);
-        NYI_OPCODE(CanSkipAwait);
+
+      case JSOp::CanSkipAwait: {
+        // value => value, can_skip
+        state.value0 = stack[0].asValue();
+        bool result = false;
+        if (!CanSkipAwait(cx, state.value0, &result)) {
+          return false;
+        }
+        stack.push(StackValue(BooleanValue(result)));
+        END_OP(CanSkipAwait);
+      }
+
         NYI_OPCODE(MaybeExtractAwaitValue);
-        NYI_OPCODE(ResumeKind);
+
+      case JSOp::ResumeKind: {
+        GeneratorResumeKind resumeKind = ResumeKindFromPC(pc.pc);
+        stack.push(StackValue(Int32Value(int32_t(resumeKind))));
+        END_OP(ResumeKind);
+      }
+
         NYI_OPCODE(CheckResumeKind);
         NYI_OPCODE(Resume);
 
@@ -980,16 +1017,43 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
         END_OP(LoopHead);
       }
+      case JSOp::AfterYield: {
+        int32_t icIndex = GET_INT32(pc.pc);
+        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+        END_OP(AfterYield);
+      }
 
       case JSOp::Goto: {
-        int32_t offset = GET_JUMP_OFFSET(pc.pc);
-        ADVANCE(offset);
+        ADVANCE(GET_JUMP_OFFSET(pc.pc));
         break;
       }
 
-        NYI_OPCODE(Coalesce);
-        NYI_OPCODE(Case);
-        NYI_OPCODE(Default);
+      case JSOp::Coalesce: {
+        if (!stack[0].asValue().isNullOrUndefined()) {
+          ADVANCE(GET_JUMP_OFFSET(pc.pc));
+          break;
+        } else {
+          END_OP(Coalesce);
+        }
+      }
+
+      case JSOp::Case: {
+        bool cond = stack.pop().asValue().toBoolean();
+        if (cond) {
+          stack.pop();
+          ADVANCE(GET_JUMP_OFFSET(pc.pc));
+          break;
+        } else {
+          END_OP(Case);
+        }
+      }
+
+      case JSOp::Default: {
+        stack.pop();
+        ADVANCE(GET_JUMP_OFFSET(pc.pc));
+        break;
+      }
+
         NYI_OPCODE(TableSwitch);
 
       case JSOp::Return: {
