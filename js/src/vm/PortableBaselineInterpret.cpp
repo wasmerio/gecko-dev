@@ -19,7 +19,9 @@
 #include "jit/JitFrames.h"
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
+#include "vm/AsyncIteration.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/Iteration.h"
 #include "vm/JitActivation.h"
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
@@ -175,6 +177,9 @@ struct PC {
     frame->interpreterPC() = pc;
   }
 };
+
+// TODO: check all stack pushes for overflow
+// TODO: convert all (except OOM) `return false`s into exception-handling path
 
 static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
                                       JSObject* envChain, Value* ret) {
@@ -694,9 +699,26 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_GetIterator;
       }
 
-        NYI_OPCODE(MoreIter);
-        NYI_OPCODE(IsNoIter);
-        NYI_OPCODE(EndIter);
+      case JSOp::MoreIter: {
+        // iter => iter, name
+        Value v = IteratorMore(&stack[0].asValue().toObject());
+        stack.push(StackValue(v));
+        END_OP(MoreIter);
+      }
+
+      case JSOp::IsNoIter: {
+        // iter => iter, bool
+        bool result = stack[0].asValue().isMagic(JS_NO_ITER_VALUE);
+        stack.push(StackValue(BooleanValue(result)));
+        END_OP(IsNoIter);
+      }
+
+      case JSOp::EndIter: {
+        // iter, interval =>
+        stack.pop();
+        CloseIterator(&stack.pop().asValue().toObject());
+        END_OP(EndIter);
+      }
 
       case JSOp::CloseIter: {
         state.obj0 = &stack.pop().asValue().toObject();
@@ -713,8 +735,29 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(CheckIsObj);
       }
 
-        NYI_OPCODE(CheckObjCoercible);
-        NYI_OPCODE(ToAsyncIter);
+      case JSOp::CheckObjCoercible: {
+        if (stack[0].asValue().isNullOrUndefined()) {
+          state.value0 = stack[0].asValue();
+          MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, state.value0));
+          return false;  // TOD: goto error
+        }
+        END_OP(CheckObjCoercible);
+      }
+
+      case JSOp::ToAsyncIter: {
+        // iter, next => asynciter
+        state.value0 = stack.pop().asValue();  // next
+        state.obj0 = &stack.pop().asValue().toObject();
+        ;  // iter
+        JSObject* ret =
+            CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
+        if (!ret) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*ret)));
+        END_OP(ToAsyncIter);
+      }
+
         NYI_OPCODE(MutateProto);
 
       case JSOp::NewArray: {
