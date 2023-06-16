@@ -133,12 +133,14 @@ struct State {
   RootedValue value0;
   RootedValue value1;
   RootedValue value2;
+  RootedValue value3;
   RootedValue res;
   RootedObject obj0;
   RootedObject obj1;
   RootedObject obj2;
   RootedScript script0;
   Rooted<PropertyName*> name0;
+  Rooted<jsid> id0;
   Rooted<JSAtom*> atom0;
   RootedFunction fun0;
   JSOp op;
@@ -151,12 +153,14 @@ struct State {
       : value0(cx),
         value1(cx),
         value2(cx),
+        value3(cx),
         res(cx),
         obj0(cx),
         obj1(cx),
         obj2(cx),
         script0(cx),
         name0(cx),
+        id0(cx),
         atom0(cx),
         fun0(cx) {}
 };
@@ -646,10 +650,43 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(SuperBase);
       }
 
-        NYI_OPCODE(SetPropSuper);
-        NYI_OPCODE(StrictSetPropSuper);
-        NYI_OPCODE(SetElemSuper);
-        NYI_OPCODE(StrictSetElemSuper);
+      case JSOp::SetPropSuper:
+      case JSOp::StrictSetPropSuper: {
+        // stack signature: receiver, lval, rval => rval
+        static_assert(JSOpLength_SetPropSuper == JSOpLength_StrictSetPropSuper);
+        bool strict = state.op == JSOp::StrictSetPropSuper;
+        state.value2 = stack.pop().asValue();  // rval
+        state.value1 = stack.pop().asValue();  // lval
+        state.value0 = stack.pop().asValue();  // receiver
+        state.name0 = script->getName(pc.pc);
+        // SetPropertySuper(cx, lval, receiver, name, rval, strict)
+        // (N.B.: lval and receiver are transposed!)
+        if (!SetPropertySuper(cx, state.value1, state.value0, state.name0,
+                              state.value2, strict)) {
+          return false;
+        }
+        stack.push(StackValue(state.value2));
+        END_OP(SetPropSuper);
+      }
+
+      case JSOp::SetElemSuper:
+      case JSOp::StrictSetElemSuper: {
+        // stack signature: receiver, key, lval, rval => rval
+        static_assert(JSOpLength_SetElemSuper == JSOpLength_StrictSetElemSuper);
+        bool strict = state.op == JSOp::StrictSetElemSuper;
+        state.value3 = stack.pop().asValue();  // rval
+        state.value2 = stack.pop().asValue();  // lval
+        state.value1 = stack.pop().asValue();  // index
+        state.value0 = stack.pop().asValue();  // receiver
+        // SetElementSuper(cx, lval, receiver, index, rval, strict)
+        // (N.B.: lval, receiver and index are rotated!)
+        if (!SetElementSuper(cx, state.value2, state.value0, state.value1,
+                             state.value3, strict)) {
+          return false;
+        }
+        stack.push(StackValue(state.value2));  // value
+        END_OP(SetElemSuper);
+      }
 
       case JSOp::Iter: {
         state.value0 = stack.pop().asValue();
