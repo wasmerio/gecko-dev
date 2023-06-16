@@ -19,6 +19,7 @@
 #include "jit/JitFrames.h"
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
+#include "jit/VMFunctions.h"
 #include "vm/AsyncIteration.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/Iteration.h"
@@ -746,9 +747,9 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::ToAsyncIter: {
         // iter, next => asynciter
-        state.value0 = stack.pop().asValue();  // next
-        state.obj0 = &stack.pop().asValue().toObject();
-        ;  // iter
+        state.value0 = stack.pop().asValue();            // next
+        state.obj0 = &stack.pop().asValue().toObject();  // iter
+
         JSObject* ret =
             CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
         if (!ret) {
@@ -758,16 +759,44 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(ToAsyncIter);
       }
 
-        NYI_OPCODE(MutateProto);
+      case JSOp::MutateProto: {
+        // obj, protoVal => obj
+        state.value0 = stack.pop().asValue();
+        state.obj0 = &stack[0].asValue().toObject();
+        if (!MutatePrototype(cx, state.obj0.as<PlainObject>(), state.value0)) {
+          return false;
+        }
+        END_OP(MutateProto);
+      }
 
       case JSOp::NewArray: {
         ADVANCE(JSOpLength_NewArray);
         goto ic_NewArray;
       }
 
-        NYI_OPCODE(InitElemArray);
-        NYI_OPCODE(Hole);
-        NYI_OPCODE(RegExp);
+      case JSOp::InitElemArray: {
+        // array, val => array
+        state.value0 = stack.pop().asValue();
+        state.obj0 = &stack[0].asValue().toObject();
+        InitElemArrayOperation(cx, pc.pc, state.obj0.as<ArrayObject>(),
+                               state.value0);
+        END_OP(InitElemArray);
+      }
+
+      case JSOp::Hole: {
+        stack.push(StackValue(MagicValue(JS_ELEMENTS_HOLE)));
+        END_OP(Hole);
+      }
+
+      case JSOp::RegExp: {
+        state.obj0 = script->getRegExp(pc.pc);
+        JSObject* obj = CloneRegExpObject(cx, state.obj0.as<RegExpObject>());
+        if (!obj) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*obj)));
+        END_OP(RegExp);
+      }
 
       case JSOp::Lambda: {
         state.fun0 = script->getFunction(pc.pc);

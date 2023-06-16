@@ -28,6 +28,7 @@
 #include "vm/JSAtomUtils-inl.h"  // PrimitiveValueToId, TypeName
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
+#include "vm/NativeObject-inl.h"
 #include "vm/ObjectOperations-inl.h"
 #include "vm/StringType-inl.h"
 
@@ -647,6 +648,29 @@ static inline JSObject* HomeObjectSuperBase(JSObject* homeObj) {
   MOZ_ASSERT(homeObj->is<PlainObject>() || homeObj->is<JSFunction>());
 
   return homeObj->staticPrototype();
+}
+
+static MOZ_ALWAYS_INLINE void InitElemArrayOperation(JSContext* cx,
+                                                     jsbytecode* pc,
+                                                     Handle<ArrayObject*> arr,
+                                                     HandleValue val) {
+  MOZ_ASSERT(JSOp(*pc) == JSOp::InitElemArray);
+
+  // The dense elements must have been initialized up to this index. The JIT
+  // implementation also depends on this.
+  uint32_t index = GET_UINT32(pc);
+  MOZ_ASSERT(index < arr->getDenseCapacity());
+  MOZ_ASSERT(index == arr->getDenseInitializedLength());
+
+  // Bump the initialized length even for hole values to ensure the
+  // index == initLength invariant holds for later InitElemArray ops.
+  arr->setDenseInitializedLength(index + 1);
+
+  if (val.isMagic(JS_ELEMENTS_HOLE)) {
+    arr->initDenseElementHole(index);
+  } else {
+    arr->initDenseElement(index, val);
+  }
 }
 
 } /* namespace js */
