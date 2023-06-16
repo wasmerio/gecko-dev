@@ -30,6 +30,7 @@
 #include "vm/PlainObject.h"
 
 #include "jit/JitScript-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
@@ -179,6 +180,15 @@ struct PC {
     frame->interpreterPC() = pc;
   }
 };
+
+static EnvironmentObject& getEnvironmentFromCoordinate(
+    BaselineFrame* frame, EnvironmentCoordinate ec) {
+  JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
+  for (unsigned i = ec.hops(); i; i--) {
+    env = &env->as<EnvironmentObject>().enclosingEnvironment();
+  }
+  return env->as<EnvironmentObject>();
+}
 
 // TODO: check all stack pushes for overflow
 // TODO: convert all (except OOM) `return false`s into exception-handling path
@@ -1168,10 +1178,33 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
         NYI_OPCODE(ArgumentsLength);
-        NYI_OPCODE(GetActualArg);
-        NYI_OPCODE(GetAliasedVar);
-        NYI_OPCODE(GetAliasedDebugVar);
-        NYI_OPCODE(GetImport);
+
+      case JSOp::GetActualArg: {
+        MOZ_ASSERT(!script->needsArgsObj());
+        uint32_t index = stack[0].asValue().toInt32();
+        stack[0] = StackValue(frame->unaliasedActual(index));
+        END_OP(GetActualArg);
+      }
+
+      case JSOp::GetAliasedVar:
+      case JSOp::GetAliasedDebugVar: {
+        static_assert(JSOpLength_GetAliasedVar ==
+                      JSOpLength_GetAliasedDebugVar);
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
+        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+        stack.push(StackValue(obj.aliasedBinding(ec)));
+        END_OP(GetAliasedVar);
+      }
+
+      case JSOp::GetImport: {
+        state.obj0 = frame->environmentChain();
+        state.value0 = stack[0].asValue();
+        if (!GetImportOperation(cx, state.obj0, script, pc.pc, &state.value0)) {
+          return false;
+        }
+        stack[0] = StackValue(state.value0);
+        END_OP(GetImport);
+      }
 
       case JSOp::GetIntrinsic: {
         ADVANCE(JSOpLength_GetIntrinsic);
@@ -1232,8 +1265,22 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(SetLocal);
       }
 
-        NYI_OPCODE(SetAliasedVar);
-        NYI_OPCODE(SetIntrinsic);
+      case JSOp::SetAliasedVar: {
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
+        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+        MOZ_ASSERT(!IsUninitializedLexical(obj.aliasedBinding(ec)));
+        obj.setAliasedBinding(ec, stack[0].asValue());
+        END_OP(SetAliasedVar);
+      }
+
+      case JSOp::SetIntrinsic: {
+        state.value0 = stack[0].asValue();
+        if (!SetIntrinsicOperation(cx, script, pc.pc, state.value0)) {
+          return false;
+        }
+        END_OP(SetIntrinsic);
+      }
+
         NYI_OPCODE(PushLexicalEnv);
         NYI_OPCODE(PopLexicalEnv);
 
