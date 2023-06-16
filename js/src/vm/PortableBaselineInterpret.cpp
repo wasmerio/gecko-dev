@@ -111,19 +111,32 @@ struct Stack {
     JSScript* script = frame->script();
     frame->setICScript(script->jitScript()->icScript());
     frame->setInterpreterFields(script->code());
-
-    cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(fp));
-
     return frame;
   }
 
   void popFrame(JSContext* cx) {
     StackValue* newTOS = fp + 1;
     fp = reinterpret_cast<StackValue*>(fp->asVoidPtr());
-
-    cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(fp));
-
     restore(newTOS);
+  }
+
+  StackValue* pushExitFrame(BaselineFrame* prevFrame) {
+    if (!push(StackValue(
+            MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)))) {
+      return nullptr;
+    }
+    if (!push(StackValue(nullptr))) {  // fake return address.
+      return nullptr;
+    }
+    if (!push(StackValue(prevFrame))) {
+      return nullptr;
+    }
+    return cur();
+  }
+
+  void popExitFrame(StackValue* fp) {
+    restore(fp);
+    sp += 3;
   }
 
   BaselineFrame* frameFromFP() {
@@ -181,6 +194,52 @@ struct PC {
   }
 };
 
+class VMFrameManager {
+  JSContext* cx;
+  BaselineFrame* frame;
+  friend class VMFrame;
+
+ public:
+  VMFrameManager(JSContext*& cx_, BaselineFrame* frame_)
+      : cx(cx_), frame(frame_) {
+    // Once the manager exists, we need to create an exit frame to
+    // have access to the cx (unless the caller promises it is not
+    // calling into the rest of the runtime).
+    cx_ = nullptr;
+  }
+
+  // Provides the JSContext, but *only* if no calls into the rest of
+  // the runtime (that may invoke a GC or stack walk) occur. Avoids
+  // the overhead of pushing an exit frame.
+  JSContext* cxForLocalUseOnly() const { return cx; }
+};
+
+class VMFrame {
+  JSContext* cx;
+  Stack& stack;
+  uint8_t* prevExitFP;
+  StackValue* exitFP;
+
+ public:
+  VMFrame(VMFrameManager& mgr, Stack& stack_) : cx(mgr.cx), stack(stack_) {
+    exitFP = stack.pushExitFrame(mgr.frame);
+    if (exitFP) {
+      prevExitFP = cx->activation()->asJit()->packedExitFP();
+      cx->activation()->asJit()->setJSExitFP(
+          reinterpret_cast<uint8_t*>(exitFP));
+    }
+  }
+
+  ~VMFrame() {
+    cx->activation()->asJit()->setPackedExitFP(prevExitFP);
+    stack.popExitFrame(exitFP);
+  }
+
+  operator JSContext*() const { return cx; }
+
+  bool success() const { return exitFP != nullptr; }
+};
+
 static EnvironmentObject& getEnvironmentFromCoordinate(
     BaselineFrame* frame, EnvironmentCoordinate ec) {
   JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
@@ -195,16 +254,16 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
 // TODO: VM-call frames around ICs (and calls into runtime?) Mechanism
 // in general surrounding "escapes"; use this to cache SP, PC as well.
 
-static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
+static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
-  State state(cx);
+  State state(cx_);
 
-  if (!stack.pushFrame(cx, envChain)) {
+  if (!stack.pushFrame(cx_, envChain)) {
     return false;
   }
 
   BaselineFrame* frame = stack.frameFromFP();
-  RootedScript script(cx, frame->script());
+  RootedScript script(cx_, frame->script());
   PC pc(frame);
 
   uint32_t nslots = script->nslots();
@@ -219,7 +278,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
     JSFunction* func = CalleeTokenToFunction(frame->calleeToken());
     frame->setEnvironmentChain(func->environment());
     if (func->needsFunctionEnvironmentObjects()) {
-      if (!js::InitFunctionEnvironmentObjects(cx, frame)) {
+      if (!js::InitFunctionEnvironmentObjects(cx_, frame)) {
         return false;
       }
     }
@@ -228,6 +287,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #ifdef DEBUG
   frame->setDebugFrameSize(BaselineFrame::Size() + nslots * sizeof(Value));
 #endif
+
+  VMFrameManager frameMgr(cx_, frame);
 
   while (true) {
   dispatch:
@@ -245,6 +306,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 #define NEXT_IC() frame->interpreterICEntry()++;
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
+
+#define PUSH_EXIT_FRAME()      \
+  VMFrame cx(frameMgr, stack); \
+  if (!cx.success()) {         \
+    return false;              \
+  }
 
     state.op = JSOp(*pc.pc);
 
@@ -313,7 +380,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
       case JSOp::Symbol: {
         stack.push(StackValue(
-            SymbolValue(cx->wellKnownSymbols().get(GET_UINT8(pc.pc)))));
+            SymbolValue(frameMgr.cxForLocalUseOnly()->wellKnownSymbols().get(
+                GET_UINT8(pc.pc)))));
         END_OP(Symbol);
       }
       case JSOp::Void: {
@@ -437,6 +505,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::ToString: {
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();
         JSString* result = ToString<CanGC>(cx, state.value0);
         if (!result) {
@@ -455,11 +524,12 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::GlobalThis: {
         stack.push(StackValue(
-            ObjectValue(*cx->global()->lexicalEnvironment().thisObject())));
+            ObjectValue(*frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment().thisObject())));
         END_OP(GlobalThis);
       }
 
       case JSOp::NonSyntacticGlobalThis: {
+        PUSH_EXIT_FRAME();
         state.obj0 = frame->environmentChain();
         js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
         stack.push(StackValue(state.value0));
@@ -472,6 +542,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::DynamicImport: {
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();  // options
         state.value1 = stack.pop().asValue();  // specifier
         JSObject* promise =
@@ -484,6 +555,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::ImportMeta: {
+        PUSH_EXIT_FRAME();
         JSObject* metaObject = ImportMetaOperation(cx, script);
         if (!metaObject) {
           return false;
@@ -505,6 +577,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(Object);
       }
       case JSOp::ObjWithProto: {
+        PUSH_EXIT_FRAME();
         state.value0 = stack[0].asValue();
         JSObject* obj = ObjectWithProtoOperation(cx, state.value0);
         stack[0] = StackValue(ObjectValue(*obj));
@@ -541,6 +614,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         static_assert(JSOpLength_InitPropGetter == JSOpLength_InitPropSetter);
         static_assert(JSOpLength_InitPropGetter ==
                       JSOpLength_InitHiddenPropSetter);
+        PUSH_EXIT_FRAME();
         state.obj1 = &stack.pop().asValue().toObject();  // val
         state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
         state.name0 = script->getName(pc.pc);
@@ -560,6 +634,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         static_assert(JSOpLength_InitElemGetter == JSOpLength_InitElemSetter);
         static_assert(JSOpLength_InitElemGetter ==
                       JSOpLength_InitHiddenElemSetter);
+        PUSH_EXIT_FRAME();
         state.obj1 = &stack.pop().asValue().toObject();  // val
         state.value0 = stack.pop().asValue();            // idval
         state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
@@ -600,6 +675,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::DelProp: {
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();
         state.name0 = script->getName(pc.pc);
         bool res = false;
@@ -610,6 +686,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(DelProp);
       }
       case JSOp::StrictDelProp: {
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();
         state.name0 = script->getName(pc.pc);
         bool res = false;
@@ -620,6 +697,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(StrictDelProp);
       }
       case JSOp::DelElem: {
+        PUSH_EXIT_FRAME();
         state.value1 = stack.pop().asValue();
         state.value0 = stack.pop().asValue();
         bool res = false;
@@ -630,6 +708,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(DelElem);
       }
       case JSOp::StrictDelElem: {
+        PUSH_EXIT_FRAME();
         state.value1 = stack.pop().asValue();
         state.value0 = stack.pop().asValue();
         bool res = false;
@@ -655,6 +734,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::NewPrivateName: {
+        PUSH_EXIT_FRAME();
         state.atom0 = script->getAtom(pc.pc);
         auto* symbol = NewPrivateName(cx, state.atom0);
         if (!symbol) {
@@ -683,6 +763,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       case JSOp::StrictSetPropSuper: {
         // stack signature: receiver, lval, rval => rval
         static_assert(JSOpLength_SetPropSuper == JSOpLength_StrictSetPropSuper);
+        PUSH_EXIT_FRAME();
         bool strict = state.op == JSOp::StrictSetPropSuper;
         state.value2 = stack.pop().asValue();  // rval
         state.value1 = stack.pop().asValue();  // lval
@@ -702,6 +783,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       case JSOp::StrictSetElemSuper: {
         // stack signature: receiver, key, lval, rval => rval
         static_assert(JSOpLength_SetElemSuper == JSOpLength_StrictSetElemSuper);
+        PUSH_EXIT_FRAME();
         bool strict = state.op == JSOp::StrictSetElemSuper;
         state.value3 = stack.pop().asValue();  // rval
         state.value2 = stack.pop().asValue();  // lval
@@ -752,6 +834,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::CheckIsObj: {
         if (!stack[0].asValue().isObject()) {
+          PUSH_EXIT_FRAME();
           MOZ_ALWAYS_FALSE(js::ThrowCheckIsObject(
               cx, js::CheckIsObjectKind(GET_UINT8(pc.pc))));
           return false;  // TODO: goto error
@@ -761,6 +844,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::CheckObjCoercible: {
         if (stack[0].asValue().isNullOrUndefined()) {
+          PUSH_EXIT_FRAME();
           state.value0 = stack[0].asValue();
           MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, state.value0));
           return false;  // TOD: goto error
@@ -770,6 +854,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::ToAsyncIter: {
         // iter, next => asynciter
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();            // next
         state.obj0 = &stack.pop().asValue().toObject();  // iter
 
@@ -784,6 +869,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::MutateProto: {
         // obj, protoVal => obj
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();
         state.obj0 = &stack[0].asValue().toObject();
         if (!MutatePrototype(cx, state.obj0.as<PlainObject>(), state.value0)) {
@@ -799,6 +885,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::InitElemArray: {
         // array, val => array
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();
         state.obj0 = &stack[0].asValue().toObject();
         InitElemArrayOperation(cx, pc.pc, state.obj0.as<ArrayObject>(),
@@ -812,6 +899,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::RegExp: {
+        PUSH_EXIT_FRAME();
         state.obj0 = script->getRegExp(pc.pc);
         JSObject* obj = CloneRegExpObject(cx, state.obj0.as<RegExpObject>());
         if (!obj) {
@@ -822,6 +910,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::Lambda: {
+        PUSH_EXIT_FRAME();
         state.fun0 = script->getFunction(pc.pc);
         state.obj0 = frame->environmentChain();
         JSObject* res = js::Lambda(cx, state.fun0, state.obj0);
@@ -834,6 +923,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::SetFunName: {
         // fun, name => fun
+        PUSH_EXIT_FRAME();
         state.value0 = stack.pop().asValue();  // name
         state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
         FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc.pc));
@@ -856,6 +946,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::CheckClassHeritage: {
+        PUSH_EXIT_FRAME();
         state.value0 = stack[0].asValue();
         if (!CheckClassHeritageOperation(cx, state.value0)) {
           return false;
@@ -865,6 +956,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::FunWithProto: {
         // proto => obj
+        PUSH_EXIT_FRAME();
         state.obj0 = &stack.pop().asValue().toObject();  // proto
         state.obj1 = frame->environmentChain();
         state.fun0 = script->getFunction(pc.pc);
@@ -878,6 +970,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::BuiltinObject: {
+        PUSH_EXIT_FRAME();
         auto kind = BuiltinObjectKind(GET_UINT8(pc.pc));
         JSObject* builtin = BuiltinObjectOperation(cx, kind);
         if (!builtin) {
@@ -948,6 +1041,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::ImplicitThis: {
+        PUSH_EXIT_FRAME();
         state.obj0 = frame->environmentChain();
         state.name0 = script->getName(pc.pc);
         if (!ImplicitThisOperation(cx, state.obj0, state.name0, &state.res)) {
@@ -960,7 +1054,8 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       case JSOp::CallSiteObj: {
         JSObject* cso = script->getObject(pc.pc);
         MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
-        MOZ_ASSERT(cso->as<ArrayObject>().containsPure(cx->names().raw));
+        MOZ_ASSERT(cso->as<ArrayObject>().containsPure(
+            frameMgr.cxForLocalUseOnly()->names().raw));
         stack.push(StackValue(ObjectValue(*cso)));
         END_OP(CallSiteObj);
       }
@@ -979,6 +1074,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::CheckThisReinit: {
         if (!stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          PUSH_EXIT_FRAME();
           MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
           return false;
         }
@@ -986,6 +1082,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::Generator: {
+        PUSH_EXIT_FRAME();
         JSObject* generator = CreateGeneratorFromFrame(cx, frame);
         if (!generator) {
           return false;
@@ -1009,6 +1106,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::CanSkipAwait: {
         // value => value, can_skip
+        PUSH_EXIT_FRAME();
         state.value0 = stack[0].asValue();
         bool result = false;
         if (!CanSkipAwait(cx, state.value0, &result)) {
@@ -1080,7 +1178,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
       case JSOp::Return: {
         *ret = stack.pop().asValue();
-        stack.popFrame(cx);
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
       }
@@ -1096,7 +1194,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::RetRval: {
-        stack.popFrame(cx);
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
       }
@@ -1113,6 +1211,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::Exception: {
+        PUSH_EXIT_FRAME();
         if (!GetAndClearException(cx, &state.res)) {
           return false;
         }
@@ -1140,7 +1239,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(CheckThis);
 
       case JSOp::BindGName: {
-        state.obj0.set(&cx->global()->lexicalEnvironment());
+        state.obj0.set(&frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         state.name0.set(script->getName(pc.pc));
         ADVANCE(JSOpLength_BindGName);
         goto ic_BindName;
@@ -1151,7 +1250,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         goto ic_BindName;
       }
       case JSOp::GetGName: {
-        state.obj0.set(&cx->global()->lexicalEnvironment());
+        state.obj0.set(&frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         ADVANCE(JSOpLength_GetGName);
         goto ic_GetName;
       }
@@ -1199,6 +1298,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::GetImport: {
+        PUSH_EXIT_FRAME();
         state.obj0 = frame->environmentChain();
         state.value0 = stack[0].asValue();
         if (!GetImportOperation(cx, state.obj0, script, pc.pc, &state.value0)) {
@@ -1246,7 +1346,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
       case JSOp::InitGLexical: {
         state.value1 = stack[0].asValue();
-        state.value0.setObject(cx->global()->lexicalEnvironment());
+        state.value0.setObject(frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         ADVANCE(JSOpLength_InitGLexical);
         goto ic_SetProp;
       }
@@ -1276,6 +1376,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::SetIntrinsic: {
+        PUSH_EXIT_FRAME();
         state.value0 = stack[0].asValue();
         if (!SetIntrinsicOperation(cx, script, pc.pc, state.value0)) {
           return false;
@@ -1299,6 +1400,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         NYI_OPCODE(BindVar);
 
       case JSOp::GlobalOrEvalDeclInstantiation: {
+        PUSH_EXIT_FRAME();
         GCThingIndex lastFun = GET_GCTHING_INDEX(pc.pc);
         state.script0 = script;
         state.obj0 = frame->environmentChain();
@@ -1311,6 +1413,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::DelName: {
+        PUSH_EXIT_FRAME();
         state.name0 = script->getName(pc.pc);
         state.obj0 = frame->environmentChain();
         if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
@@ -1321,6 +1424,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::Arguments: {
+        PUSH_EXIT_FRAME();
         if (!NewArgumentsObject(cx, frame, &state.res)) {
           return false;
         }
@@ -1334,6 +1438,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
       case JSOp::FunctionThis: {
+        PUSH_EXIT_FRAME();
         if (!js::GetFunctionThis(cx, frame, &state.res)) {
           return false;
         }
@@ -1413,6 +1518,7 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
 ic_GetName:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
       return false;
     }
@@ -1424,6 +1530,7 @@ ic_GetName_tail:
 
 ic_Call:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     uint32_t totalArgs =
         state.argc +
         state.extraArgs;  // this, callee, (cosntructing?), func args
@@ -1450,6 +1557,7 @@ ic_Call_tail:
 
 ic_Typeof:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
     }
@@ -1461,6 +1569,7 @@ ic_Typeof_tail:
 
 ic_UnaryArith:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
     }
@@ -1472,6 +1581,7 @@ ic_UnaryArith_tail:
 
 ic_BinaryArith:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
                                &state.res)) {
       return false;
@@ -1484,6 +1594,7 @@ ic_BinaryArith_tail:
 
 ic_ToBool:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
     }
@@ -1517,6 +1628,7 @@ ic_ToBool_tail:
 
 ic_Compare:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
       return false;
@@ -1529,6 +1641,7 @@ ic_Compare_tail:
 
 ic_InstanceOf:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
                               &state.res)) {
       return false;
@@ -1541,6 +1654,7 @@ ic_InstanceOf_tail:
 
 ic_In:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
                       &state.res)) {
       return false;
@@ -1553,6 +1667,7 @@ ic_In_tail:
 
 ic_BindName:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
       return false;
     }
@@ -1564,6 +1679,7 @@ ic_BindName_tail:
 
 ic_SetProp:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
                            state.value1)) {
       return false;
@@ -1575,6 +1691,7 @@ ic_SetProp_tail:
 
 ic_NewObject:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
       return false;
     }
@@ -1586,6 +1703,7 @@ ic_NewObject_tail:
 
 ic_GetProp:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
       return false;
     }
@@ -1597,6 +1715,7 @@ ic_GetProp_tail:
 
 ic_GetPropSuper:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0,
                                 &state.value1, &state.res)) {
       return false;
@@ -1609,6 +1728,7 @@ ic_GetPropSuper_tail:
 
 ic_GetElem:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
       return false;
@@ -1621,6 +1741,7 @@ ic_GetElem_tail:
 
 ic_GetElemSuper:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0, state.value1,
                                 state.value2, &state.res)) {
       return false;
@@ -1633,6 +1754,7 @@ ic_GetElemSuper_tail:
 
 ic_NewArray:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
       return false;
     }
@@ -1644,6 +1766,7 @@ ic_NewArray_tail:
 
 ic_GetIntrinsic:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
       return false;
     }
@@ -1655,6 +1778,7 @@ ic_GetIntrinsic_tail:
 
 ic_SetElem:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
                            state.value1, state.value2)) {
       return false;
@@ -1666,6 +1790,7 @@ ic_SetElem_tail:
 
 ic_HasOwn:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
                           &state.res)) {
       return false;
@@ -1678,6 +1803,7 @@ ic_HasOwn_tail:
 
 ic_CheckPrivateField:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
                                      state.value1, &state.res)) {
       return false;
@@ -1690,6 +1816,7 @@ ic_CheckPrivateField_tail:
 
 ic_GetIterator:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
       return false;
     }
@@ -1701,6 +1828,7 @@ ic_GetIterator_tail:
 
 ic_ToPropertyKey:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0,
                                  &state.res)) {
       return false;
@@ -1713,6 +1841,7 @@ ic_ToPropertyKey_tail:
 
 ic_OptimizeSpreadCall:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
                                       &state.res)) {
       return false;
@@ -1725,6 +1854,7 @@ ic_OptimizeSpreadCall_tail:
 
 ic_Rest:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoRestFallback(cx, frame, fallback, &state.res)) {
       return false;
     }
@@ -1736,6 +1866,7 @@ ic_Rest_tail:
 
 ic_CloseIter:
   ICLOOP({
+    PUSH_EXIT_FRAME();
     if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
       return false;
     }
