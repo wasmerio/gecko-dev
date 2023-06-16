@@ -22,6 +22,7 @@
 #include "jit/VMFunctions.h"
 #include "vm/AsyncIteration.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/Interpreter.h"
 #include "vm/Iteration.h"
 #include "vm/JitActivation.h"
 #include "vm/JSScript.h"
@@ -832,9 +833,37 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(InitHomeObject);
       }
 
-        NYI_OPCODE(CheckClassHeritage);
-        NYI_OPCODE(FunWithProto);
-        NYI_OPCODE(BuiltinObject);
+      case JSOp::CheckClassHeritage: {
+        state.value0 = stack[0].asValue();
+        if (!CheckClassHeritageOperation(cx, state.value0)) {
+          return false;
+        }
+        END_OP(CheckClassHeritage);
+      }
+
+      case JSOp::FunWithProto: {
+        // proto => obj
+        state.obj0 = &stack.pop().asValue().toObject();  // proto
+        state.obj1 = frame->environmentChain();
+        state.fun0 = script->getFunction(pc.pc);
+        JSObject* obj =
+            FunWithProtoOperation(cx, state.fun0, state.obj1, state.obj0);
+        if (!obj) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*obj)));
+        END_OP(FunWithProto);
+      }
+
+      case JSOp::BuiltinObject: {
+        auto kind = BuiltinObjectKind(GET_UINT8(pc.pc));
+        JSObject* builtin = BuiltinObjectOperation(cx, kind);
+        if (!builtin) {
+          return false;
+        }
+        stack.push(StackValue(ObjectValue(*builtin)));
+        END_OP(BuiltinObject);
+      }
 
       case JSOp::Call:
       case JSOp::CallIgnoresRv:
@@ -897,10 +926,35 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
       }
 
         NYI_OPCODE(ImplicitThis);
-        NYI_OPCODE(CallSiteObj);
-        NYI_OPCODE(IsConstructing);
-        NYI_OPCODE(SuperFun);
-        NYI_OPCODE(CheckThisReinit);
+
+      case JSOp::CallSiteObj: {
+        JSObject* cso = script->getObject(pc.pc);
+        MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
+        MOZ_ASSERT(cso->as<ArrayObject>().containsPure(cx->names().raw));
+        stack.push(StackValue(ObjectValue(*cso)));
+        END_OP(CallSiteObj);
+      }
+
+      case JSOp::IsConstructing: {
+        stack.push(StackValue(MagicValue(JS_IS_CONSTRUCTING)));
+        END_OP(IsConstructing);
+      }
+
+      case JSOp::SuperFun: {
+        JSObject* superEnvFunc = &stack.pop().asValue().toObject();
+        JSObject* superFun = SuperFunOperation(superEnvFunc);
+        stack.push(StackValue(ObjectOrNullValue(superFun)));
+        END_OP(SuperFun);
+      }
+
+      case JSOp::CheckThisReinit: {
+        if (!stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
+          return false;
+        }
+        END_OP(CheckThisReinit);
+      }
+
         NYI_OPCODE(Generator);
         NYI_OPCODE(InitialYield);
         NYI_OPCODE(AfterYield);
