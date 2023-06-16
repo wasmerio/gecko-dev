@@ -203,6 +203,15 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
   }
   ret->setUndefined();
 
+  if (CalleeTokenIsFunction(frame->calleeToken())) {
+    JSFunction* func = CalleeTokenToFunction(frame->calleeToken());
+    if (func->needsFunctionEnvironmentObjects()) {
+      if (!InitFunctionEnvironmentObjects(cx, frame)) {
+        return false;
+      }
+    }
+  }
+
 #ifdef DEBUG
   frame->setDebugFrameSize(BaselineFrame::Size() + nslots * sizeof(Value));
 #endif
