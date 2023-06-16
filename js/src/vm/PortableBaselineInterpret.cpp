@@ -111,6 +111,9 @@ struct Stack {
     JSScript* script = frame->script();
     frame->setICScript(script->jitScript()->icScript());
     frame->setInterpreterFields(script->code());
+#ifdef DEBUG
+    frame->setDebugFrameSize(0);  // filled in when we push an exit frame.
+#endif
     return frame;
   }
 
@@ -131,12 +134,21 @@ struct Stack {
     if (!push(StackValue(prevFrame))) {
       return nullptr;
     }
+    if (!push(StackValue(uint64_t(ExitFrameType::CallNative)))) {
+      return nullptr;
+    }
+#ifdef DEBUG
+    uintptr_t frameSize = (reinterpret_cast<uintptr_t>(prevFrame) -
+                           reinterpret_cast<uintptr_t>(cur()));
+    MOZ_ASSERT(frameSize <= 0xffffffff);
+    prevFrame->setDebugFrameSize(uint32_t(frameSize));
+#endif
     return cur();
   }
 
   void popExitFrame(StackValue* fp) {
     restore(fp);
-    sp += 3;
+    (*sp) += 3;
   }
 
   BaselineFrame* frameFromFP() {
@@ -222,9 +234,9 @@ class VMFrame {
 
  public:
   VMFrame(VMFrameManager& mgr, Stack& stack_) : cx(mgr.cx), stack(stack_) {
+    prevExitFP = cx->activation()->asJit()->packedExitFP();
     exitFP = stack.pushExitFrame(mgr.frame);
     if (exitFP) {
-      prevExitFP = cx->activation()->asJit()->packedExitFP();
       cx->activation()->asJit()->setJSExitFP(
           reinterpret_cast<uint8_t*>(exitFP));
     }
@@ -523,8 +535,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GlobalThis: {
-        stack.push(StackValue(
-            ObjectValue(*frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment().thisObject())));
+        stack.push(StackValue(ObjectValue(*frameMgr.cxForLocalUseOnly()
+                                               ->global()
+                                               ->lexicalEnvironment()
+                                               .thisObject())));
         END_OP(GlobalThis);
       }
 
@@ -1239,7 +1253,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         NYI_OPCODE(CheckThis);
 
       case JSOp::BindGName: {
-        state.obj0.set(&frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        state.obj0.set(
+            &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         state.name0.set(script->getName(pc.pc));
         ADVANCE(JSOpLength_BindGName);
         goto ic_BindName;
@@ -1250,7 +1265,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         goto ic_BindName;
       }
       case JSOp::GetGName: {
-        state.obj0.set(&frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        state.obj0.set(
+            &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         ADVANCE(JSOpLength_GetGName);
         goto ic_GetName;
       }
@@ -1346,7 +1362,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
       case JSOp::InitGLexical: {
         state.value1 = stack[0].asValue();
-        state.value0.setObject(frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        state.value0.setObject(
+            frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         ADVANCE(JSOpLength_InitGLexical);
         goto ic_SetProp;
       }
