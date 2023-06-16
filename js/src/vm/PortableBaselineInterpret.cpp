@@ -192,6 +192,8 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
 
 // TODO: check all stack pushes for overflow
 // TODO: convert all (except OOM) `return false`s into exception-handling path
+// TODO: VM-call frames around ICs (and calls into runtime?) Mechanism
+// in general surrounding "escapes"; use this to cache SP, PC as well.
 
 static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
                                       JSObject* envChain, Value* ret) {
