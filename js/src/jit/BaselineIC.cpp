@@ -1405,7 +1405,7 @@ bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
   Rooted<PropertyName*> name(cx, script->getName(pc));
   RootedId id(cx, NameToId(name));
 
-  int lhsIndex = -2;
+  int lhsIndex = stack ? -2 : JSDVG_IGNORE_STACK;
   RootedObject obj(cx,
                    ToObjectFromStackForPropertyAccess(cx, lhs, lhsIndex, id));
   if (!obj) {
