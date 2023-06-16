@@ -1251,8 +1251,23 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
         END_OP(GlobalOrEvalDeclInstantiation);
       }
 
-        NYI_OPCODE(DelName);
-        NYI_OPCODE(Arguments);
+      case JSOp::DelName: {
+        state.name0 = script->getName(pc.pc);
+        state.obj0 = frame->environmentChain();
+        if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
+          return false;
+        }
+        stack.push(StackValue(state.res));
+        END_OP(DelName);
+      }
+
+      case JSOp::Arguments: {
+        if (!NewArgumentsObject(cx, frame, &state.res)) {
+          return false;
+        }
+        stack.push(StackValue(state.res));
+        END_OP(Arguments);
+      }
 
       case JSOp::Rest: {
         ADVANCE(JSOpLength_Rest);
