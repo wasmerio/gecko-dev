@@ -205,8 +205,9 @@ static bool PortableBaselineInterpret(JSContext* cx, Stack& stack,
 
   if (CalleeTokenIsFunction(frame->calleeToken())) {
     JSFunction* func = CalleeTokenToFunction(frame->calleeToken());
+    frame->setEnvironmentChain(func->environment());
     if (func->needsFunctionEnvironmentObjects()) {
-      if (!InitFunctionEnvironmentObjects(cx, frame)) {
+      if (!js::InitFunctionEnvironmentObjects(cx, frame)) {
         return false;
       }
     }
