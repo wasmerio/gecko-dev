@@ -327,7 +327,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
     state.op = JSOp(*pc.pc);
 
-    printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n",
+    printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64 "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
     printf("script = %p pc = %p: %s (ic %d)\n", script.get(), pc.pc,
            CodeName(state.op),

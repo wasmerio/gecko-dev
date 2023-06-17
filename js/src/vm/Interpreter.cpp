@@ -1895,7 +1895,7 @@ class ReservedRooted : public RootedOperations<T, ReservedRooted<T>> {
 
   void set(const T& p) const { *savedRoot = p; }
   operator Handle<T>() { return *savedRoot; }
-  operator Rooted<T> &() { return *savedRoot; }
+  operator Rooted<T>&() { return *savedRoot; }
   MutableHandle<T> operator&() { return &*savedRoot; }
 
   DECLARE_NONPOINTER_ACCESSOR_METHODS(savedRoot->get())
@@ -1988,16 +1988,11 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
    * will enable interrupts, and activation.opMask() is or'd with the opcode
    * to implement a simple alternate dispatch.
    */
-#define ADVANCE_AND_DISPATCH(N)                                \
-  JS_BEGIN_MACRO                                               \
-    REGS.pc += (N);                                            \
-    SANITY_CHECKS();                                           \
-    printf("stack[0] = %lx stack[1] = %lx stack[2] = %lx\n",   \
-           REGS.sp[-1].asRawBits(), REGS.sp[-2].asRawBits(),   \
-           REGS.sp[-3].asRawBits());                           \
-    printf("script = %p pc = %p: %s\n", script.get(), REGS.pc, \
-           js::CodeName(JSOp(*REGS.pc)));                      \
-    DISPATCH_TO(*REGS.pc | activation.opMask());               \
+#define ADVANCE_AND_DISPATCH(N)                  \
+  JS_BEGIN_MACRO                                 \
+    REGS.pc += (N);                              \
+    SANITY_CHECKS();                             \
+    DISPATCH_TO(*REGS.pc | activation.opMask()); \
   JS_END_MACRO
 
   /*
