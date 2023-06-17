@@ -29,6 +29,7 @@
 #include "vm/Opcodes.h"
 #include "vm/PlainObject.h"
 
+#include "jit/BaselineFrame-inl.h"
 #include "jit/JitScript-inl.h"
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/Interpreter-inl.h"
@@ -181,6 +182,7 @@ struct State {
   Rooted<jsid> id0;
   Rooted<JSAtom*> atom0;
   RootedFunction fun0;
+  Rooted<Scope*> scope0;
   JSOp op;
   int argc;
   int extraArgs;
@@ -200,7 +202,8 @@ struct State {
         name0(cx),
         id0(cx),
         atom0(cx),
-        fun0(cx) {}
+        fun0(cx),
+        scope0(cx) {}
 };
 
 struct PC {
@@ -208,9 +211,7 @@ struct PC {
 
   explicit PC(BaselineFrame* frame) : pc(frame->interpreterPC()) {}
 
-  void advance(BaselineFrame* frame, intptr_t delta) {
-    pc += delta;
-  }
+  void advance(BaselineFrame* frame, intptr_t delta) { pc += delta; }
 };
 
 class VMFrameManager {
@@ -1150,13 +1151,15 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(SuperFun);
       }
 
+      case JSOp::CheckThis:
       case JSOp::CheckThisReinit: {
+        static_assert(JSOpLength_CheckThis == JSOpLength_CheckThisReinit);
         if (!stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
           PUSH_EXIT_FRAME();
           MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
           return false;
         }
-        END_OP(CheckThisReinit);
+        END_OP(CheckThis);
       }
 
       case JSOp::Generator: {
@@ -1172,9 +1175,39 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(Generator);
       }
 
-        NYI_OPCODE(InitialYield);
-        NYI_OPCODE(FinalYieldRval);
-        NYI_OPCODE(Yield);
+      case JSOp::InitialYield: {
+        *ret = stack.pop().asValue();
+        state.obj0 = &ret->toObject();
+        {
+          PUSH_EXIT_FRAME();
+          MOZ_CRASH("todo: call jit::NormalSuspend");
+        }
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+      }
+
+      case JSOp::FinalYieldRval: {
+        state.obj0 = &stack.pop().asValue().toObject();
+        {
+          PUSH_EXIT_FRAME();
+          MOZ_CRASH("todo: call jit::NormalSuspend");
+        }
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+      }
+
+      case JSOp::Yield: {
+        state.obj0 = &stack.pop().asValue().toObject();
+        {
+          PUSH_EXIT_FRAME();
+          MOZ_CRASH("todo: call jit::NormalSuspend");
+        }
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+      }
 
       case JSOp::IsGenClosing: {
         stack.push(StackValue(MagicValue(JS_GENERATOR_CLOSING)));
@@ -1318,10 +1351,30 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(InitLexical);
       }
 
-        NYI_OPCODE(InitAliasedLexical);
-        NYI_OPCODE(CheckLexical);
-        NYI_OPCODE(CheckAliasedLexical);
-        NYI_OPCODE(CheckThis);
+      case JSOp::InitAliasedLexical: {
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
+        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+        obj.setAliasedBinding(ec, stack[0].asValue());
+        END_OP(InitAliasedLexical);
+      }
+      case JSOp::CheckLexical: {
+        if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          PUSH_EXIT_FRAME();
+          ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
+                                    pc.pc);
+          return false;
+        }
+        END_OP(CheckLexical);
+      }
+      case JSOp::CheckAliasedLexical: {
+        if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          PUSH_EXIT_FRAME();
+          ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
+                                    pc.pc);
+          return false;
+        }
+        END_OP(CheckAliasedLexical);
+      }
 
       case JSOp::BindGName: {
         state.obj0.set(
@@ -1357,7 +1410,11 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(GetArg);
       }
 
-        NYI_OPCODE(GetFrameArg);
+      case JSOp::GetFrameArg: {
+        uint32_t i = GET_ARGNO(pc.pc);
+        stack.push(StackValue(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
+        END_OP(GetFrameArg);
+      }
 
       case JSOp::GetLocal: {
         uint32_t i = GET_LOCALNO(pc.pc);
@@ -1365,7 +1422,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(GetLocal);
       }
 
-        NYI_OPCODE(ArgumentsLength);
+      case JSOp::ArgumentsLength: {
+        stack.push(StackValue(Int32Value(frame->numActualArgs())));
+        END_OP(ArgumentsLength);
+      }
 
       case JSOp::GetActualArg: {
         MOZ_ASSERT(!script->needsArgsObj());
@@ -1403,8 +1463,20 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         goto ic_GetIntrinsic;
       }
 
-        NYI_OPCODE(Callee);
-        NYI_OPCODE(EnvCallee);
+      case JSOp::Callee: {
+        stack.push(StackValue(frame->calleev()));
+        END_OP(Callee);
+      }
+
+      case JSOp::EnvCallee: {
+        uint8_t numHops = GET_UINT8(pc.pc);
+        JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
+        for (unsigned i = 0; i < numHops; i++) {
+          env = &env->as<EnvironmentObject>().enclosingEnvironment();
+        }
+        stack.push(StackValue(ObjectValue(env->as<CallObject>().callee())));
+        END_OP(EnvCallee);
+      }
 
       case JSOp::SetProp:
       case JSOp::StrictSetProp:
@@ -1477,20 +1549,82 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(SetIntrinsic);
       }
 
-        NYI_OPCODE(PushLexicalEnv);
-        NYI_OPCODE(PopLexicalEnv);
-
+      case JSOp::PushLexicalEnv: {
+        state.scope0 = script->getScope(pc.pc);
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->pushLexicalEnvironment(cx,
+                                             state.scope0.as<LexicalScope>())) {
+            return false;
+          }
+        }
+        END_OP(PushLexicalEnv);
+      }
+      case JSOp::PopLexicalEnv: {
+        frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
+        END_OP(PopLexicalEnv);
+      }
       case JSOp::DebugLeaveLexicalEnv: {
         END_OP(DebugLeaveLexicalEnv);
       }
 
         NYI_OPCODE(RecreateLexicalEnv);
-        NYI_OPCODE(FreshenLexicalEnv);
-        NYI_OPCODE(PushClassBodyEnv);
-        NYI_OPCODE(PushVarEnv);
-        NYI_OPCODE(EnterWith);
-        NYI_OPCODE(LeaveWith);
-        NYI_OPCODE(BindVar);
+      case JSOp::FreshenLexicalEnv: {
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->freshenLexicalEnvironment(cx)) {
+            return false;
+          }
+        }
+        END_OP(FreshenLexicalEnv);
+      }
+      case JSOp::PushClassBodyEnv: {
+        state.scope0 = script->getScope(pc.pc);
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->pushClassBodyEnvironment(
+                  cx, state.scope0.as<ClassBodyScope>())) {
+            return false;
+          }
+        }
+        END_OP(PushClassBodyEnv);
+      }
+      case JSOp::PushVarEnv: {
+        state.scope0 = script->getScope(pc.pc);
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->pushVarEnvironment(cx, state.scope0)) {
+            return false;
+          }
+        }
+        END_OP(PushVarEnv);
+      }
+      case JSOp::EnterWith: {
+        state.scope0 = script->getScope(pc.pc);
+        state.value0 = stack.pop().asValue();
+        {
+          PUSH_EXIT_FRAME();
+          if (!EnterWithOperation(cx, frame, state.value0,
+                                  state.scope0.as<WithScope>())) {
+            return false;
+          }
+        }
+        END_OP(EnterWith);
+      }
+      case JSOp::LeaveWith: {
+        frame->popOffEnvironmentChain<WithEnvironmentObject>();
+        END_OP(LeaveWith);
+      }
+      case JSOp::BindVar: {
+        state.obj0 = frame->environmentChain();
+        JSObject* varObj;
+        {
+          PUSH_EXIT_FRAME();
+          varObj = BindVarOperation(cx, state.obj0);
+        }
+        stack.push(StackValue(ObjectValue(*varObj)));
+        END_OP(BindVar);
+      }
 
       case JSOp::GlobalOrEvalDeclInstantiation: {
         GCThingIndex lastFun = GET_GCTHING_INDEX(pc.pc);
@@ -1578,10 +1712,20 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         std::swap(stack[0], stack[1]);
         END_OP(Swap);
       }
-
-        NYI_OPCODE(Pick);
-        NYI_OPCODE(Unpick);
-
+      case JSOp::Pick: {
+        unsigned i = GET_UINT8(pc.pc);
+        StackValue tmp = stack[i];
+        memmove(&stack[1], &stack[0], sizeof(StackValue) * i);
+        stack[0] = tmp;
+        END_OP(Pick);
+      }
+      case JSOp::Unpick: {
+        unsigned i = GET_UINT8(pc.pc);
+        StackValue tmp = stack[0];
+        memmove(&stack[0], &stack[1], sizeof(StackValue) * i);
+        stack[i] = tmp;
+        END_OP(Unpick);
+      }
       case JSOp::DebugCheckSelfHosted: {
         END_OP(DebugCheckSelfHosted);
       }
