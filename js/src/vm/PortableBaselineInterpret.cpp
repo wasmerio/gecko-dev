@@ -95,6 +95,7 @@ struct Stack {
   void restore(StackValue* s) { *sp = s; }
 
   BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
+    auto* prevFP = fp;
     if (!push(StackValue(fp))) {
       return nullptr;
     }
@@ -112,7 +113,9 @@ struct Stack {
     frame->setICScript(script->jitScript()->icScript());
     frame->setInterpreterFields(script->code());
 #ifdef DEBUG
-    frame->setDebugFrameSize(0);  // filled in when we push an exit frame.
+    uintptr_t frameSize =
+        reinterpret_cast<uintptr_t>(prevFP) - reinterpret_cast<uintptr_t>(fp);
+    frame->setDebugFrameSize(frameSize);
 #endif
     return frame;
   }
@@ -124,6 +127,9 @@ struct Stack {
   }
 
   StackValue* pushExitFrame(BaselineFrame* prevFrame) {
+    uint8_t* prevFP =
+        reinterpret_cast<uint8_t*>(prevFrame) + BaselineFrame::Size();
+
     if (!push(StackValue(
             MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)))) {
       return nullptr;
@@ -131,19 +137,21 @@ struct Stack {
     if (!push(StackValue(nullptr))) {  // fake return address.
       return nullptr;
     }
-    if (!push(StackValue(prevFrame))) {
+    if (!push(StackValue(prevFP))) {
       return nullptr;
     }
+    StackValue* exitFP = cur();
     if (!push(StackValue(uint64_t(ExitFrameType::CallNative)))) {
       return nullptr;
     }
 #ifdef DEBUG
-    uintptr_t frameSize = (reinterpret_cast<uintptr_t>(prevFrame) -
-                           reinterpret_cast<uintptr_t>(cur()));
+    uintptr_t frameSize =
+        (reinterpret_cast<uintptr_t>(prevFP) -
+         reinterpret_cast<uintptr_t>(exitFP) - ExitFrameLayout::Size());
     MOZ_ASSERT(frameSize <= 0xffffffff);
     prevFrame->setDebugFrameSize(uint32_t(frameSize));
 #endif
-    return cur();
+    return exitFP;
   }
 
   void popExitFrame(StackValue* fp) {
@@ -296,10 +304,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
     }
   }
 
-#ifdef DEBUG
-  frame->setDebugFrameSize(BaselineFrame::Size() + nslots * sizeof(Value));
-#endif
-
   VMFrameManager frameMgr(cx_, frame);
 
   while (true) {
@@ -327,7 +331,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
     state.op = JSOp(*pc.pc);
 
-    printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64 "\n",
+    printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
+           "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
     printf("script = %p pc = %p: %s (ic %d)\n", script.get(), pc.pc,
            CodeName(state.op),
