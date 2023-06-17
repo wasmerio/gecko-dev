@@ -331,6 +331,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
     state.op = JSOp(*pc.pc);
 
+#if 0
     printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
            "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
@@ -338,6 +339,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
            CodeName(state.op),
            (int)(frame->interpreterICEntry() -
                  script->jitScript()->icScript()->icEntries()));
+#endif
 
     switch (state.op) {
       case JSOp::Nop: {
@@ -403,7 +405,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
       case JSOp::Void: {
         stack[0] = StackValue(JS::UndefinedValue());
-        END_OP(Symbol);
+        END_OP(Void);
       }
 
       case JSOp::Typeof:
