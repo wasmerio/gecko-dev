@@ -142,7 +142,7 @@ struct Stack {
       return nullptr;
     }
     StackValue* exitFP = cur();
-    if (!push(StackValue(uint64_t(ExitFrameType::CallNative)))) {
+    if (!push(StackValue(uint64_t(ExitFrameType::Bare)))) {
       return nullptr;
     }
 #ifdef DEBUG
