@@ -1591,7 +1591,13 @@ bool DoCallFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
     if ((op == JSOp::CallIter || op == JSOp::CallContentIter) &&
         callee.isPrimitive()) {
       MOZ_ASSERT(argc == 0, "thisv must be on top of the stack");
-      ReportValueError(cx, JSMSG_NOT_ITERABLE, -1, callArgs.thisv(), nullptr);
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+      int spindex = -1;
+#else
+      int spindex = JSDVG_IGNORE_STACK;
+#endif
+      ReportValueError(cx, JSMSG_NOT_ITERABLE, spindex, callArgs.thisv(),
+                       nullptr);
       return false;
     }
 
@@ -1922,7 +1928,12 @@ bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
   FallbackICSpew(cx, stub, "InstanceOf");
 
   if (!rhs.isObject()) {
-    ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, -1, rhs, nullptr);
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+    int spindex = -1;
+#else
+    int spindex = JSDVG_IGNORE_STACK;
+#endif
+    ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, spindex, rhs, nullptr);
     return false;
   }
 

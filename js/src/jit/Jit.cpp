@@ -81,7 +81,11 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
 
     unsigned numFormals = script->function()->nargs();
     if (numFormals > numActualArgs) {
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
+      return EnterJitStatus::NotEntered;
+#else
       code = cx->runtime()->jitRuntime()->getArgumentsRectifier().value;
+#endif
     }
   } else {
     numActualArgs = 0;
