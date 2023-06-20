@@ -65,7 +65,7 @@ struct Stack {
         base(reinterpret_cast<StackValue*>(pbs.base)),
         top(reinterpret_cast<StackValue*>(pbs.top)) {}
 
-  StackValue* allocate(size_t size) {
+  [[nodiscard]] StackValue* allocate(size_t size) {
     if (reinterpret_cast<uintptr_t>(base) + size >
         reinterpret_cast<uintptr_t>(*sp)) {
       return nullptr;
@@ -75,7 +75,7 @@ struct Stack {
     return *sp;
   }
 
-  bool push(StackValue v) {
+  [[nodiscard]] bool push(StackValue v) {
     StackValue* elem = allocate(sizeof(StackValue));
     if (!elem) {
       return false;
@@ -95,7 +95,7 @@ struct Stack {
   StackValue* cur() { return *sp; }
   void restore(StackValue* s) { *sp = s; }
 
-  BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
+  [[nodiscard]] BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
     auto* prevFP = fp;
     if (!push(StackValue(fp))) {
       return nullptr;
@@ -127,7 +127,7 @@ struct Stack {
     restore(newTOS);
   }
 
-  StackValue* pushExitFrame(BaselineFrame* prevFrame) {
+  [[nodiscard]] StackValue* pushExitFrame(BaselineFrame* prevFrame) {
     uint8_t* prevFP =
         reinterpret_cast<uint8_t*>(prevFrame) + BaselineFrame::Size();
 
@@ -274,13 +274,18 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
 // TODO: VM-call frames around ICs (and calls into runtime?) Mechanism
 // in general surrounding "escapes"; use this to cache SP, PC as well.
 
+#define TRY(x)    \
+  if (!(x)) {     \
+    return false; \
+  }
+
+#define PUSH(val) TRY(stack.push(val));
+
 static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
   State state(cx_);
 
-  if (!stack.pushFrame(cx_, envChain)) {
-    return false;
-  }
+  TRY(stack.pushFrame(cx_, envChain));
 
   BaselineFrame* frame = stack.frameFromFP();
   RootedScript script(cx_, frame->script());
@@ -288,9 +293,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
   uint32_t nslots = script->nslots();
   for (uint32_t i = 0; i < nslots; i++) {
-    if (!stack.push(StackValue(UndefinedValue()))) {
-      return false;
-    }
+    TRY(stack.push(StackValue(UndefinedValue())));
   }
   ret->setUndefined();
 
@@ -298,9 +301,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
     JSFunction* func = CalleeTokenToFunction(frame->calleeToken());
     frame->setEnvironmentChain(func->environment());
     if (func->needsFunctionEnvironmentObjects()) {
-      if (!js::InitFunctionEnvironmentObjects(cx_, frame)) {
-        return false;
-      }
+      TRY(js::InitFunctionEnvironmentObjects(cx_, frame));
     }
   }
 
@@ -336,10 +337,11 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
     printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
            "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
-    printf("script = %p pc = %p: %s (ic %d)\n", script.get(), pc.pc,
-           CodeName(state.op),
+    printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(),
+           pc.pc, CodeName(state.op),
            (int)(frame->interpreterICEntry() -
-                 script->jitScript()->icScript()->icEntries()));
+                 script->jitScript()->icScript()->icEntries()),
+           frameMgr.cxForLocalUseOnly()->isExceptionPending());
 #endif
 
     switch (state.op) {
@@ -347,59 +349,59 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(Nop);
       }
       case JSOp::Undefined: {
-        stack.push(StackValue(UndefinedValue()));
+        PUSH(StackValue(UndefinedValue()));
         END_OP(Undefined);
       }
       case JSOp::Null: {
-        stack.push(StackValue(NullValue()));
+        PUSH(StackValue(NullValue()));
         END_OP(Null);
       }
       case JSOp::False: {
-        stack.push(StackValue(BooleanValue(false)));
+        PUSH(StackValue(BooleanValue(false)));
         END_OP(False);
       }
       case JSOp::True: {
-        stack.push(StackValue(BooleanValue(true)));
+        PUSH(StackValue(BooleanValue(true)));
         END_OP(True);
       }
       case JSOp::Int32: {
-        stack.push(StackValue(Int32Value(GET_INT32(pc.pc))));
+        PUSH(StackValue(Int32Value(GET_INT32(pc.pc))));
         END_OP(Int32);
       }
       case JSOp::Zero: {
-        stack.push(StackValue(Int32Value(0)));
+        PUSH(StackValue(Int32Value(0)));
         END_OP(Zero);
       }
       case JSOp::One: {
-        stack.push(StackValue(Int32Value(1)));
+        PUSH(StackValue(Int32Value(1)));
         END_OP(One);
       }
       case JSOp::Int8: {
-        stack.push(StackValue(Int32Value(GET_INT8(pc.pc))));
+        PUSH(StackValue(Int32Value(GET_INT8(pc.pc))));
         END_OP(Int8);
       }
       case JSOp::Uint16: {
-        stack.push(StackValue(Int32Value(GET_UINT16(pc.pc))));
+        PUSH(StackValue(Int32Value(GET_UINT16(pc.pc))));
         END_OP(Uint16);
       }
       case JSOp::Uint24: {
-        stack.push(StackValue(Int32Value(GET_UINT24(pc.pc))));
+        PUSH(StackValue(Int32Value(GET_UINT24(pc.pc))));
         END_OP(Uint24);
       }
       case JSOp::Double: {
-        stack.push(StackValue(GET_INLINE_VALUE(pc.pc)));
+        PUSH(StackValue(GET_INLINE_VALUE(pc.pc)));
         END_OP(Double);
       }
       case JSOp::BigInt: {
-        stack.push(StackValue(JS::BigIntValue(script->getBigInt(pc.pc))));
+        PUSH(StackValue(JS::BigIntValue(script->getBigInt(pc.pc))));
         END_OP(BigInt);
       }
       case JSOp::String: {
-        stack.push(StackValue(StringValue(script->getString(pc.pc))));
+        PUSH(StackValue(StringValue(script->getString(pc.pc))));
         END_OP(String);
       }
       case JSOp::Symbol: {
-        stack.push(StackValue(
+        PUSH(StackValue(
             SymbolValue(frameMgr.cxForLocalUseOnly()->wellKnownSymbols().get(
                 GET_UINT8(pc.pc)))));
         END_OP(Symbol);
@@ -531,10 +533,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           result = ToString<CanGC>(cx, state.value0);
           if (!result) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(StringValue(result)));
+        PUSH(StackValue(StringValue(result)));
         END_OP(ToString);
       }
 
@@ -546,10 +548,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GlobalThis: {
-        stack.push(StackValue(ObjectValue(*frameMgr.cxForLocalUseOnly()
-                                               ->global()
-                                               ->lexicalEnvironment()
-                                               .thisObject())));
+        PUSH(StackValue(ObjectValue(*frameMgr.cxForLocalUseOnly()
+                                         ->global()
+                                         ->lexicalEnvironment()
+                                         .thisObject())));
         END_OP(GlobalThis);
       }
 
@@ -559,12 +561,12 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           state.obj0 = frame->environmentChain();
           js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
         }
-        stack.push(StackValue(state.value0));
+        PUSH(StackValue(state.value0));
         END_OP(NonSyntacticGlobalThis);
       }
 
       case JSOp::NewTarget: {
-        stack.push(StackValue(frame->newTarget()));
+        PUSH(StackValue(frame->newTarget()));
         END_OP(NewTarget);
       }
 
@@ -577,10 +579,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           promise =
               StartDynamicModuleImport(cx, script, state.value1, state.value0);
           if (!promise) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*promise)));
+        PUSH(StackValue(ObjectValue(*promise)));
         END_OP(DynamicImport);
       }
 
@@ -590,10 +592,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           metaObject = ImportMetaOperation(cx, script);
           if (!metaObject) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*metaObject)));
+        PUSH(StackValue(ObjectValue(*metaObject)));
         END_OP(ImportMeta);
       }
 
@@ -606,7 +608,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         goto ic_NewObject;
       }
       case JSOp::Object: {
-        stack.push(StackValue(ObjectValue(*script->getObject(pc.pc))));
+        PUSH(StackValue(ObjectValue(*script->getObject(pc.pc))));
         END_OP(Object);
       }
       case JSOp::ObjWithProto: {
@@ -635,7 +637,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.value1 = stack.pop().asValue();
         state.value0 = stack[0].asValue();
         if (state.op == JSOp::InitElemInc) {
-          stack.push(StackValue(Int32Value(state.value1.toInt32() + 1)));
+          PUSH(StackValue(Int32Value(state.value1.toInt32() + 1)));
         }
         ADVANCE(JSOpLength_InitElem);
         goto ic_SetElem;
@@ -657,7 +659,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!InitPropGetterSetterOperation(cx, pc.pc, state.obj0, state.name0,
                                              state.obj1)) {
-            return false;
+            goto error;
           }
         }
         END_OP(InitPropGetter);
@@ -679,7 +681,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!InitElemGetterSetterOperation(cx, pc.pc, state.obj0,
                                              state.value0, state.obj1)) {
-            return false;
+            goto error;
           }
         }
         END_OP(InitElemGetter);
@@ -721,10 +723,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(BooleanValue(res)));
+        PUSH(StackValue(BooleanValue(res)));
         END_OP(DelProp);
       }
       case JSOp::StrictDelProp: {
@@ -734,10 +736,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(BooleanValue(res)));
+        PUSH(StackValue(BooleanValue(res)));
         END_OP(StrictDelProp);
       }
       case JSOp::DelElem: {
@@ -747,10 +749,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(BooleanValue(res)));
+        PUSH(StackValue(BooleanValue(res)));
         END_OP(DelElem);
       }
       case JSOp::StrictDelElem: {
@@ -760,10 +762,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(BooleanValue(res)));
+        PUSH(StackValue(BooleanValue(res)));
         END_OP(StrictDelElem);
       }
 
@@ -788,10 +790,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           symbol = NewPrivateName(cx, state.atom0);
           if (!symbol) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(SymbolValue(symbol)));
+        PUSH(StackValue(SymbolValue(symbol)));
         END_OP(NewPrivateName);
       }
 
@@ -806,7 +808,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         JSObject* homeObj = &homeObjVal.toObject();
         JSObject* superBase = HomeObjectSuperBase(homeObj);
 
-        stack.push(StackValue(ObjectOrNullValue(superBase)));
+        PUSH(StackValue(ObjectOrNullValue(superBase)));
         END_OP(SuperBase);
       }
 
@@ -825,10 +827,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           // (N.B.: lval and receiver are transposed!)
           if (!SetPropertySuper(cx, state.value1, state.value0, state.name0,
                                 state.value2, strict)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(state.value2));
+        PUSH(StackValue(state.value2));
         END_OP(SetPropSuper);
       }
 
@@ -847,10 +849,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           // (N.B.: lval, receiver and index are rotated!)
           if (!SetElementSuper(cx, state.value2, state.value0, state.value1,
                                state.value3, strict)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(state.value2));  // value
+        PUSH(StackValue(state.value2));  // value
         END_OP(SetElemSuper);
       }
 
@@ -863,14 +865,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::MoreIter: {
         // iter => iter, name
         Value v = IteratorMore(&stack[0].asValue().toObject());
-        stack.push(StackValue(v));
+        PUSH(StackValue(v));
         END_OP(MoreIter);
       }
 
       case JSOp::IsNoIter: {
         // iter => iter, bool
         bool result = stack[0].asValue().isMagic(JS_NO_ITER_VALUE);
-        stack.push(StackValue(BooleanValue(result)));
+        PUSH(StackValue(BooleanValue(result)));
         END_OP(IsNoIter);
       }
 
@@ -892,7 +894,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           MOZ_ALWAYS_FALSE(js::ThrowCheckIsObject(
               cx, js::CheckIsObjectKind(GET_UINT8(pc.pc))));
-          return false;  // TODO: goto error
+          goto error;
         }
         END_OP(CheckIsObj);
       }
@@ -902,7 +904,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         if (state.value0.isNullOrUndefined()) {
           PUSH_EXIT_FRAME();
           MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, state.value0));
-          return false;  // TOD: goto error
+          goto error;
         }
         END_OP(CheckObjCoercible);
       }
@@ -917,10 +919,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           ret = CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
           if (!ret) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*ret)));
+        PUSH(StackValue(ObjectValue(*ret)));
         END_OP(ToAsyncIter);
       }
 
@@ -932,7 +934,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!MutatePrototype(cx, state.obj0.as<PlainObject>(),
                                state.value0)) {
-            return false;
+            goto error;
           }
         }
         END_OP(MutateProto);
@@ -956,7 +958,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Hole: {
-        stack.push(StackValue(MagicValue(JS_ELEMENTS_HOLE)));
+        PUSH(StackValue(MagicValue(JS_ELEMENTS_HOLE)));
         END_OP(Hole);
       }
 
@@ -967,10 +969,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           state.obj0 = script->getRegExp(pc.pc);
           obj = CloneRegExpObject(cx, state.obj0.as<RegExpObject>());
           if (!obj) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*obj)));
+        PUSH(StackValue(ObjectValue(*obj)));
         END_OP(RegExp);
       }
 
@@ -982,10 +984,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           res = js::Lambda(cx, state.fun0, state.obj0);
           if (!res) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*res)));
+        PUSH(StackValue(ObjectValue(*res)));
         END_OP(Lambda);
       }
 
@@ -997,7 +999,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!SetFunctionName(cx, state.fun0, state.value0, prefixKind)) {
-            return false;
+            goto error;
           }
         }
         END_OP(SetFunName);
@@ -1020,7 +1022,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!CheckClassHeritageOperation(cx, state.value0)) {
-            return false;
+            goto error;
           }
         }
         END_OP(CheckClassHeritage);
@@ -1036,10 +1038,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           obj = FunWithProtoOperation(cx, state.fun0, state.obj1, state.obj0);
           if (!obj) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*obj)));
+        PUSH(StackValue(ObjectValue(*obj)));
         END_OP(FunWithProto);
       }
 
@@ -1050,10 +1052,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           builtin = BuiltinObjectOperation(cx, kind);
           if (!builtin) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*builtin)));
+        PUSH(StackValue(ObjectValue(*builtin)));
         END_OP(BuiltinObject);
       }
 
@@ -1123,10 +1125,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!ImplicitThisOperation(cx, state.obj0, state.name0, &state.res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(state.res));
+        PUSH(StackValue(state.res));
         END_OP(ImplicitThis);
       }
 
@@ -1135,19 +1137,19 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
         MOZ_ASSERT(cso->as<ArrayObject>().containsPure(
             frameMgr.cxForLocalUseOnly()->names().raw));
-        stack.push(StackValue(ObjectValue(*cso)));
+        PUSH(StackValue(ObjectValue(*cso)));
         END_OP(CallSiteObj);
       }
 
       case JSOp::IsConstructing: {
-        stack.push(StackValue(MagicValue(JS_IS_CONSTRUCTING)));
+        PUSH(StackValue(MagicValue(JS_IS_CONSTRUCTING)));
         END_OP(IsConstructing);
       }
 
       case JSOp::SuperFun: {
         JSObject* superEnvFunc = &stack.pop().asValue().toObject();
         JSObject* superFun = SuperFunOperation(superEnvFunc);
-        stack.push(StackValue(ObjectOrNullValue(superFun)));
+        PUSH(StackValue(ObjectOrNullValue(superFun)));
         END_OP(SuperFun);
       }
 
@@ -1157,7 +1159,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         if (!stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
           PUSH_EXIT_FRAME();
           MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
-          return false;
+          goto error;
         }
         END_OP(CheckThis);
       }
@@ -1168,10 +1170,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           generator = CreateGeneratorFromFrame(cx, frame);
           if (!generator) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(ObjectValue(*generator)));
+        PUSH(StackValue(ObjectValue(*generator)));
         END_OP(Generator);
       }
 
@@ -1210,7 +1212,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::IsGenClosing: {
-        stack.push(StackValue(MagicValue(JS_GENERATOR_CLOSING)));
+        PUSH(StackValue(MagicValue(JS_GENERATOR_CLOSING)));
         END_OP(IsGenClosing);
       }
 
@@ -1225,10 +1227,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!CanSkipAwait(cx, state.value0, &result)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(BooleanValue(result)));
+        PUSH(StackValue(BooleanValue(result)));
         END_OP(CanSkipAwait);
       }
 
@@ -1236,7 +1238,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
       case JSOp::ResumeKind: {
         GeneratorResumeKind resumeKind = ResumeKindFromPC(pc.pc);
-        stack.push(StackValue(Int32Value(int32_t(resumeKind))));
+        PUSH(StackValue(Int32Value(int32_t(resumeKind))));
         END_OP(ResumeKind);
       }
 
@@ -1300,7 +1302,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GetRval: {
-        stack.push(StackValue(*ret));
+        PUSH(StackValue(*ret));
         END_OP(GetRval);
       }
 
@@ -1316,9 +1318,34 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
         NYI_OPCODE(CheckReturn);
-        NYI_OPCODE(Throw);
-        NYI_OPCODE(ThrowMsg);
-        NYI_OPCODE(ThrowSetConst);
+
+      case JSOp::Throw: {
+        state.value0 = stack.pop().asValue();
+        {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(ThrowOperation(cx, state.value0));
+          goto error;
+        }
+        END_OP(Throw);
+      }
+
+      case JSOp::ThrowMsg: {
+        {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(ThrowMsgOperation(cx, GET_UINT8(pc.pc)));
+          goto error;
+        }
+        END_OP(ThrowMsg);
+      }
+
+      case JSOp::ThrowSetConst: {
+        {
+          PUSH_EXIT_FRAME();
+          ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, pc.pc);
+          goto error;
+        }
+        END_OP(ThrowSetConst);
+      }
 
       case JSOp::Try:
       case JSOp::TryDestructuring: {
@@ -1330,10 +1357,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!GetAndClearException(cx, &state.res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(state.res));
+        PUSH(StackValue(state.res));
         END_OP(Exception);
       }
 
@@ -1342,7 +1369,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Uninitialized: {
-        stack.push(StackValue(MagicValue(JS_UNINITIALIZED_LEXICAL)));
+        PUSH(StackValue(MagicValue(JS_UNINITIALIZED_LEXICAL)));
         END_OP(Uninitialized);
       }
       case JSOp::InitLexical: {
@@ -1362,7 +1389,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
                                     pc.pc);
-          return false;
+          goto error;
         }
         END_OP(CheckLexical);
       }
@@ -1371,7 +1398,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
                                     pc.pc);
-          return false;
+          goto error;
         }
         END_OP(CheckAliasedLexical);
       }
@@ -1403,27 +1430,27 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::GetArg: {
         unsigned i = GET_ARGNO(pc.pc);
         if (script->argsObjAliasesFormals()) {
-          stack.push(StackValue(frame->argsObj().arg(i)));
+          PUSH(StackValue(frame->argsObj().arg(i)));
         } else {
-          stack.push(StackValue(frame->unaliasedFormal(i)));
+          PUSH(StackValue(frame->unaliasedFormal(i)));
         }
         END_OP(GetArg);
       }
 
       case JSOp::GetFrameArg: {
         uint32_t i = GET_ARGNO(pc.pc);
-        stack.push(StackValue(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
+        PUSH(StackValue(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
         END_OP(GetFrameArg);
       }
 
       case JSOp::GetLocal: {
         uint32_t i = GET_LOCALNO(pc.pc);
-        stack.push(StackValue(frame->unaliasedLocal(i)));
+        PUSH(StackValue(frame->unaliasedLocal(i)));
         END_OP(GetLocal);
       }
 
       case JSOp::ArgumentsLength: {
-        stack.push(StackValue(Int32Value(frame->numActualArgs())));
+        PUSH(StackValue(Int32Value(frame->numActualArgs())));
         END_OP(ArgumentsLength);
       }
 
@@ -1440,7 +1467,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                       JSOpLength_GetAliasedDebugVar);
         EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
         EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-        stack.push(StackValue(obj.aliasedBinding(ec)));
+        PUSH(StackValue(obj.aliasedBinding(ec)));
         END_OP(GetAliasedVar);
       }
 
@@ -1451,7 +1478,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!GetImportOperation(cx, state.obj0, script, pc.pc,
                                   &state.value0)) {
-            return false;
+            goto error;
           }
         }
         stack[0] = StackValue(state.value0);
@@ -1464,7 +1491,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Callee: {
-        stack.push(StackValue(frame->calleev()));
+        PUSH(StackValue(frame->calleev()));
         END_OP(Callee);
       }
 
@@ -1474,7 +1501,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         for (unsigned i = 0; i < numHops; i++) {
           env = &env->as<EnvironmentObject>().enclosingEnvironment();
         }
-        stack.push(StackValue(ObjectValue(env->as<CallObject>().callee())));
+        PUSH(StackValue(ObjectValue(env->as<CallObject>().callee())));
         END_OP(EnvCallee);
       }
 
@@ -1491,7 +1518,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
         state.value1 = stack.pop().asValue();
         state.value0 = stack.pop().asValue();
-        stack.push(StackValue(state.value1));
+        PUSH(StackValue(state.value1));
         ADVANCE(JSOpLength_SetProp);
         goto ic_SetProp;
       }
@@ -1543,7 +1570,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!SetIntrinsicOperation(cx, script, pc.pc, state.value0)) {
-            return false;
+            goto error;
           }
         }
         END_OP(SetIntrinsic);
@@ -1555,7 +1582,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!frame->pushLexicalEnvironment(cx,
                                              state.scope0.as<LexicalScope>())) {
-            return false;
+            goto error;
           }
         }
         END_OP(PushLexicalEnv);
@@ -1568,12 +1595,21 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(DebugLeaveLexicalEnv);
       }
 
-        NYI_OPCODE(RecreateLexicalEnv);
+      case JSOp::RecreateLexicalEnv: {
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->recreateLexicalEnvironment(cx)) {
+            goto error;
+          }
+        }
+        END_OP(RecreateLexicalEnv);
+      }
+
       case JSOp::FreshenLexicalEnv: {
         {
           PUSH_EXIT_FRAME();
           if (!frame->freshenLexicalEnvironment(cx)) {
-            return false;
+            goto error;
           }
         }
         END_OP(FreshenLexicalEnv);
@@ -1584,7 +1620,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!frame->pushClassBodyEnvironment(
                   cx, state.scope0.as<ClassBodyScope>())) {
-            return false;
+            goto error;
           }
         }
         END_OP(PushClassBodyEnv);
@@ -1594,7 +1630,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!frame->pushVarEnvironment(cx, state.scope0)) {
-            return false;
+            goto error;
           }
         }
         END_OP(PushVarEnv);
@@ -1606,7 +1642,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!EnterWithOperation(cx, frame, state.value0,
                                   state.scope0.as<WithScope>())) {
-            return false;
+            goto error;
           }
         }
         END_OP(EnterWith);
@@ -1622,7 +1658,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           varObj = BindVarOperation(cx, state.obj0);
         }
-        stack.push(StackValue(ObjectValue(*varObj)));
+        PUSH(StackValue(ObjectValue(*varObj)));
         END_OP(BindVar);
       }
 
@@ -1634,8 +1670,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
                                              lastFun)) {
-            // TODO: exception case?
-            return false;
+            goto error;
           }
         }
         END_OP(GlobalOrEvalDeclInstantiation);
@@ -1647,10 +1682,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(state.res));
+        PUSH(StackValue(state.res));
         END_OP(DelName);
       }
 
@@ -1658,10 +1693,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!NewArgumentsObject(cx, frame, &state.res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(state.res));
+        PUSH(StackValue(state.res));
         END_OP(Arguments);
       }
 
@@ -1674,10 +1709,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         {
           PUSH_EXIT_FRAME();
           if (!js::GetFunctionThis(cx, frame, &state.res)) {
-            return false;
+            goto error;
           }
         }
-        stack.push(StackValue(state.res));
+        PUSH(StackValue(state.res));
         END_OP(FunctionThis);
       }
 
@@ -1692,20 +1727,20 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
       case JSOp::Dup: {
         StackValue value = stack[0];
-        stack.push(value);
+        PUSH(value);
         END_OP(Dup);
       }
       case JSOp::Dup2: {
         StackValue value1 = stack[0];
         StackValue value2 = stack[1];
-        stack.push(value2);
-        stack.push(value1);
+        PUSH(value2);
+        PUSH(value1);
         END_OP(Dup2);
       }
       case JSOp::DupAt: {
         unsigned i = GET_UINT24(pc.pc);
         StackValue value = stack[i];
-        stack.push(value);
+        PUSH(value);
         END_OP(DupAt);
       }
       case JSOp::Swap: {
@@ -1765,11 +1800,11 @@ ic_GetName:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_GetName_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1787,17 +1822,17 @@ ic_Call:
       PUSH_EXIT_FRAME();
       if (state.spreadCall) {
         if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
-          return false;
+          goto error;
         }
       } else {
         if (!DoCallFallback(cx, frame, fallback, state.argc, args,
                             &state.res)) {
-          return false;
+          goto error;
         }
       }
     }
     stack.popn(totalArgs);
-    stack.push(StackValue(state.res));
+    PUSH(StackValue(state.res));
   });
 ic_Call_tail:
   NEXT_IC();
@@ -1807,11 +1842,11 @@ ic_Typeof:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_Typeof_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1819,11 +1854,11 @@ ic_UnaryArith:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_UnaryArith_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1832,11 +1867,11 @@ ic_BinaryArith:
     PUSH_EXIT_FRAME();
     if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
                                &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_BinaryArith_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1844,13 +1879,13 @@ ic_ToBool:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_ToBool_tail:
   switch (state.op) {
     case JSOp::Not:
-      stack.push(StackValue(BooleanValue(!state.res.toBoolean())));
+      PUSH(StackValue(BooleanValue(!state.res.toBoolean())));
       break;
     case JSOp::Or:
     case JSOp::JumpIfTrue: {
@@ -1879,11 +1914,11 @@ ic_Compare:
     PUSH_EXIT_FRAME();
     if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_Compare_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1892,11 +1927,11 @@ ic_InstanceOf:
     PUSH_EXIT_FRAME();
     if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
                               &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_InstanceOf_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1905,11 +1940,11 @@ ic_In:
     PUSH_EXIT_FRAME();
     if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
                       &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_In_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1917,11 +1952,11 @@ ic_BindName:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_BindName_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1930,7 +1965,7 @@ ic_SetProp:
     PUSH_EXIT_FRAME();
     if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
                            state.value1)) {
-      return false;
+      goto error;
     }
   });
 ic_SetProp_tail:
@@ -1941,11 +1976,11 @@ ic_NewObject:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_NewObject_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1953,11 +1988,11 @@ ic_GetProp:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_GetProp_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1966,11 +2001,11 @@ ic_GetPropSuper:
     PUSH_EXIT_FRAME();
     if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0,
                                 &state.value1, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_GetPropSuper_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1979,11 +2014,11 @@ ic_GetElem:
     PUSH_EXIT_FRAME();
     if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                            &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_GetElem_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -1992,11 +2027,11 @@ ic_GetElemSuper:
     PUSH_EXIT_FRAME();
     if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0, state.value1,
                                 state.value2, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_GetElemSuper_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2004,11 +2039,11 @@ ic_NewArray:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_NewArray_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2016,11 +2051,11 @@ ic_GetIntrinsic:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_GetIntrinsic_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2029,7 +2064,7 @@ ic_SetElem:
     PUSH_EXIT_FRAME();
     if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
                            state.value1, state.value2)) {
-      return false;
+      goto error;
     }
   });
 ic_SetElem_tail:
@@ -2041,11 +2076,11 @@ ic_HasOwn:
     PUSH_EXIT_FRAME();
     if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
                           &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_HasOwn_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2054,11 +2089,11 @@ ic_CheckPrivateField:
     PUSH_EXIT_FRAME();
     if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
                                      state.value1, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_CheckPrivateField_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2066,11 +2101,11 @@ ic_GetIterator:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_GetIterator_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2079,11 +2114,11 @@ ic_ToPropertyKey:
     PUSH_EXIT_FRAME();
     if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0,
                                  &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_ToPropertyKey_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2092,11 +2127,11 @@ ic_OptimizeSpreadCall:
     PUSH_EXIT_FRAME();
     if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
                                       &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_OptimizeSpreadCall_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2104,11 +2139,11 @@ ic_Rest:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoRestFallback(cx, frame, fallback, &state.res)) {
-      return false;
+      goto error;
     }
   });
 ic_Rest_tail:
-  stack.push(StackValue(state.res));
+  PUSH(StackValue(state.res));
   NEXT_IC();
   goto dispatch;
 
@@ -2116,11 +2151,60 @@ ic_CloseIter:
   ICLOOP({
     PUSH_EXIT_FRAME();
     if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
-      return false;
+      goto error;
     }
   });
 ic_CloseIter_tail:
   NEXT_IC();
+  goto dispatch;
+
+error:
+  do {
+    printf("HandleException at pc %p\n", pc.pc);
+    ResumeFromException rfe;
+    {
+      PUSH_EXIT_FRAME();
+      HandleException(&rfe);
+    }
+
+    switch (rfe.kind) {
+      case ExceptionResumeKind::EntryFrame:
+        *ret = MagicValue(JS_ION_ERROR);
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return false;
+        break;
+      case ExceptionResumeKind::Catch:
+        pc.pc = frame->interpreterPC();
+        printf("catch to pc %p\n", pc.pc);
+        goto dispatch;
+      case ExceptionResumeKind::Finally:
+        printf("finally\n");
+        pc.pc = frame->interpreterPC();
+        PUSH(StackValue(rfe.exception));
+        PUSH(StackValue(BooleanValue(true)));
+        goto dispatch;
+      case ExceptionResumeKind::ForcedReturnBaseline:
+        printf("finally\n");
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+        break;
+      case ExceptionResumeKind::ForcedReturnIon:
+        MOZ_CRASH(
+            "Unexpected ForcedReturnIon exception-resume kind in Portable "
+            "Baseline");
+      case ExceptionResumeKind::Bailout:
+        MOZ_CRASH(
+            "Unexpected Bailout exception-resume kind in Portable Baseline");
+      case ExceptionResumeKind::Wasm:
+        MOZ_CRASH("Unexpected Wasm exception-resume kind in Portable Baseline");
+      case ExceptionResumeKind::WasmCatch:
+        MOZ_CRASH(
+            "Unexpected WasmCatch exception-resume kind in Portable Baseline");
+    }
+  } while (false);
+
   goto dispatch;
 }
 
@@ -2139,12 +2223,11 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   // - "return address" (nullptr for top frame)
 
   for (size_t i = 0; i < argc; i++) {
-    stack.push(StackValue(argv[argc - 1 - i]));
+    PUSH(StackValue(argv[argc - 1 - i]));
   }
-  stack.push(StackValue(calleeToken));
-  stack.push(
-      StackValue(MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, argc)));
-  stack.push(StackValue(nullptr));  // Fake return address.
+  PUSH(StackValue(calleeToken));
+  PUSH(StackValue(MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, argc)));
+  PUSH(StackValue(nullptr));  // Fake return address.
 
   if (!PortableBaselineInterpret(cx, stack, envChain, result)) {
     return false;
