@@ -1338,7 +1338,25 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         return true;
       }
 
-        NYI_OPCODE(CheckReturn);
+      case JSOp::CheckReturn: {
+        Value thisval = stack.pop().asValue();
+        if (ret->isObject()) {
+          PUSH(StackValue(*ret));
+        } else if (!ret->isUndefined()) {
+          PUSH_EXIT_FRAME();
+          state.value0 = *ret;
+          ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK,
+                           state.value0, nullptr);
+          goto error;
+        } else if (thisval.isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
+          goto error;
+        } else {
+          PUSH(StackValue(thisval));
+        }
+        END_OP(CheckReturn);
+      }
 
       case JSOp::Throw: {
         state.value0 = stack.pop().asValue();
