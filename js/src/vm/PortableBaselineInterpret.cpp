@@ -1292,7 +1292,28 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         break;
       }
 
-        NYI_OPCODE(TableSwitch);
+      case JSOp::TableSwitch: {
+        int32_t len = GET_JUMP_OFFSET(pc.pc);
+        int32_t low = GET_JUMP_OFFSET(pc.pc + 1 * JUMP_OFFSET_LEN);
+        int32_t high = GET_JUMP_OFFSET(pc.pc + 2 * JUMP_OFFSET_LEN);
+        Value v = stack.pop().asValue();
+        int32_t i = 0;
+        if (v.isInt32()) {
+          i = v.toInt32();
+        } else if (!v.isDouble() ||
+                   !mozilla::NumberEqualsInt32(v.toDouble(), &i)) {
+          ADVANCE(len);
+          break;
+        }
+
+        i = uint32_t(i) - uint32_t(low);
+        if ((uint32_t(i) < uint32_t(high - low + 1))) {
+          len = script->tableSwitchCaseOffset(pc.pc, uint32_t(i)) -
+                script->pcToOffset(pc.pc);
+        }
+        ADVANCE(len);
+        break;
+      }
 
       case JSOp::Return: {
         *ret = stack.pop().asValue();
