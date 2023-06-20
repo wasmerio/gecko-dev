@@ -667,7 +667,9 @@ void HandleException(ResumeFromException* rfe) {
   JSContext* cx = TlsContext.get();
 
 #ifdef DEBUG
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
   cx->runtime()->jitRuntime()->clearDisallowArbitraryCode();
+#endif
 
   // Reset the counter when we bailed after MDebugEnterGCUnsafeRegion, but
   // before the matching MDebugLeaveGCUnsafeRegion.
@@ -677,10 +679,12 @@ void HandleException(ResumeFromException* rfe) {
 #endif
 
   auto resetProfilerFrame = mozilla::MakeScopeExit([=] {
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
     if (!cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
             cx->runtime())) {
       return;
     }
+#endif
 
     MOZ_ASSERT(cx->jitActivation == cx->profilingActivation());
 
