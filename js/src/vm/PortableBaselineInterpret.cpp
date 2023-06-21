@@ -1849,7 +1849,6 @@ ic_GetName_tail:
   goto dispatch;
 
 ic_Call:
-  frame->interpreterPC() = pc.pc;
   ICLOOP({
     uint32_t totalArgs =
         state.argc +
@@ -1876,7 +1875,6 @@ ic_Call:
     PUSH(StackValue(state.res));
   });
 ic_Call_tail:
-  pc.pc = frame->interpreterPC();
   NEXT_IC();
   goto dispatch;
 
