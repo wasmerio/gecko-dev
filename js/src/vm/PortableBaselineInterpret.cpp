@@ -100,8 +100,7 @@ struct Stack {
   void restore(StackValue* s) { *sp = s; }
 
   uint32_t frameSize(BaselineFrame* curFrame) const {
-    return sizeof(StackValue) *
-           (reinterpret_cast<StackValue*>(curFrame) - cur());
+    return sizeof(StackValue) * (reinterpret_cast<StackValue*>(fp) - cur());
   }
 
   [[nodiscard]] BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
@@ -1191,6 +1190,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
+        *ret = stack[0].asValue();
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
@@ -1207,6 +1207,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
+        *ret = stack[0].asValue();
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
@@ -1234,7 +1235,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::AsyncAwait: {
         // value, gen => promise
         state.obj0 = &stack.pop().asValue().toObject();  // gen
-        state.value0 = stack.pop().asValue();           // value
+        state.value0 = stack.pop().asValue();            // value
         JSObject* promise;
         {
           PUSH_EXIT_FRAME();
