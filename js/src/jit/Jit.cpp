@@ -231,7 +231,12 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
 
     // Try to enter the Portable Baseline Interpreter.
     if (IsPortableBaselineInterpreterEnabled()) {
-      if (CanEnterPortableBaselineInterpreter(cx, state)) {
+      jit::MethodStatus status =
+        CanEnterPortableBaselineInterpreter(cx, state);
+      if (status == jit::Method_Error) {
+        return EnterJitStatus::Error;
+      }
+      if (status == jit::Method_Compiled) {
         code = script->jitCodeRaw();
         break;
       }
