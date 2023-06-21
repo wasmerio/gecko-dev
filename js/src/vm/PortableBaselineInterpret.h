@@ -14,6 +14,7 @@
 
 #include "jspubtd.h"
 
+#include "jit/JitContext.h"
 #include "jit/JitScript.h"
 #include "vm/Interpreter.h"
 #include "vm/Stack.h"
@@ -24,7 +25,8 @@ bool PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                 size_t numActualArgs,
                                 jit::CalleeToken calleeToken,
                                 JSObject* envChain, Value* result);
-bool CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state);
+jit::MethodStatus CanEnterPortableBaselineInterpreter(JSContext* cx,
+                                                      RunState& state);
 
 } /* namespace js */
 

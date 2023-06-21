@@ -35,6 +35,8 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
+#define TRACE_INTERP
+
 using namespace js;
 using namespace js::jit;
 
@@ -333,7 +335,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
     state.op = JSOp(*pc.pc);
 
-#if 0
+#ifdef TRACE_INTERP
     printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
            "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
@@ -2199,6 +2201,9 @@ ic_CloseIter_tail:
   goto dispatch;
 
 error:
+#ifdef TRACE_INTERP
+  printf("HandleException\n");
+#endif
   do {
     ResumeFromException rfe;
     {
@@ -2208,19 +2213,31 @@ error:
 
     switch (rfe.kind) {
       case ExceptionResumeKind::EntryFrame:
+#ifdef TRACE_INTERP
+        printf(" -> Return from entry frame\n");
+#endif
         *ret = MagicValue(JS_ION_ERROR);
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return false;
       case ExceptionResumeKind::Catch:
         pc.pc = frame->interpreterPC();
+#ifdef TRACE_INTERP
+        printf(" -> catch to pc %p\n", pc.pc);
+#endif
         goto dispatch;
       case ExceptionResumeKind::Finally:
         pc.pc = frame->interpreterPC();
+#ifdef TRACE_INTERP
+        printf(" -> finally to pc %p\n", pc.pc);
+#endif
         PUSH(StackValue(rfe.exception));
         PUSH(StackValue(BooleanValue(true)));
         goto dispatch;
       case ExceptionResumeKind::ForcedReturnBaseline:
+#ifdef TRACE_INTERP
+        printf(" -> forced return\n");
+#endif
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
@@ -2280,37 +2297,37 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   return true;
 }
 
-bool js::CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state) {
+MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state) {
   if (!JitOptions.portableBaselineInterpreter) {
-    return false;
+    return MethodStatus::Method_CantCompile;
   }
   if (state.script()->hasJitScript()) {
-    return true;
+    return MethodStatus::Method_Compiled;
   }
   if (state.script()->hasForceInterpreterOp()) {
-    return false;
+    return MethodStatus::Method_CantCompile;
   }
   if (state.script()->nslots() > BaselineMaxScriptSlots) {
-    return false;
+    return MethodStatus::Method_CantCompile;
   }
   if (state.isInvoke()) {
     InvokeState& invoke = *state.asInvoke();
     if (TooManyActualArguments(invoke.args().length())) {
-      return false;
+      return MethodStatus::Method_CantCompile;
     }
   }
   if (state.script()->getWarmUpCount() <=
       JitOptions.portableBaselineInterpreterWarmUpThreshold) {
-    return false;
+    return MethodStatus::Method_Skipped;
   }
   if (!cx->realm()->ensureJitRealmExists(cx)) {
-    return false;
+    return MethodStatus::Method_Error;
   }
 
   AutoKeepJitScripts keepJitScript(cx);
   if (!state.script()->ensureHasJitScript(cx, keepJitScript)) {
-    return false;
+    return MethodStatus::Method_Error;
   }
   state.script()->updateJitCodeRaw(cx->runtime());
-  return true;
+  return MethodStatus::Method_Compiled;
 }
