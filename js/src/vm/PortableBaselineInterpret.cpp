@@ -35,7 +35,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+//#define TRACE_INTERP
 
 using namespace js;
 using namespace js::jit;

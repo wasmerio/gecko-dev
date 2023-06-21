@@ -1,4 +1,5 @@
 // |jit-test| exitstatus: 3;
+// |jit-test| skip-if: getJitCompilerOptions()['pbl.enable']
 
 let debuggerRealm = newGlobal({newCompartment: true});
 debuggerRealm.debuggee = this;

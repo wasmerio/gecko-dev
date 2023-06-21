@@ -160,8 +160,11 @@ bool js::jit::EnterInterpreterEntryTrampoline(uint8_t* code, JSContext* cx,
 }
 
 EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
-  if (!IsBaselineInterpreterEnabled() &&
-      !IsPortableBaselineInterpreterEnabled()) {
+  if (!IsBaselineInterpreterEnabled()
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
+      && !IsPortableBaselineInterpreterEnabled()
+#endif
+  ) {
     // All JITs are disabled.
     return EnterJitStatus::NotEntered;
   }
@@ -214,7 +217,6 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
         break;
       }
     }
-#endif  // !ENABLE_PORTABLE_BASELINE_INTERP
 
     // Try to enter the Baseline Interpreter.
     if (IsBaselineInterpreterEnabled()) {
@@ -228,11 +230,12 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
         break;
       }
     }
+    
+#else // !ENABLE_PORTABLE_BASELINE_INTERP
 
     // Try to enter the Portable Baseline Interpreter.
     if (IsPortableBaselineInterpreterEnabled()) {
-      jit::MethodStatus status =
-        CanEnterPortableBaselineInterpreter(cx, state);
+      jit::MethodStatus status = CanEnterPortableBaselineInterpreter(cx, state);
       if (status == jit::Method_Error) {
         return EnterJitStatus::Error;
       }
@@ -241,6 +244,7 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
         break;
       }
     }
+#endif
 
     return EnterJitStatus::NotEntered;
   } while (false);
