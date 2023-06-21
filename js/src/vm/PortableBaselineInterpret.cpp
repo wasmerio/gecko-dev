@@ -333,7 +333,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
     state.op = JSOp(*pc.pc);
 
-#if 1
+#if 0
     printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
            "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
@@ -1089,10 +1089,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.extraArgs = 3;
         state.spreadCall = false;
         ADVANCE(JSOpLength_SuperCall);
-        printf("SuperCall/New/NewContent: argc = %d\n", state.argc);
-        for (int i = 0; i < state.argc + state.extraArgs; i++) {
-          printf("arg %d = %" PRIx64 "\n", i, stack[i].asUInt64());
-        }
         goto ic_Call;
       }
 
@@ -1345,25 +1341,19 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
       case JSOp::CheckReturn: {
         Value thisval = stack.pop().asValue();
-        printf("checkreturn: thisval = %" PRIx64 " ret = %" PRIx64 "\n",
-               thisval.asRawBits(), ret->asRawBits());
         if (ret->isObject()) {
-          printf(" -> ret is object\n");
           PUSH(StackValue(*ret));
         } else if (!ret->isUndefined()) {
-          printf(" -> ret is defined but not object\n");
           PUSH_EXIT_FRAME();
           state.value0 = *ret;
           ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK,
                            state.value0, nullptr);
           goto error;
         } else if (thisval.isMagic(JS_UNINITIALIZED_LEXICAL)) {
-          printf(" -> uninitialized this\n");
           PUSH_EXIT_FRAME();
           MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
           goto error;
         } else {
-          printf(" -> taking this\n");
           PUSH(StackValue(thisval));
         }
         END_OP(CheckReturn);
@@ -2212,7 +2202,6 @@ ic_CloseIter_tail:
 
 error:
   do {
-    printf("HandleException at pc %p\n", pc.pc);
     ResumeFromException rfe;
     {
       PUSH_EXIT_FRAME();
@@ -2221,23 +2210,19 @@ error:
 
     switch (rfe.kind) {
       case ExceptionResumeKind::EntryFrame:
-        printf(" -> EntryFrame\n");
         *ret = MagicValue(JS_ION_ERROR);
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return false;
       case ExceptionResumeKind::Catch:
         pc.pc = frame->interpreterPC();
-        printf("catch to pc %p\n", pc.pc);
         goto dispatch;
       case ExceptionResumeKind::Finally:
-        printf("finally\n");
         pc.pc = frame->interpreterPC();
         PUSH(StackValue(rfe.exception));
         PUSH(StackValue(BooleanValue(true)));
         goto dispatch;
       case ExceptionResumeKind::ForcedReturnBaseline:
-        printf("forced return\n");
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
@@ -2261,6 +2246,7 @@ error:
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
+                                    size_t numActualArgs,
                                     CalleeToken calleeToken, JSObject* envChain,
                                     Value* result) {
   Stack stack(cx->portableBaselineStack());
@@ -2274,11 +2260,15 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   // - descriptor
   // - "return address" (nullptr for top frame)
 
+  if (CalleeTokenIsConstructing(calleeToken)) {
+    argc++;
+  }
   for (size_t i = 0; i < argc; i++) {
     PUSH(StackValue(argv[argc - 1 - i]));
   }
   PUSH(StackValue(calleeToken));
-  PUSH(StackValue(MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, argc)));
+  PUSH(StackValue(
+      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
   PUSH(StackValue(nullptr));  // Fake return address.
 
   if (!PortableBaselineInterpret(cx, stack, envChain, result)) {
