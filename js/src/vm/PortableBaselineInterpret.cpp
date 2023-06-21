@@ -1937,11 +1937,13 @@ ic_launch_stub:
   } while (0);
 
   while (true) {
-    switch (state.cacheIRReader->readOp()) {
+    CacheOp op = state.cacheIRReader->readOp();
+    switch (op) {
       case CacheOp::ReturnFromIC:
         state.cacheIRReader.reset();
         goto* state.stubTail;
       default:
+        printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
         goto ic_fail;
     }
   }
