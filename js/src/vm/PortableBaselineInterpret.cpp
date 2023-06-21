@@ -1939,6 +1939,7 @@ ic_launch_stub:
   while (true) {
     switch (state.cacheIRReader->readOp()) {
       case CacheOp::ReturnFromIC:
+        state.cacheIRReader.reset();
         goto* state.stubTail;
       default:
         goto ic_fail;
@@ -1946,6 +1947,7 @@ ic_launch_stub:
   }
 
 ic_fail:
+  state.cacheIRReader.reset();
   state.stub = state.stub->maybeNext();
   goto ic_launch_stub;
 
