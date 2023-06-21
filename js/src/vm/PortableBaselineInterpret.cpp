@@ -11,11 +11,15 @@
 
 #include "vm/PortableBaselineInterpret.h"
 
+#include "mozilla/Maybe.h"
+
 #include "jsapi.h"
 
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
+#include "jit/CacheIR.h"
+#include "jit/CacheIRReader.h"
 #include "jit/JitFrames.h"
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
@@ -196,6 +200,10 @@ struct State {
   int extraArgs;
   bool spreadCall;
   int32_t jumpOffset;
+  ICStub* stub;
+  void* fallbackIC;
+  void* stubTail;
+  mozilla::Maybe<CacheIRReader> cacheIRReader;
 
   State(JSContext* cx)
       : value0(cx),
@@ -1900,381 +1908,384 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
     }
   }
 
-#define ICLOOP(fallback_body)                                         \
-  for (ICStub* stub = frame->interpreterICEntry()->firstStub(); stub; \
-       stub = stub->maybeNext()) {                                    \
-    if (stub->isFallback()) {                                         \
-      ICFallbackStub* fallback = stub->toFallbackStub();              \
-      fallback_body;                                                  \
-      break;                                                          \
-    } else {                                                          \
-      ICCacheIRStub* cacheir = stub->toCacheIRStub();                 \
-      (void)cacheir;                                                  \
-      /* nothing */                                                   \
-    }                                                                 \
+#define ICLOOP(fallback_body)                                             \
+  for (state.stub = frame->interpreterICEntry()->firstStub(); state.stub; \
+       state.stub = state.stub->maybeNext()) {                            \
+    if (stub->isFallback()) {                                             \
+      ICFallbackStub* fallback = stub->toFallbackStub();                  \
+      fallback_body;                                                      \
+      break;                                                              \
+    } else {                                                              \
+      ICCacheIRStub* cacheir = stub->toCacheIRStub();                     \
+      (void)cacheir;                                                      \
+      printf("trying to run cacheir stub: %p\n", cacheir);                \
+      /* nothing */                                                       \
+    }                                                                     \
   }
 
-ic_GetName:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
-      goto error;
+ic_launch_stub:
+  do {
+    if (!state.stub) {
+      goto ic_fail;
     }
-  });
-ic_GetName_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+    if (state.stub->isFallback()) {
+      goto* state.fallbackIC;
+    }
+    ICCacheIRStub* cstub = state.stub->toCacheIRStub();
+    cstub->incrementEnteredCount();
+    state.cacheIRReader.emplace(cstub->stubInfo());
+  } while (0);
 
-ic_Call:
-  ICLOOP({
-    uint32_t totalArgs =
-        state.argc +
-        state.extraArgs;  // this, callee, (cosntructing?), func args
-    Value* args = reinterpret_cast<Value*>(&stack[0]);
-    // Reverse values on the stack.
-    for (uint32_t i = 0; i < totalArgs / 2; i++) {
-      std::swap(args[i], args[totalArgs - 1 - i]);
+  while (true) {
+    switch (state.cacheIRReader->readOp()) {
+      case CacheOp::ReturnFromIC:
+        goto* state.stubTail;
+      default:
+        goto ic_fail;
     }
-    {
-      PUSH_EXIT_FRAME();
-      if (state.spreadCall) {
-        if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
+  }
+
+ic_fail:
+  state.stub = state.stub->maybeNext();
+  goto ic_launch_stub;
+
+#define IC_KIND(kind, fallback_body, tail_body)              \
+  ic_##kind : do {                                           \
+    state.stub = frame->interpreterICEntry()->firstStub();   \
+    state.fallbackIC = &&ic_##kind##_fallback;               \
+    state.stubTail = &&ic_##kind##_tail;                     \
+    goto ic_launch_stub;                                     \
+  }                                                          \
+  while (0)                                                  \
+    ;                                                        \
+  ic_##kind##_fallback : do {                                \
+    ICFallbackStub* fallback = state.stub->toFallbackStub(); \
+    fallback_body;                                           \
+  }                                                          \
+  while (0)                                                  \
+    ;                                                        \
+  ic_##kind##_tail : do {                                    \
+    tail_body;                                               \
+    NEXT_IC();                                               \
+    goto dispatch;                                           \
+  }                                                          \
+  while (0)
+
+  IC_KIND(
+      GetName,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
           goto error;
         }
-      } else {
-        if (!DoCallFallback(cx, frame, fallback, state.argc, args,
-                            &state.res)) {
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      Call,
+      {
+        uint32_t totalArgs =
+            state.argc +
+            state.extraArgs;  // this, callee, (cosntructing?), func args
+        Value* args = reinterpret_cast<Value*>(&stack[0]);
+        // Reverse values on the stack.
+        for (uint32_t i = 0; i < totalArgs / 2; i++) {
+          std::swap(args[i], args[totalArgs - 1 - i]);
+        }
+        {
+          PUSH_EXIT_FRAME();
+          if (state.spreadCall) {
+            if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
+              goto error;
+            }
+          } else {
+            if (!DoCallFallback(cx, frame, fallback, state.argc, args,
+                                &state.res)) {
+              goto error;
+            }
+          }
+        }
+        stack.popn(totalArgs);
+        PUSH(StackValue(state.res));
+      },
+      {});
+
+  IC_KIND(
+      Typeof,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
           goto error;
         }
-      }
-    }
-    stack.popn(totalArgs);
-    PUSH(StackValue(state.res));
-  });
-ic_Call_tail:
-  NEXT_IC();
-  goto dispatch;
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_Typeof:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
-      goto error;
-    }
-  });
-ic_Typeof_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      UnaryArith,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoUnaryArithFallback(cx, frame, fallback, state.value0,
+                                  &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_UnaryArith:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
-      goto error;
-    }
-  });
-ic_UnaryArith_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      BinaryArith,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoBinaryArithFallback(cx, frame, fallback, state.value0,
+                                   state.value1, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_BinaryArith:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
+  IC_KIND(
+      ToBool,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
+          goto error;
+        }
+      },
+      {
+        switch (state.op) {
+          case JSOp::Not:
+            PUSH(StackValue(BooleanValue(!state.res.toBoolean())));
+            break;
+          case JSOp::Or:
+          case JSOp::JumpIfTrue: {
+            bool result = state.res.toBoolean();
+            if (result) {
+              ADVANCE(state.jumpOffset);
+            }
+            break;
+          }
+          case JSOp::And:
+          case JSOp::JumpIfFalse: {
+            bool result = state.res.toBoolean();
+            if (!result) {
+              ADVANCE(state.jumpOffset);
+            }
+            break;
+          }
+          default:
+            MOZ_CRASH("unexpected opcode");
+        }
+      });
+
+  IC_KIND(
+      Compare,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
                                &state.res)) {
-      goto error;
-    }
-  });
-ic_BinaryArith_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_ToBool:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
-      goto error;
-    }
-  });
-ic_ToBool_tail:
-  switch (state.op) {
-    case JSOp::Not:
-      PUSH(StackValue(BooleanValue(!state.res.toBoolean())));
-      break;
-    case JSOp::Or:
-    case JSOp::JumpIfTrue: {
-      bool result = state.res.toBoolean();
-      if (result) {
-        ADVANCE(state.jumpOffset);
-      }
-      break;
-    }
-    case JSOp::And:
-    case JSOp::JumpIfFalse: {
-      bool result = state.res.toBoolean();
-      if (!result) {
-        ADVANCE(state.jumpOffset);
-      }
-      break;
-    }
-    default:
-      MOZ_CRASH("unexpected opcode");
-  }
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      InstanceOf,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoInstanceOfFallback(cx, frame, fallback, state.value0,
+                                  state.value1, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_Compare:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
-                           &state.res)) {
-      goto error;
-    }
-  });
-ic_Compare_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_InstanceOf:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
-                              &state.res)) {
-      goto error;
-    }
-  });
-ic_InstanceOf_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_In:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
-                      &state.res)) {
-      goto error;
-    }
-  });
-ic_In_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_BindName:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
-      goto error;
-    }
-  });
-ic_BindName_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_SetProp:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
-                           state.value1)) {
-      goto error;
-    }
-  });
-ic_SetProp_tail:
-  NEXT_IC();
-  goto dispatch;
-
-ic_NewObject:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
-      goto error;
-    }
-  });
-ic_NewObject_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_GetProp:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
-      goto error;
-    }
-  });
-ic_GetProp_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_GetPropSuper:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0,
-                                &state.value1, &state.res)) {
-      goto error;
-    }
-  });
-ic_GetPropSuper_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_GetElem:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
-                           &state.res)) {
-      goto error;
-    }
-  });
-ic_GetElem_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_GetElemSuper:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0, state.value1,
-                                state.value2, &state.res)) {
-      goto error;
-    }
-  });
-ic_GetElemSuper_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_NewArray:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
-      goto error;
-    }
-  });
-ic_NewArray_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_GetIntrinsic:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
-      goto error;
-    }
-  });
-ic_GetIntrinsic_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
-
-ic_SetElem:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
-                           state.value1, state.value2)) {
-      goto error;
-    }
-  });
-ic_SetElem_tail:
-  NEXT_IC();
-  goto dispatch;
-
-ic_HasOwn:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
+  IC_KIND(
+      In,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
                           &state.res)) {
-      goto error;
-    }
-  });
-ic_HasOwn_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_CheckPrivateField:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
-                                     state.value1, &state.res)) {
-      goto error;
-    }
-  });
-ic_CheckPrivateField_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      BindName,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_GetIterator:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
-      goto error;
-    }
-  });
-ic_GetIterator_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(SetProp,
+          {
+            PUSH_EXIT_FRAME();
+            if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
+                                   state.value1)) {
+              goto error;
+            }
+          },
+          {});
 
-ic_ToPropertyKey:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0,
-                                 &state.res)) {
-      goto error;
-    }
-  });
-ic_ToPropertyKey_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      NewObject,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_OptimizeSpreadCall:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
-                                      &state.res)) {
-      goto error;
-    }
-  });
-ic_OptimizeSpreadCall_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      GetProp,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoGetPropFallback(cx, frame, fallback, &state.value0,
+                               &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_Rest:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoRestFallback(cx, frame, fallback, &state.res)) {
-      goto error;
-    }
-  });
-ic_Rest_tail:
-  PUSH(StackValue(state.res));
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      GetPropSuper,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0,
+                                    &state.value1, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
 
-ic_CloseIter:
-  ICLOOP({
-    PUSH_EXIT_FRAME();
-    if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
-      goto error;
-    }
-  });
-ic_CloseIter_tail:
-  NEXT_IC();
-  goto dispatch;
+  IC_KIND(
+      GetElem,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
+                               &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      GetElemSuper,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0,
+                                    state.value1, state.value2, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      NewArray,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      GetIntrinsic,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(SetElem,
+          {
+            PUSH_EXIT_FRAME();
+            if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
+                                   state.value1, state.value2)) {
+              goto error;
+            }
+          },
+          {});
+
+  IC_KIND(
+      HasOwn,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
+                              &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      CheckPrivateField,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
+                                         state.value1, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      GetIterator,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoGetIteratorFallback(cx, frame, fallback, state.value0,
+                                   &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      ToPropertyKey,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0,
+                                     &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      OptimizeSpreadCall,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
+                                          &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(
+      Rest,
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoRestFallback(cx, frame, fallback, &state.res)) {
+          goto error;
+        }
+      },
+      { PUSH(StackValue(state.res)); });
+
+  IC_KIND(CloseIter,
+          {
+            PUSH_EXIT_FRAME();
+            if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
+              goto error;
+            }
+          },
+          {});
 
 error:
 #ifdef TRACE_INTERP
