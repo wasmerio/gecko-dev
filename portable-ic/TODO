@@ -1,0 +1,13 @@
+- implement await/resume
+
+-     // TODO: from BaselineIC.cpp:1812:
+      // If this is a |constructing| call, if the callee returns a non-object, we
+      // replace it with the |this| object passed in.
+
+- start to implement interpreter for CacheIR
+  - (X) u64 array for "registers" / operandIDs
+  - (X) tail (post-IC-return) dispatch and fallback dispatch based on
+    "IC kind" state
+  - use *only* icVals; don't use the rooted storage in `state` unless
+    we go to the fallback. (Avoid some data movement and the barriers
+    too.)
