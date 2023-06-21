@@ -1908,21 +1908,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
     }
   }
 
-#define ICLOOP(fallback_body)                                             \
-  for (state.stub = frame->interpreterICEntry()->firstStub(); state.stub; \
-       state.stub = state.stub->maybeNext()) {                            \
-    if (stub->isFallback()) {                                             \
-      ICFallbackStub* fallback = stub->toFallbackStub();                  \
-      fallback_body;                                                      \
-      break;                                                              \
-    } else {                                                              \
-      ICCacheIRStub* cacheir = stub->toCacheIRStub();                     \
-      (void)cacheir;                                                      \
-      printf("trying to run cacheir stub: %p\n", cacheir);                \
-      /* nothing */                                                       \
-    }                                                                     \
-  }
-
 ic_launch_stub:
   do {
     if (!state.stub) {
