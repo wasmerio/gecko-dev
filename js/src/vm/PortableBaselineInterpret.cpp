@@ -20,8 +20,10 @@
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
 #include "jit/VMFunctions.h"
+#include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
 #include "vm/JitActivation.h"
@@ -35,7 +37,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-//#define TRACE_INTERP
+#define TRACE_INTERP
 
 using namespace js;
 using namespace js::jit;
@@ -94,8 +96,13 @@ struct Stack {
     (*sp) += len;
   }
 
-  StackValue* cur() { return *sp; }
+  StackValue* cur() const { return *sp; }
   void restore(StackValue* s) { *sp = s; }
+
+  uint32_t frameSize(BaselineFrame* curFrame) const {
+    return sizeof(StackValue) *
+           (reinterpret_cast<StackValue*>(curFrame) - cur());
+  }
 
   [[nodiscard]] BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
     auto* prevFP = fp;
@@ -312,12 +319,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
   while (true) {
   dispatch:
     frame->interpreterPC() = pc.pc;
-
-#define NYI_OPCODE(op)                               \
-  case JSOp::op:                                     \
-    printf("not-yet-implemented opcode: " #op "\n"); \
-    MOZ_CRASH("Bad opcode");                         \
-    break;
 
 #define ADVANCE(delta) pc.advance(frame, (delta));
 #define ADVANCE_AND_DISPATCH(delta) \
@@ -1181,11 +1182,30 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::InitialYield: {
-        *ret = stack.pop().asValue();
-        state.obj0 = &ret->toObject();
+        // gen => rval, gen, resumeKind
+        state.obj0 = &stack[0].asValue().toObject();
+        uint32_t frameSize = stack.frameSize(frame);
         {
           PUSH_EXIT_FRAME();
-          MOZ_CRASH("todo: call jit::NormalSuspend");
+          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc.pc)) {
+            goto error;
+          }
+        }
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+      }
+
+      case JSOp::Await:
+      case JSOp::Yield: {
+        // rval1, gen => rval2, gen, resumeKind
+        state.obj0 = &stack[0].asValue().toObject();
+        uint32_t frameSize = stack.frameSize(frame);
+        {
+          PUSH_EXIT_FRAME();
+          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc.pc)) {
+            goto error;
+          }
         }
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
@@ -1193,21 +1213,13 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::FinalYieldRval: {
+        // gen =>
         state.obj0 = &stack.pop().asValue().toObject();
         {
           PUSH_EXIT_FRAME();
-          MOZ_CRASH("todo: call jit::NormalSuspend");
-        }
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return true;
-      }
-
-      case JSOp::Yield: {
-        state.obj0 = &stack.pop().asValue().toObject();
-        {
-          PUSH_EXIT_FRAME();
-          MOZ_CRASH("todo: call jit::NormalSuspend");
+          if (!FinalSuspend(cx, state.obj0, pc.pc)) {
+            goto error;
+          }
         }
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
@@ -1219,9 +1231,41 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(IsGenClosing);
       }
 
-        NYI_OPCODE(AsyncAwait);
-        NYI_OPCODE(AsyncResolve);
-        NYI_OPCODE(Await);
+      case JSOp::AsyncAwait: {
+        // value, gen => promise
+        state.obj0 = &stack.pop().asValue().toObject();  // gen
+        state.value0 = stack.pop().asValue();           // value
+        JSObject* promise;
+        {
+          PUSH_EXIT_FRAME();
+          promise = AsyncFunctionAwait(
+              cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0);
+          if (!promise) {
+            goto error;
+          }
+        }
+        PUSH(StackValue(ObjectValue(*promise)));
+        END_OP(AsyncAwait);
+      }
+
+      case JSOp::AsyncResolve: {
+        // valueOrReason, gen => promise
+        state.obj0 = &stack.pop().asValue().toObject();  // gen
+        state.value0 = stack.pop().asValue();            // valueOrReason
+        auto resolveKind = AsyncFunctionResolveKind(GET_UINT8(pc.pc));
+        JSObject* promise;
+        {
+          PUSH_EXIT_FRAME();
+          promise = AsyncFunctionResolve(
+              cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0,
+              resolveKind);
+          if (!promise) {
+            goto error;
+          }
+        }
+        PUSH(StackValue(ObjectValue(*promise)));
+        END_OP(AsyncResolve);
+      }
 
       case JSOp::CanSkipAwait: {
         // value => value, can_skip
@@ -1237,7 +1281,20 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(CanSkipAwait);
       }
 
-        NYI_OPCODE(MaybeExtractAwaitValue);
+      case JSOp::MaybeExtractAwaitValue: {
+        // value, can_skip => value_or_resolved, can_skip
+        state.value1 = stack.pop().asValue();  // can_skip
+        state.value0 = stack.pop().asValue();  // value
+        if (state.value1.toBoolean()) {
+          PUSH_EXIT_FRAME();
+          if (!ExtractAwaitValue(cx, state.value0, &state.value0)) {
+            goto error;
+          }
+        }
+        PUSH(StackValue(state.value0));
+        PUSH(StackValue(state.value1));
+        END_OP(MaybeExtractAwaitValue);
+      }
 
       case JSOp::ResumeKind: {
         GeneratorResumeKind resumeKind = ResumeKindFromPC(pc.pc);
@@ -1245,8 +1302,26 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(ResumeKind);
       }
 
-        NYI_OPCODE(CheckResumeKind);
-        NYI_OPCODE(Resume);
+      case JSOp::CheckResumeKind: {
+        // rval, gen, resumeKind => rval
+        GeneratorResumeKind resumeKind =
+            IntToResumeKind(stack.pop().asValue().toInt32());
+        state.obj0 = &stack.pop().asValue().toObject();  // gen
+        state.value0 = stack[0].asValue();               // rval
+        if (resumeKind != GeneratorResumeKind::Next) {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(
+              cx, frame, state.obj0.as<AbstractGeneratorObject>(), state.value0,
+              resumeKind));
+          goto error;
+        }
+        END_OP(CheckResumeKind);
+      }
+
+      case JSOp::Resume: {
+        MOZ_CRASH("implement resume");
+        END_OP(Resume);
+      }
 
       case JSOp::JumpTarget: {
         int32_t icIndex = GET_INT32(pc.pc);
@@ -2297,7 +2372,8 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   return true;
 }
 
-MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx, RunState& state) {
+MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
+                                                     RunState& state) {
   if (!JitOptions.portableBaselineInterpreter) {
     return MethodStatus::Method_CantCompile;
   }
