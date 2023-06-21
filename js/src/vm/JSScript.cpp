@@ -3243,12 +3243,14 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
     if (!usingEntryTrampoline) {
       setJitCodeRaw(rt->jitRuntime()->baselineInterpreter().codeRaw());
     }
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
   } else if (hasJitScript() &&
              js::jit::IsPortableBaselineInterpreterEnabled()) {
     // The portable baseline interpreter does not dispatch on this
     // pointer, but it needs to be non-null to trigger the appropriate
     // code-paths, so we set it to the entry trampoline itself here.
     setJitCodeRaw(reinterpret_cast<uint8_t*>(&js::PortableBaselineTrampoline));
+#endif  // ENABLE_PORTABLE_BASELINE_INTERP
   } else if (!js::jit::IsBaselineInterpreterEnabled()) {
     setJitCodeRaw(nullptr);
   } else {

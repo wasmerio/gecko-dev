@@ -4358,6 +4358,9 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
     case JSJITCOMPILER_BASELINE_INTERPRETER_ENABLE:
       *valueOut = jit::JitOptions.baselineInterpreter;
       break;
+    case JSJITCOMPILER_PORTABLE_BASELINE_ENABLE:
+      *valueOut = jit::JitOptions.portableBaselineInterpreter;
+      break;
     case JSJITCOMPILER_BASELINE_ENABLE:
       *valueOut = jit::JitOptions.baselineJit;
       break;

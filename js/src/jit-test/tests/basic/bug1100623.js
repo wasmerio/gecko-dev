@@ -1,4 +1,5 @@
 // |jit-test| error: baz is null
+// |jit-test| skip-if: getJitCompilerOptions()['pbl.enable']
 
 var document = {getElementById: () => null};
 
