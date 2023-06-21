@@ -1992,7 +1992,6 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
   JS_BEGIN_MACRO                                 \
     REGS.pc += (N);                              \
     SANITY_CHECKS();                             \
-    printf("script = %p pc = %p: %s\n", script.get(), REGS.pc, CodeName(JSOp(*REGS.pc))); \
     DISPATCH_TO(*REGS.pc | activation.opMask()); \
   JS_END_MACRO
 
