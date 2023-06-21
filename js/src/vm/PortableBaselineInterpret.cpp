@@ -209,7 +209,6 @@ struct State {
 
   static const int kMaxICVals = 64;
   uint64_t icVals[kMaxICVals];
-  JSValueType icValTypes[kMaxICVals];
 
   State(JSContext* cx)
       : value0(cx),
@@ -1972,15 +1971,11 @@ ic_fail:
   // `BaselineCacheIRCompiler::init()`, together with the R0/R1/R2
   // setup in BaselineCodeGen.cpp's `emit_*` methods, for the
   // canonical index->value mappings.
-#define IC_VAL(index, state_elem)                       \
-  state.icVals[(index)] = state.state_elem.asRawBits(); \
-  state.icValTypes[(index)] = JSVAL_TYPE_UNKNOWN;
-#define IC_OBJ(index, state_elem)                                              \
-  state.icVals[(index)] = reinterpret_cast<uintptr_t>(state.state_elem.get()); \
-  state.icValTypes[(index)] = JSVAL_TYPE_OBJECT;
-#define IC_INT32(index, expr)     \
-  state.icVals[(index)] = (expr); \
-  state.icValTypes[(index)] = JSVAL_TYPE_INT32;
+#define IC_VAL(index, state_elem) \
+  state.icVals[(index)] = state.state_elem.asRawBits();
+#define IC_OBJ(index, state_elem) \
+  state.icVals[(index)] = reinterpret_cast<uintptr_t>(state.state_elem.get());
+#define IC_INT32(index, expr) state.icVals[(index)] = (expr);
 
   IC_KIND(
       GetName, { IC_OBJ(0, obj0); },
