@@ -200,10 +200,16 @@ struct State {
   int extraArgs;
   bool spreadCall;
   int32_t jumpOffset;
+
+  /* IC-related state */
   ICStub* stub;
   void* fallbackIC;
   void* stubTail;
   mozilla::Maybe<CacheIRReader> cacheIRReader;
+
+  static const int kMaxICVals = 64;
+  uint64_t icVals[kMaxICVals];
+  JSValueType icValTypes[kMaxICVals];
 
   State(JSContext* cx)
       : value0(cx),
@@ -1938,11 +1944,13 @@ ic_fail:
   state.stub = state.stub->maybeNext();
   goto ic_launch_stub;
 
-#define IC_KIND(kind, fallback_body, tail_body)              \
+#define IC_KIND(kind, setup_body, fallback_body, tail_body)  \
   ic_##kind : do {                                           \
+    printf("stub: " #kind "\n");                             \
     state.stub = frame->interpreterICEntry()->firstStub();   \
     state.fallbackIC = &&ic_##kind##_fallback;               \
     state.stubTail = &&ic_##kind##_tail;                     \
+    setup_body;                                              \
     goto ic_launch_stub;                                     \
   }                                                          \
   while (0)                                                  \
@@ -1960,8 +1968,22 @@ ic_fail:
   }                                                          \
   while (0)
 
+  // Setup for "registers" used by CacheIR ops. See
+  // `BaselineCacheIRCompiler::init()`, together with the R0/R1/R2
+  // setup in BaselineCodeGen.cpp's `emit_*` methods, for the
+  // canonical index->value mappings.
+#define IC_VAL(index, state_elem)                       \
+  state.icVals[(index)] = state.state_elem.asRawBits(); \
+  state.icValTypes[(index)] = JSVAL_TYPE_UNKNOWN;
+#define IC_OBJ(index, state_elem)                                              \
+  state.icVals[(index)] = reinterpret_cast<uintptr_t>(state.state_elem.get()); \
+  state.icValTypes[(index)] = JSVAL_TYPE_OBJECT;
+#define IC_INT32(index, expr)     \
+  state.icVals[(index)] = (expr); \
+  state.icValTypes[(index)] = JSVAL_TYPE_INT32;
+
   IC_KIND(
-      GetName,
+      GetName, { IC_OBJ(0, obj0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
@@ -1971,7 +1993,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      Call,
+      Call, { IC_INT32(0, state.argc); },
       {
         uint32_t totalArgs =
             state.argc +
@@ -2000,7 +2022,7 @@ ic_fail:
       {});
 
   IC_KIND(
-      Typeof,
+      Typeof, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -2010,7 +2032,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      UnaryArith,
+      UnaryArith, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoUnaryArithFallback(cx, frame, fallback, state.value0,
@@ -2023,6 +2045,10 @@ ic_fail:
   IC_KIND(
       BinaryArith,
       {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
+      {
         PUSH_EXIT_FRAME();
         if (!DoBinaryArithFallback(cx, frame, fallback, state.value0,
                                    state.value1, &state.res)) {
@@ -2032,7 +2058,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      ToBool,
+      ToBool, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -2068,6 +2094,10 @@ ic_fail:
   IC_KIND(
       Compare,
       {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
+      {
         PUSH_EXIT_FRAME();
         if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
                                &state.res)) {
@@ -2078,6 +2108,10 @@ ic_fail:
 
   IC_KIND(
       InstanceOf,
+      {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
       {
         PUSH_EXIT_FRAME();
         if (!DoInstanceOfFallback(cx, frame, fallback, state.value0,
@@ -2090,6 +2124,10 @@ ic_fail:
   IC_KIND(
       In,
       {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
+      {
         PUSH_EXIT_FRAME();
         if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
                           &state.res)) {
@@ -2099,7 +2137,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      BindName,
+      BindName, { IC_OBJ(0, obj0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
@@ -2108,18 +2146,23 @@ ic_fail:
       },
       { PUSH(StackValue(state.res)); });
 
-  IC_KIND(SetProp,
-          {
-            PUSH_EXIT_FRAME();
-            if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
-                                   state.value1)) {
-              goto error;
-            }
-          },
-          {});
+  IC_KIND(
+      SetProp,
+      {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
+                               state.value1)) {
+          goto error;
+        }
+      },
+      {});
 
   IC_KIND(
-      NewObject,
+      NewObject, {},
       {
         PUSH_EXIT_FRAME();
         if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
@@ -2129,7 +2172,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      GetProp,
+      GetProp, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoGetPropFallback(cx, frame, fallback, &state.value0,
@@ -2140,7 +2183,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      GetPropSuper,
+      GetPropSuper, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0,
@@ -2153,6 +2196,10 @@ ic_fail:
   IC_KIND(
       GetElem,
       {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
+      {
         PUSH_EXIT_FRAME();
         if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                                &state.res)) {
@@ -2164,6 +2211,10 @@ ic_fail:
   IC_KIND(
       GetElemSuper,
       {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
+      {
         PUSH_EXIT_FRAME();
         if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0,
                                     state.value1, state.value2, &state.res)) {
@@ -2173,7 +2224,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      NewArray,
+      NewArray, {},
       {
         PUSH_EXIT_FRAME();
         if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
@@ -2183,7 +2234,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      GetIntrinsic,
+      GetIntrinsic, {},
       {
         PUSH_EXIT_FRAME();
         if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
@@ -2192,18 +2243,28 @@ ic_fail:
       },
       { PUSH(StackValue(state.res)); });
 
-  IC_KIND(SetElem,
-          {
-            PUSH_EXIT_FRAME();
-            if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
-                                   state.value1, state.value2)) {
-              goto error;
-            }
-          },
-          {});
+  IC_KIND(
+      SetElem,
+      {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+        IC_VAL(2, value2);
+      },
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
+                               state.value1, state.value2)) {
+          goto error;
+        }
+      },
+      {});
 
   IC_KIND(
       HasOwn,
+      {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
       {
         PUSH_EXIT_FRAME();
         if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
@@ -2216,6 +2277,10 @@ ic_fail:
   IC_KIND(
       CheckPrivateField,
       {
+        IC_VAL(0, value0);
+        IC_VAL(1, value1);
+      },
+      {
         PUSH_EXIT_FRAME();
         if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
                                          state.value1, &state.res)) {
@@ -2225,7 +2290,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      GetIterator,
+      GetIterator, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoGetIteratorFallback(cx, frame, fallback, state.value0,
@@ -2236,7 +2301,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      ToPropertyKey,
+      ToPropertyKey, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0,
@@ -2247,7 +2312,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      OptimizeSpreadCall,
+      OptimizeSpreadCall, { IC_VAL(0, value0); },
       {
         PUSH_EXIT_FRAME();
         if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
@@ -2258,7 +2323,7 @@ ic_fail:
       { PUSH(StackValue(state.res)); });
 
   IC_KIND(
-      Rest,
+      Rest, {},
       {
         PUSH_EXIT_FRAME();
         if (!DoRestFallback(cx, frame, fallback, &state.res)) {
@@ -2267,14 +2332,15 @@ ic_fail:
       },
       { PUSH(StackValue(state.res)); });
 
-  IC_KIND(CloseIter,
-          {
-            PUSH_EXIT_FRAME();
-            if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
-              goto error;
-            }
-          },
-          {});
+  IC_KIND(
+      CloseIter, { IC_OBJ(0, obj0); },
+      {
+        PUSH_EXIT_FRAME();
+        if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
+          goto error;
+        }
+      },
+      {});
 
 error:
 #ifdef TRACE_INTERP
@@ -2329,7 +2395,8 @@ error:
         MOZ_CRASH("Unexpected Wasm exception-resume kind in Portable Baseline");
       case ExceptionResumeKind::WasmCatch:
         MOZ_CRASH(
-            "Unexpected WasmCatch exception-resume kind in Portable Baseline");
+            "Unexpected WasmCatch exception-resume kind in Portable "
+            "Baseline");
     }
   } while (false);
 
