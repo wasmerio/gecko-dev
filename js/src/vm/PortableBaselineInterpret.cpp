@@ -1931,7 +1931,30 @@ ic_launch_stub:
     switch (op) {
       case CacheOp::ReturnFromIC:
         state.cacheIRReader.reset();
+        printf("stub successful!\n");
         goto* state.stubTail;
+      case CacheOp::GuardToInt32: {
+        ValOperandId inputId = state.cacheIRReader->valOperandId();
+        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+        if (!v.isInt32()) {
+          goto ic_fail;
+        }
+        // N.B.: we don't need to unbox because the low 32 bits are
+        // already the int32 itself, and we are careful when using
+        // `Int32Operand`s to only use those bits.
+        break;
+      }
+      case CacheOp::Int32AddResult: {
+        Int32OperandId lhsId = state.cacheIRReader->int32OperandId();
+        Int32OperandId rhsId = state.cacheIRReader->int32OperandId();
+        int64_t result = int64_t(int32_t(state.icVals[lhsId.id()])) +
+                         int64_t(int32_t(state.icVals[rhsId.id()]));
+        if (result < INT32_MIN || result > INT32_MAX) {
+          goto ic_fail;
+        }
+        state.res.setInt32(int32_t(result));
+        break;
+      }
       default:
         printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
         goto ic_fail;
