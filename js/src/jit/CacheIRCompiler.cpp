@@ -1055,6 +1055,18 @@ uintptr_t CacheIRStubInfo::getStubRawWord(ICCacheIRStub* stub,
   return getStubRawWord(stubData, offset);
 }
 
+int32_t CacheIRStubInfo::getStubRawInt32(const uint8_t* stubData,
+                                         uint32_t offset) const {
+  MOZ_ASSERT(uintptr_t(stubData + offset) % sizeof(int64_t) == 0);
+  return *reinterpret_cast<const int32_t*>(stubData + offset);
+}
+
+int32_t CacheIRStubInfo::getStubRawInt32(ICCacheIRStub* stub,
+                                         uint32_t offset) const {
+  uint8_t* stubData = (uint8_t*)stub + stubDataOffset_;
+  return getStubRawInt32(stubData, offset);
+}
+
 int64_t CacheIRStubInfo::getStubRawInt64(const uint8_t* stubData,
                                          uint32_t offset) const {
   MOZ_ASSERT(uintptr_t(stubData + offset) % sizeof(int64_t) == 0);
