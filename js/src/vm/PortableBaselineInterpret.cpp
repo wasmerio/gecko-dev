@@ -35,6 +35,7 @@
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
 #include "vm/PlainObject.h"
+#include "vm/Shape.h"
 
 #include "jit/BaselineFrame-inl.h"
 #include "jit/JitScript-inl.h"
@@ -42,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+//#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -2044,6 +2045,21 @@ ic_launch_stub:
         break;
       }
 
+      case CacheOp::GuardShape: {
+        TRACE_PRINTF("GuardShape\n");
+        ObjOperandId objId = state.cacheIRReader.objOperandId();
+        uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                  .toObject()
+                                  .as<NativeObject>();
+        uintptr_t expectedShape =
+            state.cstub->stubInfo()->getStubRawWord(state.cstub, offsetOffset);
+        if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
+          goto ic_fail;
+        }
+        break;
+      }
+
       case CacheOp::StoreDynamicSlot: {
         TRACE_PRINTF("StoreDynamicSlot\n");
         ObjOperandId objId = state.cacheIRReader.objOperandId();
@@ -2114,6 +2130,21 @@ ic_launch_stub:
         break;
       }
 
+      case CacheOp::LoadFixedSlotResult: {
+        TRACE_PRINTF("LoadFixedSlotResult\n");
+        ObjOperandId objId = state.cacheIRReader.objOperandId();
+        uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+        uintptr_t offset =
+            state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                  .toObject()
+                                  .as<NativeObject>();
+        Value* slot = reinterpret_cast<Value*>(
+            reinterpret_cast<uintptr_t>(nobj) + offset);
+        state.res.set(*slot);
+        break;
+      }
+
       case CacheOp::LoadDynamicSlotResult: {
         TRACE_PRINTF("LoadDynamicSlotResult\n");
         ObjOperandId objId = state.cacheIRReader.objOperandId();
@@ -2128,20 +2159,20 @@ ic_launch_stub:
         break;
       }
 
-#define INT32_OP(name, op, extra_check)                           \
-  case CacheOp::Int32##name##Result: {                            \
-    TRACE_PRINTF("Int32" #name "Result\n");                       \
+#define INT32_OP(name, op, extra_check)                          \
+  case CacheOp::Int32##name##Result: {                           \
+    TRACE_PRINTF("Int32" #name "Result\n");                      \
     Int32OperandId lhsId = state.cacheIRReader.int32OperandId(); \
     Int32OperandId rhsId = state.cacheIRReader.int32OperandId(); \
-    int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));     \
-    int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));     \
-    extra_check;                                                  \
-    int64_t result = lhs op rhs;                                  \
-    if (result < INT32_MIN || result > INT32_MAX) {               \
-      goto ic_fail;                                               \
-    }                                                             \
-    state.res.setInt32(int32_t(result));                          \
-    break;                                                        \
+    int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));    \
+    int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));    \
+    extra_check;                                                 \
+    int64_t result = lhs op rhs;                                 \
+    if (result < INT32_MIN || result > INT32_MAX) {              \
+      goto ic_fail;                                              \
+    }                                                            \
+    state.res.setInt32(int32_t(result));                         \
+    break;                                                       \
   }
 
         INT32_OP(Add, +, {});
