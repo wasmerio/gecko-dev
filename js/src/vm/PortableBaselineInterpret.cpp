@@ -19,6 +19,7 @@
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIR.h"
+#include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRReader.h"
 #include "jit/JitFrames.h"
 #include "jit/JitScript.h"
@@ -46,12 +47,12 @@
 using namespace js;
 using namespace js::jit;
 
-struct StackValue {
+struct StackVal {
   uint64_t value;
 
-  explicit StackValue(uint64_t v) : value(v) {}
-  explicit StackValue(Value v) : value(v.asRawBits()) {}
-  explicit StackValue(void* v) : value(reinterpret_cast<uint64_t>(v)) {}
+  explicit StackVal(uint64_t v) : value(v) {}
+  explicit StackVal(Value v) : value(v.asRawBits()) {}
+  explicit StackVal(void* v) : value(reinterpret_cast<uint64_t>(v)) {}
 
   uint64_t asUInt64() const { return value; }
   Value asValue() const { return Value::fromRawBits(value); }
@@ -62,36 +63,36 @@ struct StackValue {
 };
 
 struct Stack {
-  StackValue** sp;
-  StackValue* fp;
-  StackValue* base;
-  StackValue* top;
+  StackVal** sp;
+  StackVal* fp;
+  StackVal* base;
+  StackVal* top;
 
   Stack(PortableBaselineStack& pbs)
-      : sp(reinterpret_cast<StackValue**>(&pbs.top)),
+      : sp(reinterpret_cast<StackVal**>(&pbs.top)),
         fp(nullptr),
-        base(reinterpret_cast<StackValue*>(pbs.base)),
-        top(reinterpret_cast<StackValue*>(pbs.top)) {}
+        base(reinterpret_cast<StackVal*>(pbs.base)),
+        top(reinterpret_cast<StackVal*>(pbs.top)) {}
 
-  [[nodiscard]] StackValue* allocate(size_t size) {
+  [[nodiscard]] StackVal* allocate(size_t size) {
     if (reinterpret_cast<uintptr_t>(base) + size >
         reinterpret_cast<uintptr_t>(*sp)) {
       return nullptr;
     }
     (*sp) =
-        reinterpret_cast<StackValue*>(reinterpret_cast<uintptr_t>(*sp) - size);
+        reinterpret_cast<StackVal*>(reinterpret_cast<uintptr_t>(*sp) - size);
     return *sp;
   }
 
-  [[nodiscard]] bool push(StackValue v) {
-    StackValue* elem = allocate(sizeof(StackValue));
+  [[nodiscard]] bool push(StackVal v) {
+    StackVal* elem = allocate(sizeof(StackVal));
     if (!elem) {
       return false;
     }
     *elem = v;
     return true;
   }
-  StackValue pop() {
+  StackVal pop() {
     MOZ_ASSERT((*sp) + 1 <= top);
     return *(*sp)++;
   }
@@ -100,16 +101,16 @@ struct Stack {
     (*sp) += len;
   }
 
-  StackValue* cur() const { return *sp; }
-  void restore(StackValue* s) { *sp = s; }
+  StackVal* cur() const { return *sp; }
+  void restore(StackVal* s) { *sp = s; }
 
   uint32_t frameSize(BaselineFrame* curFrame) const {
-    return sizeof(StackValue) * (reinterpret_cast<StackValue*>(fp) - cur());
+    return sizeof(StackVal) * (reinterpret_cast<StackVal*>(fp) - cur());
   }
 
   [[nodiscard]] BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
     auto* prevFP = fp;
-    if (!push(StackValue(fp))) {
+    if (!push(StackVal(fp))) {
       return nullptr;
     }
     fp = cur();
@@ -134,27 +135,27 @@ struct Stack {
   }
 
   void popFrame(JSContext* cx) {
-    StackValue* newTOS = fp + 1;
-    fp = reinterpret_cast<StackValue*>(fp->asVoidPtr());
+    StackVal* newTOS = fp + 1;
+    fp = reinterpret_cast<StackVal*>(fp->asVoidPtr());
     restore(newTOS);
   }
 
-  [[nodiscard]] StackValue* pushExitFrame(BaselineFrame* prevFrame) {
+  [[nodiscard]] StackVal* pushExitFrame(BaselineFrame* prevFrame) {
     uint8_t* prevFP =
         reinterpret_cast<uint8_t*>(prevFrame) + BaselineFrame::Size();
 
-    if (!push(StackValue(
+    if (!push(StackVal(
             MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)))) {
       return nullptr;
     }
-    if (!push(StackValue(nullptr))) {  // fake return address.
+    if (!push(StackVal(nullptr))) {  // fake return address.
       return nullptr;
     }
-    if (!push(StackValue(prevFP))) {
+    if (!push(StackVal(prevFP))) {
       return nullptr;
     }
-    StackValue* exitFP = cur();
-    if (!push(StackValue(uint64_t(ExitFrameType::Bare)))) {
+    StackVal* exitFP = cur();
+    if (!push(StackVal(uint64_t(ExitFrameType::Bare)))) {
       return nullptr;
     }
 #ifdef DEBUG
@@ -167,7 +168,7 @@ struct Stack {
     return exitFP;
   }
 
-  void popExitFrame(StackValue* fp) {
+  void popExitFrame(StackVal* fp) {
     restore(fp);
     (*sp) += 3;
   }
@@ -177,7 +178,7 @@ struct Stack {
                                             BaselineFrame::Size());
   }
 
-  StackValue& operator[](size_t index) { return (*sp)[index]; }
+  StackVal& operator[](size_t index) { return (*sp)[index]; }
 };
 
 struct State {
@@ -203,6 +204,7 @@ struct State {
 
   /* IC-related state */
   ICStub* stub;
+  ICCacheIRStub* cstub;
   void* fallbackIC;
   void* stubTail;
   mozilla::Maybe<CacheIRReader> cacheIRReader;
@@ -259,7 +261,7 @@ class VMFrame {
   JSContext* cx;
   Stack& stack;
   uint8_t* prevExitFP;
-  StackValue* exitFP;
+  StackVal* exitFP;
 
  public:
   VMFrame(VMFrameManager& mgr, Stack& stack_) : cx(mgr.cx), stack(stack_) {
@@ -314,7 +316,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
   uint32_t nslots = script->nslots();
   for (uint32_t i = 0; i < nslots; i++) {
-    TRY(stack.push(StackValue(UndefinedValue())));
+    TRY(stack.push(StackVal(UndefinedValue())));
   }
   ret->setUndefined();
 
@@ -365,65 +367,65 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(Nop);
       }
       case JSOp::Undefined: {
-        PUSH(StackValue(UndefinedValue()));
+        PUSH(StackVal(UndefinedValue()));
         END_OP(Undefined);
       }
       case JSOp::Null: {
-        PUSH(StackValue(NullValue()));
+        PUSH(StackVal(NullValue()));
         END_OP(Null);
       }
       case JSOp::False: {
-        PUSH(StackValue(BooleanValue(false)));
+        PUSH(StackVal(BooleanValue(false)));
         END_OP(False);
       }
       case JSOp::True: {
-        PUSH(StackValue(BooleanValue(true)));
+        PUSH(StackVal(BooleanValue(true)));
         END_OP(True);
       }
       case JSOp::Int32: {
-        PUSH(StackValue(Int32Value(GET_INT32(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_INT32(pc.pc))));
         END_OP(Int32);
       }
       case JSOp::Zero: {
-        PUSH(StackValue(Int32Value(0)));
+        PUSH(StackVal(Int32Value(0)));
         END_OP(Zero);
       }
       case JSOp::One: {
-        PUSH(StackValue(Int32Value(1)));
+        PUSH(StackVal(Int32Value(1)));
         END_OP(One);
       }
       case JSOp::Int8: {
-        PUSH(StackValue(Int32Value(GET_INT8(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_INT8(pc.pc))));
         END_OP(Int8);
       }
       case JSOp::Uint16: {
-        PUSH(StackValue(Int32Value(GET_UINT16(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_UINT16(pc.pc))));
         END_OP(Uint16);
       }
       case JSOp::Uint24: {
-        PUSH(StackValue(Int32Value(GET_UINT24(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_UINT24(pc.pc))));
         END_OP(Uint24);
       }
       case JSOp::Double: {
-        PUSH(StackValue(GET_INLINE_VALUE(pc.pc)));
+        PUSH(StackVal(GET_INLINE_VALUE(pc.pc)));
         END_OP(Double);
       }
       case JSOp::BigInt: {
-        PUSH(StackValue(JS::BigIntValue(script->getBigInt(pc.pc))));
+        PUSH(StackVal(JS::BigIntValue(script->getBigInt(pc.pc))));
         END_OP(BigInt);
       }
       case JSOp::String: {
-        PUSH(StackValue(StringValue(script->getString(pc.pc))));
+        PUSH(StackVal(StringValue(script->getString(pc.pc))));
         END_OP(String);
       }
       case JSOp::Symbol: {
-        PUSH(StackValue(
+        PUSH(StackVal(
             SymbolValue(frameMgr.cxForLocalUseOnly()->wellKnownSymbols().get(
                 GET_UINT8(pc.pc)))));
         END_OP(Symbol);
       }
       case JSOp::Void: {
-        stack[0] = StackValue(JS::UndefinedValue());
+        stack[0] = StackVal(JS::UndefinedValue());
         END_OP(Void);
       }
 
@@ -552,19 +554,19 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(StringValue(result)));
+        PUSH(StackVal(StringValue(result)));
         END_OP(ToString);
       }
 
       case JSOp::IsNullOrUndefined: {
         bool result =
             stack[0].asValue().isNull() || stack[0].asValue().isUndefined();
-        stack[0] = StackValue(BooleanValue(result));
+        stack[0] = StackVal(BooleanValue(result));
         END_OP(IsNullOrUndefined);
       }
 
       case JSOp::GlobalThis: {
-        PUSH(StackValue(ObjectValue(*frameMgr.cxForLocalUseOnly()
+        PUSH(StackVal(ObjectValue(*frameMgr.cxForLocalUseOnly()
                                          ->global()
                                          ->lexicalEnvironment()
                                          .thisObject())));
@@ -577,12 +579,12 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           state.obj0 = frame->environmentChain();
           js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
         }
-        PUSH(StackValue(state.value0));
+        PUSH(StackVal(state.value0));
         END_OP(NonSyntacticGlobalThis);
       }
 
       case JSOp::NewTarget: {
-        PUSH(StackValue(frame->newTarget()));
+        PUSH(StackVal(frame->newTarget()));
         END_OP(NewTarget);
       }
 
@@ -598,7 +600,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*promise)));
+        PUSH(StackVal(ObjectValue(*promise)));
         END_OP(DynamicImport);
       }
 
@@ -611,7 +613,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*metaObject)));
+        PUSH(StackVal(ObjectValue(*metaObject)));
         END_OP(ImportMeta);
       }
 
@@ -624,7 +626,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         goto ic_NewObject;
       }
       case JSOp::Object: {
-        PUSH(StackValue(ObjectValue(*script->getObject(pc.pc))));
+        PUSH(StackVal(ObjectValue(*script->getObject(pc.pc))));
         END_OP(Object);
       }
       case JSOp::ObjWithProto: {
@@ -634,7 +636,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           obj = ObjectWithProtoOperation(cx, state.value0);
         }
-        stack[0] = StackValue(ObjectValue(*obj));
+        stack[0] = StackVal(ObjectValue(*obj));
         END_OP(ObjWithProto);
       }
 
@@ -653,7 +655,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.value1 = stack.pop().asValue();
         state.value0 = stack[0].asValue();
         if (state.op == JSOp::InitElemInc) {
-          PUSH(StackValue(Int32Value(state.value1.toInt32() + 1)));
+          PUSH(StackVal(Int32Value(state.value1.toInt32() + 1)));
         }
         ADVANCE(JSOpLength_InitElem);
         goto ic_SetElem;
@@ -742,7 +744,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(BooleanValue(res)));
+        PUSH(StackVal(BooleanValue(res)));
         END_OP(DelProp);
       }
       case JSOp::StrictDelProp: {
@@ -755,7 +757,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(BooleanValue(res)));
+        PUSH(StackVal(BooleanValue(res)));
         END_OP(StrictDelProp);
       }
       case JSOp::DelElem: {
@@ -768,7 +770,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(BooleanValue(res)));
+        PUSH(StackVal(BooleanValue(res)));
         END_OP(DelElem);
       }
       case JSOp::StrictDelElem: {
@@ -781,7 +783,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(BooleanValue(res)));
+        PUSH(StackVal(BooleanValue(res)));
         END_OP(StrictDelElem);
       }
 
@@ -809,7 +811,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(SymbolValue(symbol)));
+        PUSH(StackVal(SymbolValue(symbol)));
         END_OP(NewPrivateName);
       }
 
@@ -824,7 +826,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         JSObject* homeObj = &homeObjVal.toObject();
         JSObject* superBase = HomeObjectSuperBase(homeObj);
 
-        PUSH(StackValue(ObjectOrNullValue(superBase)));
+        PUSH(StackVal(ObjectOrNullValue(superBase)));
         END_OP(SuperBase);
       }
 
@@ -846,7 +848,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.value2));
+        PUSH(StackVal(state.value2));
         END_OP(SetPropSuper);
       }
 
@@ -868,7 +870,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.value2));  // value
+        PUSH(StackVal(state.value2));  // value
         END_OP(SetElemSuper);
       }
 
@@ -881,14 +883,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::MoreIter: {
         // iter => iter, name
         Value v = IteratorMore(&stack[0].asValue().toObject());
-        PUSH(StackValue(v));
+        PUSH(StackVal(v));
         END_OP(MoreIter);
       }
 
       case JSOp::IsNoIter: {
         // iter => iter, bool
         bool result = stack[0].asValue().isMagic(JS_NO_ITER_VALUE);
-        PUSH(StackValue(BooleanValue(result)));
+        PUSH(StackVal(BooleanValue(result)));
         END_OP(IsNoIter);
       }
 
@@ -938,7 +940,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*ret)));
+        PUSH(StackVal(ObjectValue(*ret)));
         END_OP(ToAsyncIter);
       }
 
@@ -974,7 +976,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Hole: {
-        PUSH(StackValue(MagicValue(JS_ELEMENTS_HOLE)));
+        PUSH(StackVal(MagicValue(JS_ELEMENTS_HOLE)));
         END_OP(Hole);
       }
 
@@ -988,7 +990,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*obj)));
+        PUSH(StackVal(ObjectValue(*obj)));
         END_OP(RegExp);
       }
 
@@ -1003,7 +1005,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*res)));
+        PUSH(StackVal(ObjectValue(*res)));
         END_OP(Lambda);
       }
 
@@ -1057,7 +1059,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*obj)));
+        PUSH(StackVal(ObjectValue(*obj)));
         END_OP(FunWithProto);
       }
 
@@ -1071,7 +1073,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*builtin)));
+        PUSH(StackVal(ObjectValue(*builtin)));
         END_OP(BuiltinObject);
       }
 
@@ -1144,7 +1146,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.res));
+        PUSH(StackVal(state.res));
         END_OP(ImplicitThis);
       }
 
@@ -1153,19 +1155,19 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
         MOZ_ASSERT(cso->as<ArrayObject>().containsPure(
             frameMgr.cxForLocalUseOnly()->names().raw));
-        PUSH(StackValue(ObjectValue(*cso)));
+        PUSH(StackVal(ObjectValue(*cso)));
         END_OP(CallSiteObj);
       }
 
       case JSOp::IsConstructing: {
-        PUSH(StackValue(MagicValue(JS_IS_CONSTRUCTING)));
+        PUSH(StackVal(MagicValue(JS_IS_CONSTRUCTING)));
         END_OP(IsConstructing);
       }
 
       case JSOp::SuperFun: {
         JSObject* superEnvFunc = &stack.pop().asValue().toObject();
         JSObject* superFun = SuperFunOperation(superEnvFunc);
-        PUSH(StackValue(ObjectOrNullValue(superFun)));
+        PUSH(StackVal(ObjectOrNullValue(superFun)));
         END_OP(SuperFun);
       }
 
@@ -1189,7 +1191,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*generator)));
+        PUSH(StackVal(ObjectValue(*generator)));
         END_OP(Generator);
       }
 
@@ -1241,7 +1243,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::IsGenClosing: {
-        PUSH(StackValue(MagicValue(JS_GENERATOR_CLOSING)));
+        PUSH(StackVal(MagicValue(JS_GENERATOR_CLOSING)));
         END_OP(IsGenClosing);
       }
 
@@ -1258,7 +1260,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*promise)));
+        PUSH(StackVal(ObjectValue(*promise)));
         END_OP(AsyncAwait);
       }
 
@@ -1277,7 +1279,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(ObjectValue(*promise)));
+        PUSH(StackVal(ObjectValue(*promise)));
         END_OP(AsyncResolve);
       }
 
@@ -1291,7 +1293,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(BooleanValue(result)));
+        PUSH(StackVal(BooleanValue(result)));
         END_OP(CanSkipAwait);
       }
 
@@ -1305,14 +1307,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.value0));
-        PUSH(StackValue(state.value1));
+        PUSH(StackVal(state.value0));
+        PUSH(StackVal(state.value1));
         END_OP(MaybeExtractAwaitValue);
       }
 
       case JSOp::ResumeKind: {
         GeneratorResumeKind resumeKind = ResumeKindFromPC(pc.pc);
-        PUSH(StackValue(Int32Value(int32_t(resumeKind))));
+        PUSH(StackVal(Int32Value(int32_t(resumeKind))));
         END_OP(ResumeKind);
       }
 
@@ -1415,7 +1417,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GetRval: {
-        PUSH(StackValue(*ret));
+        PUSH(StackVal(*ret));
         END_OP(GetRval);
       }
 
@@ -1433,7 +1435,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::CheckReturn: {
         Value thisval = stack.pop().asValue();
         if (ret->isObject()) {
-          PUSH(StackValue(*ret));
+          PUSH(StackVal(*ret));
         } else if (!ret->isUndefined()) {
           PUSH_EXIT_FRAME();
           state.value0 = *ret;
@@ -1445,7 +1447,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
           goto error;
         } else {
-          PUSH(StackValue(thisval));
+          PUSH(StackVal(thisval));
         }
         END_OP(CheckReturn);
       }
@@ -1491,7 +1493,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.res));
+        PUSH(StackVal(state.res));
         END_OP(Exception);
       }
 
@@ -1500,7 +1502,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Uninitialized: {
-        PUSH(StackValue(MagicValue(JS_UNINITIALIZED_LEXICAL)));
+        PUSH(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
         END_OP(Uninitialized);
       }
       case JSOp::InitLexical: {
@@ -1561,34 +1563,34 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::GetArg: {
         unsigned i = GET_ARGNO(pc.pc);
         if (script->argsObjAliasesFormals()) {
-          PUSH(StackValue(frame->argsObj().arg(i)));
+          PUSH(StackVal(frame->argsObj().arg(i)));
         } else {
-          PUSH(StackValue(frame->unaliasedFormal(i)));
+          PUSH(StackVal(frame->unaliasedFormal(i)));
         }
         END_OP(GetArg);
       }
 
       case JSOp::GetFrameArg: {
         uint32_t i = GET_ARGNO(pc.pc);
-        PUSH(StackValue(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
+        PUSH(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
         END_OP(GetFrameArg);
       }
 
       case JSOp::GetLocal: {
         uint32_t i = GET_LOCALNO(pc.pc);
-        PUSH(StackValue(frame->unaliasedLocal(i)));
+        PUSH(StackVal(frame->unaliasedLocal(i)));
         END_OP(GetLocal);
       }
 
       case JSOp::ArgumentsLength: {
-        PUSH(StackValue(Int32Value(frame->numActualArgs())));
+        PUSH(StackVal(Int32Value(frame->numActualArgs())));
         END_OP(ArgumentsLength);
       }
 
       case JSOp::GetActualArg: {
         MOZ_ASSERT(!script->needsArgsObj());
         uint32_t index = stack[0].asValue().toInt32();
-        stack[0] = StackValue(frame->unaliasedActual(index));
+        stack[0] = StackVal(frame->unaliasedActual(index));
         END_OP(GetActualArg);
       }
 
@@ -1598,7 +1600,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                       JSOpLength_GetAliasedDebugVar);
         EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
         EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-        PUSH(StackValue(obj.aliasedBinding(ec)));
+        PUSH(StackVal(obj.aliasedBinding(ec)));
         END_OP(GetAliasedVar);
       }
 
@@ -1612,7 +1614,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        stack[0] = StackValue(state.value0);
+        stack[0] = StackVal(state.value0);
         END_OP(GetImport);
       }
 
@@ -1622,7 +1624,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Callee: {
-        PUSH(StackValue(frame->calleev()));
+        PUSH(StackVal(frame->calleev()));
         END_OP(Callee);
       }
 
@@ -1632,7 +1634,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         for (unsigned i = 0; i < numHops; i++) {
           env = &env->as<EnvironmentObject>().enclosingEnvironment();
         }
-        PUSH(StackValue(ObjectValue(env->as<CallObject>().callee())));
+        PUSH(StackVal(ObjectValue(env->as<CallObject>().callee())));
         END_OP(EnvCallee);
       }
 
@@ -1649,7 +1651,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
         state.value1 = stack.pop().asValue();
         state.value0 = stack.pop().asValue();
-        PUSH(StackValue(state.value1));
+        PUSH(StackVal(state.value1));
         ADVANCE(JSOpLength_SetProp);
         goto ic_SetProp;
       }
@@ -1789,7 +1791,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
           PUSH_EXIT_FRAME();
           varObj = BindVarOperation(cx, state.obj0);
         }
-        PUSH(StackValue(ObjectValue(*varObj)));
+        PUSH(StackVal(ObjectValue(*varObj)));
         END_OP(BindVar);
       }
 
@@ -1816,7 +1818,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.res));
+        PUSH(StackVal(state.res));
         END_OP(DelName);
       }
 
@@ -1827,7 +1829,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.res));
+        PUSH(StackVal(state.res));
         END_OP(Arguments);
       }
 
@@ -1843,7 +1845,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
             goto error;
           }
         }
-        PUSH(StackValue(state.res));
+        PUSH(StackVal(state.res));
         END_OP(FunctionThis);
       }
 
@@ -1857,20 +1859,20 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(PopN);
       }
       case JSOp::Dup: {
-        StackValue value = stack[0];
+        StackVal value = stack[0];
         PUSH(value);
         END_OP(Dup);
       }
       case JSOp::Dup2: {
-        StackValue value1 = stack[0];
-        StackValue value2 = stack[1];
+        StackVal value1 = stack[0];
+        StackVal value2 = stack[1];
         PUSH(value2);
         PUSH(value1);
         END_OP(Dup2);
       }
       case JSOp::DupAt: {
         unsigned i = GET_UINT24(pc.pc);
-        StackValue value = stack[i];
+        StackVal value = stack[i];
         PUSH(value);
         END_OP(DupAt);
       }
@@ -1880,15 +1882,15 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
       case JSOp::Pick: {
         unsigned i = GET_UINT8(pc.pc);
-        StackValue tmp = stack[i];
-        memmove(&stack[1], &stack[0], sizeof(StackValue) * i);
+        StackVal tmp = stack[i];
+        memmove(&stack[1], &stack[0], sizeof(StackVal) * i);
         stack[0] = tmp;
         END_OP(Pick);
       }
       case JSOp::Unpick: {
         unsigned i = GET_UINT8(pc.pc);
-        StackValue tmp = stack[0];
-        memmove(&stack[0], &stack[1], sizeof(StackValue) * i);
+        StackVal tmp = stack[0];
+        memmove(&stack[0], &stack[1], sizeof(StackVal) * i);
         stack[i] = tmp;
         END_OP(Unpick);
       }
@@ -1921,9 +1923,9 @@ ic_launch_stub:
     if (state.stub->isFallback()) {
       goto* state.fallbackIC;
     }
-    ICCacheIRStub* cstub = state.stub->toCacheIRStub();
-    cstub->incrementEnteredCount();
-    state.cacheIRReader.emplace(cstub->stubInfo());
+    state.cstub = state.stub->toCacheIRStub();
+    state.cstub->incrementEnteredCount();
+    state.cacheIRReader.emplace(state.cstub->stubInfo());
   } while (0);
 
   while (true) {
@@ -1933,9 +1935,11 @@ ic_launch_stub:
         state.cacheIRReader.reset();
         printf("stub successful!\n");
         goto* state.stubTail;
+
       case CacheOp::GuardToInt32: {
         ValOperandId inputId = state.cacheIRReader->valOperandId();
         Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+        printf("GuardToInt32: icVal %" PRIx64 "\n", state.icVals[inputId.id()]);
         if (!v.isInt32()) {
           goto ic_fail;
         }
@@ -1944,17 +1948,113 @@ ic_launch_stub:
         // `Int32Operand`s to only use those bits.
         break;
       }
-      case CacheOp::Int32AddResult: {
-        Int32OperandId lhsId = state.cacheIRReader->int32OperandId();
-        Int32OperandId rhsId = state.cacheIRReader->int32OperandId();
-        int64_t result = int64_t(int32_t(state.icVals[lhsId.id()])) +
-                         int64_t(int32_t(state.icVals[rhsId.id()]));
-        if (result < INT32_MIN || result > INT32_MAX) {
+
+      case CacheOp::GuardToObject: {
+        ObjOperandId inputId = state.cacheIRReader->objOperandId();
+        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+        printf("GuardToObject: icVal %" PRIx64 "\n",
+               state.icVals[inputId.id()]);
+        if (!v.isObject()) {
           goto ic_fail;
         }
-        state.res.setInt32(int32_t(result));
         break;
       }
+
+      case CacheOp::GuardIsNullOrUndefined: {
+        ObjOperandId inputId = state.cacheIRReader->objOperandId();
+        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+        if (!v.isNullOrUndefined()) {
+          goto ic_fail;
+        }
+        break;
+      }
+
+      case CacheOp::GuardIsNull: {
+        ObjOperandId inputId = state.cacheIRReader->objOperandId();
+        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+        if (!v.isNull()) {
+          goto ic_fail;
+        }
+        break;
+      }
+
+      case CacheOp::GuardIsUndefined: {
+        ObjOperandId inputId = state.cacheIRReader->objOperandId();
+        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+        if (!v.isUndefined()) {
+          goto ic_fail;
+        }
+        break;
+      }
+
+      case CacheOp::StoreDynamicSlot: {
+        printf("StoreDynamicSlot\n");
+        ObjOperandId objId = state.cacheIRReader->objOperandId();
+        uint32_t offsetOffset = state.cacheIRReader->stubOffset();
+        uintptr_t offset =
+            state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+        ValOperandId valId = state.cacheIRReader->valOperandId();
+        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                  .toObject()
+                                  .as<NativeObject>();
+        HeapSlot* slots = nobj->getSlotsUnchecked();
+        Value val = Value::fromRawBits(state.icVals[valId.id()]);
+        size_t dynSlot = offset / sizeof(Value);
+        size_t slot = dynSlot + nobj->numFixedSlots();
+        slots[dynSlot].set(nobj, HeapSlot::Slot, slot, val);
+        break;
+      }
+
+      case CacheOp::LoadDynamicSlotResult: {
+        printf("LoadDynamicSlotResult\n");
+        fflush(stdout);
+        ObjOperandId objId = state.cacheIRReader->objOperandId();
+        uint32_t offsetOffset = state.cacheIRReader->stubOffset();
+        uintptr_t offset =
+            state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                  .toObject()
+                                  .as<NativeObject>();
+        HeapSlot* slots = nobj->getSlotsUnchecked();
+        state.res.set(slots[offset / sizeof(Value)].get());
+        break;
+      }
+
+#define INT32_OP(name, op, extra_check)                           \
+  case CacheOp::Int32##name##Result: {                            \
+    printf("Int32" #name "Result\n"); \
+    Int32OperandId lhsId = state.cacheIRReader->int32OperandId(); \
+    Int32OperandId rhsId = state.cacheIRReader->int32OperandId(); \
+    int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));     \
+    int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));     \
+    extra_check;                                                  \
+    int64_t result = lhs op rhs;                                  \
+    if (result < INT32_MIN || result > INT32_MAX) {               \
+      goto ic_fail;                                               \
+    }                                                             \
+    state.res.setInt32(int32_t(result));                          \
+    break;                                                        \
+  }
+
+        INT32_OP(Add, +, {});
+        INT32_OP(Sub, -, {});
+        INT32_OP(Mul, *, {});
+        INT32_OP(Div, /, {
+          if (rhs == 0) {
+            goto ic_fail;
+          }
+        });
+        INT32_OP(Mod, %, {
+          if (rhs == 0) {
+            goto ic_fail;
+          }
+        });
+        INT32_OP(Pow, <<, {
+          if (rhs >= 32 || rhs < 0) {
+            goto ic_fail;
+          }
+        });
+
       default:
         printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
         goto ic_fail;
@@ -1990,14 +2090,14 @@ ic_fail:
   }                                                          \
   while (0)
 
-  // Setup for "registers" used by CacheIR ops. See
-  // `BaselineCacheIRCompiler::init()`, together with the R0/R1/R2
-  // setup in BaselineCodeGen.cpp's `emit_*` methods, for the
-  // canonical index->value mappings.
+// Setup for "registers" used by CacheIR ops. See
+// `BaselineCacheIRCompiler::init()`, together with the R0/R1/R2
+// setup in BaselineCodeGen.cpp's `emit_*` methods, for the
+// canonical index->value mappings.
 #define IC_VAL(index, state_elem) \
   state.icVals[(index)] = state.state_elem.asRawBits();
 #define IC_OBJ(index, state_elem) \
-  state.icVals[(index)] = reinterpret_cast<uintptr_t>(state.state_elem.get());
+  state.icVals[(index)] = ObjectValue(*state.state_elem.get()).asRawBits();
 #define IC_INT32(index, expr) state.icVals[(index)] = (expr);
 
   IC_KIND(
@@ -2008,7 +2108,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       Call, { IC_INT32(0, state.argc); },
@@ -2035,7 +2135,7 @@ ic_fail:
           }
         }
         stack.popn(totalArgs);
-        PUSH(StackValue(state.res));
+        PUSH(StackVal(state.res));
       },
       {});
 
@@ -2047,7 +2147,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       UnaryArith, { IC_VAL(0, value0); },
@@ -2058,7 +2158,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       BinaryArith,
@@ -2073,7 +2173,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       ToBool, { IC_VAL(0, value0); },
@@ -2086,7 +2186,7 @@ ic_fail:
       {
         switch (state.op) {
           case JSOp::Not:
-            PUSH(StackValue(BooleanValue(!state.res.toBoolean())));
+            PUSH(StackVal(BooleanValue(!state.res.toBoolean())));
             break;
           case JSOp::Or:
           case JSOp::JumpIfTrue: {
@@ -2122,7 +2222,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       InstanceOf,
@@ -2137,7 +2237,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       In,
@@ -2152,7 +2252,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       BindName, { IC_OBJ(0, obj0); },
@@ -2162,7 +2262,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       SetProp,
@@ -2187,7 +2287,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       GetProp, { IC_VAL(0, value0); },
@@ -2198,7 +2298,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       GetPropSuper, { IC_VAL(0, value0); },
@@ -2209,7 +2309,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       GetElem,
@@ -2224,7 +2324,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       GetElemSuper,
@@ -2239,7 +2339,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       NewArray, {},
@@ -2249,7 +2349,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       GetIntrinsic, {},
@@ -2259,7 +2359,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       SetElem,
@@ -2290,7 +2390,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       CheckPrivateField,
@@ -2305,7 +2405,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       GetIterator, { IC_VAL(0, value0); },
@@ -2316,7 +2416,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       ToPropertyKey, { IC_VAL(0, value0); },
@@ -2327,7 +2427,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       OptimizeSpreadCall, { IC_VAL(0, value0); },
@@ -2338,7 +2438,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       Rest, {},
@@ -2348,7 +2448,7 @@ ic_fail:
           goto error;
         }
       },
-      { PUSH(StackValue(state.res)); });
+      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       CloseIter, { IC_OBJ(0, obj0); },
@@ -2391,8 +2491,8 @@ error:
 #ifdef TRACE_INTERP
         printf(" -> finally to pc %p\n", pc.pc);
 #endif
-        PUSH(StackValue(rfe.exception));
-        PUSH(StackValue(BooleanValue(true)));
+        PUSH(StackVal(rfe.exception));
+        PUSH(StackVal(BooleanValue(true)));
         goto dispatch;
       case ExceptionResumeKind::ForcedReturnBaseline:
 #ifdef TRACE_INTERP
@@ -2440,12 +2540,12 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
     argc++;
   }
   for (size_t i = 0; i < argc; i++) {
-    PUSH(StackValue(argv[argc - 1 - i]));
+    PUSH(StackVal(argv[argc - 1 - i]));
   }
-  PUSH(StackValue(calleeToken));
-  PUSH(StackValue(
+  PUSH(StackVal(calleeToken));
+  PUSH(StackVal(
       MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
-  PUSH(StackValue(nullptr));  // Fake return address.
+  PUSH(StackVal(nullptr));  // Fake return address.
 
   if (!PortableBaselineInterpret(cx, stack, envChain, result)) {
     return false;

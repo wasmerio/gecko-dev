@@ -1308,6 +1308,9 @@ class CacheIRStubInfo {
   uintptr_t getStubRawWord(const uint8_t* stubData, uint32_t offset) const;
   uintptr_t getStubRawWord(ICCacheIRStub* stub, uint32_t offset) const;
 
+  int32_t getStubRawInt32(const uint8_t* stubData, uint32_t offset) const;
+  int32_t getStubRawInt32(ICCacheIRStub* stub, uint32_t offset) const;
+
   int64_t getStubRawInt64(const uint8_t* stubData, uint32_t offset) const;
   int64_t getStubRawInt64(ICCacheIRStub* stub, uint32_t offset) const;
 
