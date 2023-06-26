@@ -2116,7 +2116,6 @@ ic_launch_stub:
 
       case CacheOp::LoadDynamicSlotResult: {
         TRACE_PRINTF("LoadDynamicSlotResult\n");
-        fflush(stdout);
         ObjOperandId objId = state.cacheIRReader->objOperandId();
         uint32_t offsetOffset = state.cacheIRReader->stubOffset();
         uintptr_t offset =
