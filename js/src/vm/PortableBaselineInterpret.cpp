@@ -1939,7 +1939,8 @@ ic_launch_stub:
       case CacheOp::GuardToInt32: {
         ValOperandId inputId = state.cacheIRReader->valOperandId();
         Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        printf("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(), state.icVals[inputId.id()]);
+        printf("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(),
+               state.icVals[inputId.id()]);
         if (!v.isInt32()) {
           goto ic_fail;
         }
@@ -1987,6 +1988,52 @@ ic_launch_stub:
         break;
       }
 
+      case CacheOp::GuardNonDoubleType: {
+        ValOperandId inputId = state.cacheIRReader->valOperandId();
+        ValueType type = state.cacheIRReader->valueType();
+        Value val = Value::fromRawBits(state.icVals[inputId.id()]);
+        switch (type) {
+          case ValueType::String:
+            if (!val.isString()) {
+              goto ic_fail;
+            }
+            break;
+          case ValueType::Symbol:
+            if (!val.isSymbol()) {
+              goto ic_fail;
+            }
+            break;
+          case ValueType::BigInt:
+            if (!val.isBigInt()) {
+              goto ic_fail;
+            }
+            break;
+          case ValueType::Int32:
+            if (!val.isInt32()) {
+              goto ic_fail;
+            }
+            break;
+          case ValueType::Boolean:
+            if (!val.isBoolean()) {
+              goto ic_fail;
+            }
+            break;
+          case ValueType::Undefined:
+            if (!val.isUndefined()) {
+              goto ic_fail;
+            }
+            break;
+          case ValueType::Null:
+            if (!val.isNull()) {
+              goto ic_fail;
+            }
+            break;
+          default:
+            MOZ_CRASH("Unexpected type");
+        }
+        break;
+      }
+
       case CacheOp::StoreDynamicSlot: {
         printf("StoreDynamicSlot\n");
         ObjOperandId objId = state.cacheIRReader->objOperandId();
@@ -2002,6 +2049,58 @@ ic_launch_stub:
         size_t dynSlot = offset / sizeof(Value);
         size_t slot = dynSlot + nobj->numFixedSlots();
         slots[dynSlot].set(nobj, HeapSlot::Slot, slot, val);
+        break;
+      }
+
+      case CacheOp::LoadOperandResult: {
+        ValOperandId valId = state.cacheIRReader->valOperandId();
+        Value val = Value::fromRawBits(state.icVals[valId.id()]);
+        state.res.set(val);
+        break;
+      }
+
+      case CacheOp::LoadObjectResult: {
+        ObjOperandId objId = state.cacheIRReader->objOperandId();
+        Value val = Value::fromRawBits(state.icVals[objId.id()]);
+        state.res.set(val);
+        break;
+      }
+
+      case CacheOp::LoadStringResult: {
+        StringOperandId stringId = state.cacheIRReader->stringOperandId();
+        Value val = Value::fromRawBits(state.icVals[stringId.id()]);
+        state.res.set(val);
+        break;
+      }
+
+      case CacheOp::LoadSymbolResult: {
+        SymbolOperandId symbolId = state.cacheIRReader->symbolOperandId();
+        Value val = Value::fromRawBits(state.icVals[symbolId.id()]);
+        state.res.set(val);
+        break;
+      }
+
+      case CacheOp::LoadInt32Result: {
+        Int32OperandId intId = state.cacheIRReader->int32OperandId();
+        int32_t value = int32_t(state.icVals[intId.id()]);
+        state.res.setInt32(value);
+        break;
+      }
+
+      case CacheOp::LoadBigIntResult: {
+        BigIntOperandId bigintId = state.cacheIRReader->bigIntOperandId();
+        Value val = Value::fromRawBits(state.icVals[bigintId.id()]);
+        state.res.set(val);
+        break;
+      }
+
+      case CacheOp::LoadDoubleResult: {
+        NumberOperandId numId = state.cacheIRReader->numberOperandId();
+        Value val = Value::fromRawBits(state.icVals[numId.id()]);
+        if (val.isInt32()) {
+          val = DoubleValue(val.toInt32());
+        }
+        state.res.set(val);
         break;
       }
 
@@ -2055,6 +2154,17 @@ ic_launch_stub:
           }
         });
 
+      case CacheOp::Int32IncResult: {
+        Int32OperandId intId = state.cacheIRReader->int32OperandId();
+        int64_t value = int64_t(int32_t(state.icVals[intId.id()]));
+        value++;
+        if (value > INT32_MAX) {
+          goto ic_fail;
+        }
+        state.res.setInt32(int32_t(value));
+        break;
+      }
+
       case CacheOp::CompareInt32Result: {
         printf("CompareInt32Result\n");
         JSOp op = state.cacheIRReader->jsop();
@@ -2062,7 +2172,8 @@ ic_launch_stub:
         Int32OperandId rhsId = state.cacheIRReader->int32OperandId();
         int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));
         int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));
-        printf("lhs (%d) = %" PRIi64 " rhs (%d) = %" PRIi64 "\n", lhsId.id(), lhs, rhsId.id(), rhs);
+        printf("lhs (%d) = %" PRIi64 " rhs (%d) = %" PRIi64 "\n", lhsId.id(),
+               lhs, rhsId.id(), rhs);
         bool result;
         switch (op) {
           case JSOp::Eq:
@@ -2085,8 +2196,8 @@ ic_launch_stub:
           case JSOp::Ge:
             result = lhs >= rhs;
             break;
-        default:
-          MOZ_CRASH("Unexpected opcode");
+          default:
+            MOZ_CRASH("Unexpected opcode");
         }
         state.res.setBoolean(result);
         break;
