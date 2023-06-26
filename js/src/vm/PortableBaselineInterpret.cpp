@@ -44,6 +44,14 @@
 
 #define TRACE_INTERP
 
+#ifdef TRACE_INTERP
+#  define TRACE_PRINTF(...) printf(__VA_ARGS__)
+#else
+#  define TRACE_PRINTF(...) \
+    do {                    \
+    } while (0)
+#endif
+
 using namespace js;
 using namespace js::jit;
 
@@ -1933,14 +1941,14 @@ ic_launch_stub:
     switch (op) {
       case CacheOp::ReturnFromIC:
         state.cacheIRReader.reset();
-        printf("stub successful!\n");
+        TRACE_PRINTF("stub successful!\n");
         goto* state.stubTail;
 
       case CacheOp::GuardToInt32: {
         ValOperandId inputId = state.cacheIRReader->valOperandId();
         Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        printf("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(),
-               state.icVals[inputId.id()]);
+        TRACE_PRINTF("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(),
+                     state.icVals[inputId.id()]);
         if (!v.isInt32()) {
           goto ic_fail;
         }
@@ -1953,8 +1961,8 @@ ic_launch_stub:
       case CacheOp::GuardToObject: {
         ObjOperandId inputId = state.cacheIRReader->objOperandId();
         Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        printf("GuardToObject: icVal %" PRIx64 "\n",
-               state.icVals[inputId.id()]);
+        TRACE_PRINTF("GuardToObject: icVal %" PRIx64 "\n",
+                     state.icVals[inputId.id()]);
         if (!v.isObject()) {
           goto ic_fail;
         }
@@ -2035,7 +2043,7 @@ ic_launch_stub:
       }
 
       case CacheOp::StoreDynamicSlot: {
-        printf("StoreDynamicSlot\n");
+        TRACE_PRINTF("StoreDynamicSlot\n");
         ObjOperandId objId = state.cacheIRReader->objOperandId();
         uint32_t offsetOffset = state.cacheIRReader->stubOffset();
         uintptr_t offset =
@@ -2105,7 +2113,7 @@ ic_launch_stub:
       }
 
       case CacheOp::LoadDynamicSlotResult: {
-        printf("LoadDynamicSlotResult\n");
+        TRACE_PRINTF("LoadDynamicSlotResult\n");
         fflush(stdout);
         ObjOperandId objId = state.cacheIRReader->objOperandId();
         uint32_t offsetOffset = state.cacheIRReader->stubOffset();
@@ -2121,7 +2129,7 @@ ic_launch_stub:
 
 #define INT32_OP(name, op, extra_check)                           \
   case CacheOp::Int32##name##Result: {                            \
-    printf("Int32" #name "Result\n");                             \
+    TRACE_PRINTF("Int32" #name "Result\n");                       \
     Int32OperandId lhsId = state.cacheIRReader->int32OperandId(); \
     Int32OperandId rhsId = state.cacheIRReader->int32OperandId(); \
     int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));     \
@@ -2166,14 +2174,14 @@ ic_launch_stub:
       }
 
       case CacheOp::CompareInt32Result: {
-        printf("CompareInt32Result\n");
+        TRACE_PRINTF("CompareInt32Result\n");
         JSOp op = state.cacheIRReader->jsop();
         Int32OperandId lhsId = state.cacheIRReader->int32OperandId();
         Int32OperandId rhsId = state.cacheIRReader->int32OperandId();
         int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));
         int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));
-        printf("lhs (%d) = %" PRIi64 " rhs (%d) = %" PRIi64 "\n", lhsId.id(),
-               lhs, rhsId.id(), rhs);
+        TRACE_PRINTF("lhs (%d) = %" PRIi64 " rhs (%d) = %" PRIi64 "\n",
+                     lhsId.id(), lhs, rhsId.id(), rhs);
         bool result;
         switch (op) {
           case JSOp::Eq:
@@ -2204,7 +2212,7 @@ ic_launch_stub:
       }
 
       default:
-        printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+        TRACE_PRINTF("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
         goto ic_fail;
     }
   }
@@ -2216,7 +2224,7 @@ ic_fail:
 
 #define IC_KIND(kind, setup_body, fallback_body, tail_body)  \
   ic_##kind : do {                                           \
-    printf("stub: " #kind "\n");                             \
+    TRACE_PRINTF("stub: " #kind "\n");                       \
     state.stub = frame->interpreterICEntry()->firstStub();   \
     state.fallbackIC = &&ic_##kind##_fallback;               \
     state.stubTail = &&ic_##kind##_tail;                     \
@@ -2610,9 +2618,7 @@ ic_fail:
       {});
 
 error:
-#ifdef TRACE_INTERP
-  printf("HandleException\n");
-#endif
+  TRACE_PRINTF("HandleException\n");
   do {
     ResumeFromException rfe;
     {
@@ -2622,31 +2628,23 @@ error:
 
     switch (rfe.kind) {
       case ExceptionResumeKind::EntryFrame:
-#ifdef TRACE_INTERP
-        printf(" -> Return from entry frame\n");
-#endif
+        TRACE_PRINTF(" -> Return from entry frame\n");
         *ret = MagicValue(JS_ION_ERROR);
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return false;
       case ExceptionResumeKind::Catch:
         pc.pc = frame->interpreterPC();
-#ifdef TRACE_INTERP
-        printf(" -> catch to pc %p\n", pc.pc);
-#endif
+        TRACE_PRINTF(" -> catch to pc %p\n", pc.pc);
         goto dispatch;
       case ExceptionResumeKind::Finally:
         pc.pc = frame->interpreterPC();
-#ifdef TRACE_INTERP
-        printf(" -> finally to pc %p\n", pc.pc);
-#endif
+        TRACE_PRINTF(" -> finally to pc %p\n", pc.pc);
         PUSH(StackVal(rfe.exception));
         PUSH(StackVal(BooleanValue(true)));
         goto dispatch;
       case ExceptionResumeKind::ForcedReturnBaseline:
-#ifdef TRACE_INTERP
-        printf(" -> forced return\n");
-#endif
+        TRACE_PRINTF(" -> forced return\n");
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
