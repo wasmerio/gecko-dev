@@ -42,7 +42,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+//#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -117,7 +117,9 @@ struct Stack {
   }
 
   [[nodiscard]] BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
+#ifdef DEBUG
     auto* prevFP = fp;
+#endif
     if (!push(StackVal(fp))) {
       return nullptr;
     }
