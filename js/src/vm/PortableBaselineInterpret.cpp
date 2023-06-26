@@ -567,9 +567,9 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
       case JSOp::GlobalThis: {
         PUSH(StackVal(ObjectValue(*frameMgr.cxForLocalUseOnly()
-                                         ->global()
-                                         ->lexicalEnvironment()
-                                         .thisObject())));
+                                       ->global()
+                                       ->lexicalEnvironment()
+                                       .thisObject())));
         END_OP(GlobalThis);
       }
 
@@ -1939,7 +1939,7 @@ ic_launch_stub:
       case CacheOp::GuardToInt32: {
         ValOperandId inputId = state.cacheIRReader->valOperandId();
         Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        printf("GuardToInt32: icVal %" PRIx64 "\n", state.icVals[inputId.id()]);
+        printf("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(), state.icVals[inputId.id()]);
         if (!v.isInt32()) {
           goto ic_fail;
         }
@@ -2022,7 +2022,7 @@ ic_launch_stub:
 
 #define INT32_OP(name, op, extra_check)                           \
   case CacheOp::Int32##name##Result: {                            \
-    printf("Int32" #name "Result\n"); \
+    printf("Int32" #name "Result\n");                             \
     Int32OperandId lhsId = state.cacheIRReader->int32OperandId(); \
     Int32OperandId rhsId = state.cacheIRReader->int32OperandId(); \
     int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));     \
@@ -2054,6 +2054,43 @@ ic_launch_stub:
             goto ic_fail;
           }
         });
+
+      case CacheOp::CompareInt32Result: {
+        printf("CompareInt32Result\n");
+        JSOp op = state.cacheIRReader->jsop();
+        Int32OperandId lhsId = state.cacheIRReader->int32OperandId();
+        Int32OperandId rhsId = state.cacheIRReader->int32OperandId();
+        int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));
+        int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));
+        printf("lhs (%d) = %" PRIi64 " rhs (%d) = %" PRIi64 "\n", lhsId.id(), lhs, rhsId.id(), rhs);
+        bool result;
+        switch (op) {
+          case JSOp::Eq:
+          case JSOp::StrictEq:
+            result = lhs == rhs;
+            break;
+          case JSOp::Ne:
+          case JSOp::StrictNe:
+            result = lhs != rhs;
+            break;
+          case JSOp::Lt:
+            result = lhs < rhs;
+            break;
+          case JSOp::Le:
+            result = lhs <= rhs;
+            break;
+          case JSOp::Gt:
+            result = lhs > rhs;
+            break;
+          case JSOp::Ge:
+            result = lhs >= rhs;
+            break;
+        default:
+          MOZ_CRASH("Unexpected opcode");
+        }
+        state.res.setBoolean(result);
+        break;
+      }
 
       default:
         printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
@@ -2096,6 +2133,7 @@ ic_fail:
 // canonical index->value mappings.
 #define IC_VAL(index, state_elem) \
   state.icVals[(index)] = state.state_elem.asRawBits();
+  // TODO: store Objects unboxed
 #define IC_OBJ(index, state_elem) \
   state.icVals[(index)] = ObjectValue(*state.state_elem.get()).asRawBits();
 #define IC_INT32(index, expr) state.icVals[(index)] = (expr);
