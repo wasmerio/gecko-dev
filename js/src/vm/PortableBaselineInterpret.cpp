@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+//#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -324,7 +324,6 @@ enum class ICInterpretOpResult {
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
 ICInterpretOp(State& state, ICCacheIRStub* cstub) {
-  printf("ICInterpretOp\n");
   CacheOp op = state.cacheIRReader.readOp();
   switch (op) {
     case CacheOp::ReturnFromIC:
@@ -629,10 +628,13 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
   return ICInterpretOpResult::Ok;
 }
 
+#define NEXT_IC() frame->interpreterICEntry()++;
+
 #define INVOKE_IC(kind)                           \
   if (!IC##kind(frame, frameMgr, stack, state)) { \
     goto error;                                   \
-  }
+  }                                               \
+  NEXT_IC();
 
 #define DEFINE_IC(kind, fallback_body)                                 \
   static bool IC##kind(BaselineFrame* frame, VMFrameManager& frameMgr, \
@@ -654,7 +656,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
         while (true) {                                                 \
           switch (ICInterpretOp(state, cstub)) {                       \
             case ICInterpretOpResult::Fail:                            \
-              state.stub = state.stub->maybeNext();                    \
+              stub = stub->maybeNext();                                \
               goto next_stub;                                          \
             case ICInterpretOpResult::Ok:                              \
               continue;                                                \
@@ -717,7 +719,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 #define ADVANCE_AND_DISPATCH(delta) \
   ADVANCE(delta);                   \
   goto dispatch;
-#define NEXT_IC() frame->interpreterICEntry()++;
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
@@ -2304,14 +2305,11 @@ ic_launch_stub:
   while (true) {
     switch (ICInterpretOp(state, state.cstub)) {
       case ICInterpretOpResult::Fail:
-        printf("returned fail\n");
         state.stub = state.stub->maybeNext();
         goto ic_launch_stub;
       case ICInterpretOpResult::Ok:
-        printf("returned ok\n");
         continue;
       case ICInterpretOpResult::Return:
-        printf("returned\n");
         state.res.set(Value::fromRawBits(state.icResult));
         goto* state.stubTail;
     }
@@ -2329,14 +2327,12 @@ ic_launch_stub:
   while (0)                                                  \
     ;                                                        \
   ic_##kind##_fallback : do {                                \
-    printf("fallback: " #kind "\n");                         \
     ICFallbackStub* fallback = state.stub->toFallbackStub(); \
     fallback_body;                                           \
   }                                                          \
   while (0)                                                  \
     ;                                                        \
   ic_##kind##_tail : do {                                    \
-    printf("tail: " #kind "\n");                             \
     tail_body;                                               \
     NEXT_IC();                                               \
     goto dispatch;                                           \
