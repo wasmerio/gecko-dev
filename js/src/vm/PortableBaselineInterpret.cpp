@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-//#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -245,7 +245,6 @@ struct PC {
   jsbytecode* pc;
 
   explicit PC(BaselineFrame* frame) : pc(frame->interpreterPC()) {}
-
   void advance(BaselineFrame* frame, intptr_t delta) { pc += delta; }
 };
 
@@ -315,6 +314,326 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
   }
 
 #define PUSH(val) TRY(stack.push(val));
+
+enum class ICInterpretOpResult {
+  Fail,
+  Ok,
+  Return,
+};
+
+static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
+  CacheOp op = state.cacheIRReader.readOp();
+  switch (op) {
+    case CacheOp::ReturnFromIC:
+      TRACE_PRINTF("stub successful!\n");
+      return ICInterpretOpResult::Return;
+
+    case CacheOp::GuardToInt32: {
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      TRACE_PRINTF("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(),
+                   state.icVals[inputId.id()]);
+      if (!v.isInt32()) {
+        return ICInterpretOpResult::Fail;
+      }
+      // N.B.: we don't need to unbox because the low 32 bits are
+      // already the int32 itself, and we are careful when using
+      // `Int32Operand`s to only use those bits.
+      break;
+    }
+
+    case CacheOp::GuardToObject: {
+      ObjOperandId inputId = state.cacheIRReader.objOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      TRACE_PRINTF("GuardToObject: icVal %" PRIx64 "\n",
+                   state.icVals[inputId.id()]);
+      if (!v.isObject()) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardIsNullOrUndefined: {
+      ObjOperandId inputId = state.cacheIRReader.objOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (!v.isNullOrUndefined()) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardIsNull: {
+      ObjOperandId inputId = state.cacheIRReader.objOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (!v.isNull()) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardIsUndefined: {
+      ObjOperandId inputId = state.cacheIRReader.objOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (!v.isUndefined()) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardNonDoubleType: {
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
+      ValueType type = state.cacheIRReader.valueType();
+      Value val = Value::fromRawBits(state.icVals[inputId.id()]);
+      switch (type) {
+        case ValueType::String:
+          if (!val.isString()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case ValueType::Symbol:
+          if (!val.isSymbol()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case ValueType::BigInt:
+          if (!val.isBigInt()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case ValueType::Int32:
+          if (!val.isInt32()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case ValueType::Boolean:
+          if (!val.isBoolean()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case ValueType::Undefined:
+          if (!val.isUndefined()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case ValueType::Null:
+          if (!val.isNull()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        default:
+          MOZ_CRASH("Unexpected type");
+      }
+      break;
+    }
+
+    case CacheOp::GuardShape: {
+      TRACE_PRINTF("GuardShape\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                .toObject()
+                                .as<NativeObject>();
+      uintptr_t expectedShape =
+          state.cstub->stubInfo()->getStubRawWord(state.cstub, offsetOffset);
+      if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::StoreDynamicSlot: {
+      TRACE_PRINTF("StoreDynamicSlot\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+      uintptr_t offset =
+          state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+      ValOperandId valId = state.cacheIRReader.valOperandId();
+      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                .toObject()
+                                .as<NativeObject>();
+      HeapSlot* slots = nobj->getSlotsUnchecked();
+      Value val = Value::fromRawBits(state.icVals[valId.id()]);
+      size_t dynSlot = offset / sizeof(Value);
+      size_t slot = dynSlot + nobj->numFixedSlots();
+      slots[dynSlot].set(nobj, HeapSlot::Slot, slot, val);
+      break;
+    }
+
+    case CacheOp::LoadOperandResult: {
+      ValOperandId valId = state.cacheIRReader.valOperandId();
+      Value val = Value::fromRawBits(state.icVals[valId.id()]);
+      state.res.set(val);
+      break;
+    }
+
+    case CacheOp::LoadObjectResult: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      Value val = Value::fromRawBits(state.icVals[objId.id()]);
+      state.res.set(val);
+      break;
+    }
+
+    case CacheOp::LoadStringResult: {
+      StringOperandId stringId = state.cacheIRReader.stringOperandId();
+      Value val = Value::fromRawBits(state.icVals[stringId.id()]);
+      state.res.set(val);
+      break;
+    }
+
+    case CacheOp::LoadSymbolResult: {
+      SymbolOperandId symbolId = state.cacheIRReader.symbolOperandId();
+      Value val = Value::fromRawBits(state.icVals[symbolId.id()]);
+      state.res.set(val);
+      break;
+    }
+
+    case CacheOp::LoadInt32Result: {
+      Int32OperandId intId = state.cacheIRReader.int32OperandId();
+      int32_t value = int32_t(state.icVals[intId.id()]);
+      state.res.setInt32(value);
+      break;
+    }
+
+    case CacheOp::LoadBigIntResult: {
+      BigIntOperandId bigintId = state.cacheIRReader.bigIntOperandId();
+      Value val = Value::fromRawBits(state.icVals[bigintId.id()]);
+      state.res.set(val);
+      break;
+    }
+
+    case CacheOp::LoadDoubleResult: {
+      NumberOperandId numId = state.cacheIRReader.numberOperandId();
+      Value val = Value::fromRawBits(state.icVals[numId.id()]);
+      if (val.isInt32()) {
+        val = DoubleValue(val.toInt32());
+      }
+      state.res.set(val);
+      break;
+    }
+
+    case CacheOp::LoadFixedSlotResult: {
+      TRACE_PRINTF("LoadFixedSlotResult\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+      uintptr_t offset =
+          state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                .toObject()
+                                .as<NativeObject>();
+      Value* slot =
+          reinterpret_cast<Value*>(reinterpret_cast<uintptr_t>(nobj) + offset);
+      state.res.set(*slot);
+      break;
+    }
+
+    case CacheOp::LoadDynamicSlotResult: {
+      TRACE_PRINTF("LoadDynamicSlotResult\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+      uintptr_t offset =
+          state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
+                                .toObject()
+                                .as<NativeObject>();
+      HeapSlot* slots = nobj->getSlotsUnchecked();
+      state.res.set(slots[offset / sizeof(Value)].get());
+      break;
+    }
+
+#define INT32_OP(name, op, extra_check)                          \
+  case CacheOp::Int32##name##Result: {                           \
+    TRACE_PRINTF("Int32" #name "Result\n");                      \
+    Int32OperandId lhsId = state.cacheIRReader.int32OperandId(); \
+    Int32OperandId rhsId = state.cacheIRReader.int32OperandId(); \
+    int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));    \
+    int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));    \
+    extra_check;                                                 \
+    int64_t result = lhs op rhs;                                 \
+    if (result < INT32_MIN || result > INT32_MAX) {              \
+      return ICInterpretOpResult::Fail;                          \
+    }                                                            \
+    state.res.setInt32(int32_t(result));                         \
+    break;                                                       \
+  }
+
+      INT32_OP(Add, +, {});
+      INT32_OP(Sub, -, {});
+      INT32_OP(Mul, *, {});
+      INT32_OP(Div, /, {
+        if (rhs == 0) {
+          return ICInterpretOpResult::Fail;
+        }
+      });
+      INT32_OP(Mod, %, {
+        if (rhs == 0) {
+          return ICInterpretOpResult::Fail;
+        }
+      });
+      INT32_OP(Pow, <<, {
+        if (rhs >= 32 || rhs < 0) {
+          return ICInterpretOpResult::Fail;
+        }
+      });
+
+    case CacheOp::Int32IncResult: {
+      Int32OperandId intId = state.cacheIRReader.int32OperandId();
+      int64_t value = int64_t(int32_t(state.icVals[intId.id()]));
+      value++;
+      if (value > INT32_MAX) {
+        return ICInterpretOpResult::Fail;
+      }
+      state.res.setInt32(int32_t(value));
+      break;
+    }
+
+    case CacheOp::CompareInt32Result: {
+      TRACE_PRINTF("CompareInt32Result\n");
+      JSOp op = state.cacheIRReader.jsop();
+      Int32OperandId lhsId = state.cacheIRReader.int32OperandId();
+      Int32OperandId rhsId = state.cacheIRReader.int32OperandId();
+      int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));
+      int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));
+      TRACE_PRINTF("lhs (%d) = %" PRIi64 " rhs (%d) = %" PRIi64 "\n",
+                   lhsId.id(), lhs, rhsId.id(), rhs);
+      bool result;
+      switch (op) {
+        case JSOp::Eq:
+        case JSOp::StrictEq:
+          result = lhs == rhs;
+          break;
+        case JSOp::Ne:
+        case JSOp::StrictNe:
+          result = lhs != rhs;
+          break;
+        case JSOp::Lt:
+          result = lhs < rhs;
+          break;
+        case JSOp::Le:
+          result = lhs <= rhs;
+          break;
+        case JSOp::Gt:
+          result = lhs > rhs;
+          break;
+        case JSOp::Ge:
+          result = lhs >= rhs;
+          break;
+        default:
+          MOZ_CRASH("Unexpected opcode");
+      }
+      state.res.setBoolean(result);
+      break;
+    }
+
+    default:
+      TRACE_PRINTF("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+      return ICInterpretOpResult::Fail;
+  }
+
+  return ICInterpretOpResult::Ok;
+}
+
+static bool ICInterpret(JSContext* cx_, Stack& stack, BaselineFrame* frame,
+                        VMFrameManager& frameMgr, State& state) {}
 
 static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
@@ -1929,9 +2248,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
 ic_launch_stub:
   do {
-    if (!state.stub) {
-      goto ic_fail;
-    }
+    MOZ_ASSERT(state.stub);
     if (state.stub->isFallback()) {
       goto* state.fallbackIC;
     }
@@ -1941,317 +2258,16 @@ ic_launch_stub:
   } while (0);
 
   while (true) {
-    CacheOp op = state.cacheIRReader.readOp();
-    switch (op) {
-      case CacheOp::ReturnFromIC:
-        TRACE_PRINTF("stub successful!\n");
+    switch (ICInterpretOp(state)) {
+      case ICInterpretOpResult::Fail:
+        state.stub = state.stub->maybeNext();
+        goto ic_launch_stub;
+      case ICInterpretOpResult::Ok:
+        continue;
+      case ICInterpretOpResult::Return:
         goto* state.stubTail;
-
-      case CacheOp::GuardToInt32: {
-        ValOperandId inputId = state.cacheIRReader.valOperandId();
-        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        TRACE_PRINTF("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(),
-                     state.icVals[inputId.id()]);
-        if (!v.isInt32()) {
-          goto ic_fail;
-        }
-        // N.B.: we don't need to unbox because the low 32 bits are
-        // already the int32 itself, and we are careful when using
-        // `Int32Operand`s to only use those bits.
-        break;
-      }
-
-      case CacheOp::GuardToObject: {
-        ObjOperandId inputId = state.cacheIRReader.objOperandId();
-        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        TRACE_PRINTF("GuardToObject: icVal %" PRIx64 "\n",
-                     state.icVals[inputId.id()]);
-        if (!v.isObject()) {
-          goto ic_fail;
-        }
-        break;
-      }
-
-      case CacheOp::GuardIsNullOrUndefined: {
-        ObjOperandId inputId = state.cacheIRReader.objOperandId();
-        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        if (!v.isNullOrUndefined()) {
-          goto ic_fail;
-        }
-        break;
-      }
-
-      case CacheOp::GuardIsNull: {
-        ObjOperandId inputId = state.cacheIRReader.objOperandId();
-        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        if (!v.isNull()) {
-          goto ic_fail;
-        }
-        break;
-      }
-
-      case CacheOp::GuardIsUndefined: {
-        ObjOperandId inputId = state.cacheIRReader.objOperandId();
-        Value v = Value::fromRawBits(state.icVals[inputId.id()]);
-        if (!v.isUndefined()) {
-          goto ic_fail;
-        }
-        break;
-      }
-
-      case CacheOp::GuardNonDoubleType: {
-        ValOperandId inputId = state.cacheIRReader.valOperandId();
-        ValueType type = state.cacheIRReader.valueType();
-        Value val = Value::fromRawBits(state.icVals[inputId.id()]);
-        switch (type) {
-          case ValueType::String:
-            if (!val.isString()) {
-              goto ic_fail;
-            }
-            break;
-          case ValueType::Symbol:
-            if (!val.isSymbol()) {
-              goto ic_fail;
-            }
-            break;
-          case ValueType::BigInt:
-            if (!val.isBigInt()) {
-              goto ic_fail;
-            }
-            break;
-          case ValueType::Int32:
-            if (!val.isInt32()) {
-              goto ic_fail;
-            }
-            break;
-          case ValueType::Boolean:
-            if (!val.isBoolean()) {
-              goto ic_fail;
-            }
-            break;
-          case ValueType::Undefined:
-            if (!val.isUndefined()) {
-              goto ic_fail;
-            }
-            break;
-          case ValueType::Null:
-            if (!val.isNull()) {
-              goto ic_fail;
-            }
-            break;
-          default:
-            MOZ_CRASH("Unexpected type");
-        }
-        break;
-      }
-
-      case CacheOp::GuardShape: {
-        TRACE_PRINTF("GuardShape\n");
-        ObjOperandId objId = state.cacheIRReader.objOperandId();
-        uint32_t offsetOffset = state.cacheIRReader.stubOffset();
-        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                  .toObject()
-                                  .as<NativeObject>();
-        uintptr_t expectedShape =
-            state.cstub->stubInfo()->getStubRawWord(state.cstub, offsetOffset);
-        if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
-          goto ic_fail;
-        }
-        break;
-      }
-
-      case CacheOp::StoreDynamicSlot: {
-        TRACE_PRINTF("StoreDynamicSlot\n");
-        ObjOperandId objId = state.cacheIRReader.objOperandId();
-        uint32_t offsetOffset = state.cacheIRReader.stubOffset();
-        uintptr_t offset =
-            state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
-        ValOperandId valId = state.cacheIRReader.valOperandId();
-        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                  .toObject()
-                                  .as<NativeObject>();
-        HeapSlot* slots = nobj->getSlotsUnchecked();
-        Value val = Value::fromRawBits(state.icVals[valId.id()]);
-        size_t dynSlot = offset / sizeof(Value);
-        size_t slot = dynSlot + nobj->numFixedSlots();
-        slots[dynSlot].set(nobj, HeapSlot::Slot, slot, val);
-        break;
-      }
-
-      case CacheOp::LoadOperandResult: {
-        ValOperandId valId = state.cacheIRReader.valOperandId();
-        Value val = Value::fromRawBits(state.icVals[valId.id()]);
-        state.res.set(val);
-        break;
-      }
-
-      case CacheOp::LoadObjectResult: {
-        ObjOperandId objId = state.cacheIRReader.objOperandId();
-        Value val = Value::fromRawBits(state.icVals[objId.id()]);
-        state.res.set(val);
-        break;
-      }
-
-      case CacheOp::LoadStringResult: {
-        StringOperandId stringId = state.cacheIRReader.stringOperandId();
-        Value val = Value::fromRawBits(state.icVals[stringId.id()]);
-        state.res.set(val);
-        break;
-      }
-
-      case CacheOp::LoadSymbolResult: {
-        SymbolOperandId symbolId = state.cacheIRReader.symbolOperandId();
-        Value val = Value::fromRawBits(state.icVals[symbolId.id()]);
-        state.res.set(val);
-        break;
-      }
-
-      case CacheOp::LoadInt32Result: {
-        Int32OperandId intId = state.cacheIRReader.int32OperandId();
-        int32_t value = int32_t(state.icVals[intId.id()]);
-        state.res.setInt32(value);
-        break;
-      }
-
-      case CacheOp::LoadBigIntResult: {
-        BigIntOperandId bigintId = state.cacheIRReader.bigIntOperandId();
-        Value val = Value::fromRawBits(state.icVals[bigintId.id()]);
-        state.res.set(val);
-        break;
-      }
-
-      case CacheOp::LoadDoubleResult: {
-        NumberOperandId numId = state.cacheIRReader.numberOperandId();
-        Value val = Value::fromRawBits(state.icVals[numId.id()]);
-        if (val.isInt32()) {
-          val = DoubleValue(val.toInt32());
-        }
-        state.res.set(val);
-        break;
-      }
-
-      case CacheOp::LoadFixedSlotResult: {
-        TRACE_PRINTF("LoadFixedSlotResult\n");
-        ObjOperandId objId = state.cacheIRReader.objOperandId();
-        uint32_t offsetOffset = state.cacheIRReader.stubOffset();
-        uintptr_t offset =
-            state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
-        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                  .toObject()
-                                  .as<NativeObject>();
-        Value* slot = reinterpret_cast<Value*>(
-            reinterpret_cast<uintptr_t>(nobj) + offset);
-        state.res.set(*slot);
-        break;
-      }
-
-      case CacheOp::LoadDynamicSlotResult: {
-        TRACE_PRINTF("LoadDynamicSlotResult\n");
-        ObjOperandId objId = state.cacheIRReader.objOperandId();
-        uint32_t offsetOffset = state.cacheIRReader.stubOffset();
-        uintptr_t offset =
-            state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
-        NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                  .toObject()
-                                  .as<NativeObject>();
-        HeapSlot* slots = nobj->getSlotsUnchecked();
-        state.res.set(slots[offset / sizeof(Value)].get());
-        break;
-      }
-
-#define INT32_OP(name, op, extra_check)                          \
-  case CacheOp::Int32##name##Result: {                           \
-    TRACE_PRINTF("Int32" #name "Result\n");                      \
-    Int32OperandId lhsId = state.cacheIRReader.int32OperandId(); \
-    Int32OperandId rhsId = state.cacheIRReader.int32OperandId(); \
-    int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));    \
-    int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));    \
-    extra_check;                                                 \
-    int64_t result = lhs op rhs;                                 \
-    if (result < INT32_MIN || result > INT32_MAX) {              \
-      goto ic_fail;                                              \
-    }                                                            \
-    state.res.setInt32(int32_t(result));                         \
-    break;                                                       \
-  }
-
-        INT32_OP(Add, +, {});
-        INT32_OP(Sub, -, {});
-        INT32_OP(Mul, *, {});
-        INT32_OP(Div, /, {
-          if (rhs == 0) {
-            goto ic_fail;
-          }
-        });
-        INT32_OP(Mod, %, {
-          if (rhs == 0) {
-            goto ic_fail;
-          }
-        });
-        INT32_OP(Pow, <<, {
-          if (rhs >= 32 || rhs < 0) {
-            goto ic_fail;
-          }
-        });
-
-      case CacheOp::Int32IncResult: {
-        Int32OperandId intId = state.cacheIRReader.int32OperandId();
-        int64_t value = int64_t(int32_t(state.icVals[intId.id()]));
-        value++;
-        if (value > INT32_MAX) {
-          goto ic_fail;
-        }
-        state.res.setInt32(int32_t(value));
-        break;
-      }
-
-      case CacheOp::CompareInt32Result: {
-        TRACE_PRINTF("CompareInt32Result\n");
-        JSOp op = state.cacheIRReader.jsop();
-        Int32OperandId lhsId = state.cacheIRReader.int32OperandId();
-        Int32OperandId rhsId = state.cacheIRReader.int32OperandId();
-        int64_t lhs = int64_t(int32_t(state.icVals[lhsId.id()]));
-        int64_t rhs = int64_t(int32_t(state.icVals[rhsId.id()]));
-        TRACE_PRINTF("lhs (%d) = %" PRIi64 " rhs (%d) = %" PRIi64 "\n",
-                     lhsId.id(), lhs, rhsId.id(), rhs);
-        bool result;
-        switch (op) {
-          case JSOp::Eq:
-          case JSOp::StrictEq:
-            result = lhs == rhs;
-            break;
-          case JSOp::Ne:
-          case JSOp::StrictNe:
-            result = lhs != rhs;
-            break;
-          case JSOp::Lt:
-            result = lhs < rhs;
-            break;
-          case JSOp::Le:
-            result = lhs <= rhs;
-            break;
-          case JSOp::Gt:
-            result = lhs > rhs;
-            break;
-          case JSOp::Ge:
-            result = lhs >= rhs;
-            break;
-          default:
-            MOZ_CRASH("Unexpected opcode");
-        }
-        state.res.setBoolean(result);
-        break;
-      }
-
-      default:
-        TRACE_PRINTF("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
-        goto ic_fail;
     }
   }
-
-ic_fail:
-  state.stub = state.stub->maybeNext();
-  goto ic_launch_stub;
 
 #define IC_KIND(kind, setup_body, fallback_body, tail_body)  \
   ic_##kind : do {                                           \
