@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-//#define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -695,6 +695,56 @@ DEFINE_IC(GetName, {
   }
 });
 
+DEFINE_IC(Call, {
+  uint32_t totalArgs =
+      state.argc + state.extraArgs;  // this, callee, (cosntructing?), func args
+  Value* args = reinterpret_cast<Value*>(&stack[0]);
+  // Reverse values on the stack.
+  for (uint32_t i = 0; i < totalArgs / 2; i++) {
+    std::swap(args[i], args[totalArgs - 1 - i]);
+  }
+  {
+    PUSH_EXIT_FRAME();
+    if (state.spreadCall) {
+      if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
+        goto error;
+      }
+    } else {
+      if (!DoCallFallback(cx, frame, fallback, state.argc, args, &state.res)) {
+        goto error;
+      }
+    }
+  }
+  stack.popn(totalArgs);
+  PUSH(StackVal(state.res));
+});
+
+DEFINE_IC(UnaryArith, {
+  IC_LOAD_VAL(value0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(BinaryArith, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
+                             &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(ToBool, {
+  IC_LOAD_VAL(value0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
+    goto error;
+  }
+});
+
 static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
   State state(cx_);
@@ -733,7 +783,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
 #define IC_SET_ARG_FROM_STACK(index, stack_index) \
-  state.icVals[(index)] = stack[(stack_index)];
+  state.icVals[(index)] = stack[(stack_index)].asUInt64();
 #define IC_POP_ARG(index) state.icVals[(index)] = stack.pop().asUInt64();
 #define IC_SET_VAL_ARG(index, expr) state.icVals[(index)] = (expr).asRawBits();
 #define IC_SET_OBJ_ARG(index, expr) \
@@ -841,30 +891,61 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_Pos == JSOpLength_Inc);
         static_assert(JSOpLength_Pos == JSOpLength_Dec);
         static_assert(JSOpLength_Pos == JSOpLength_ToNumeric);
-        ADVANCE(JSOpLength_Pos);
-        state.value0 = stack.pop().asValue();
-        goto ic_UnaryArith;
+        IC_POP_ARG(0);
+        INVOKE_IC(UnaryArith);
+        IC_PUSH_RESULT();
+        END_OP(Pos);
       }
       case JSOp::Not: {
-        ADVANCE(JSOpLength_Not);
-        state.value0 = stack.pop().asValue();
-        goto ic_ToBool;
+        IC_POP_ARG(0);
+        INVOKE_IC(ToBool);
+        PUSH(StackVal(
+            BooleanValue(!Value::fromRawBits(state.icResult).toBoolean())));
+        END_OP(Not);
       }
-      case JSOp::And:
-      case JSOp::Or: {
-        static_assert(JSOpLength_And == JSOpLength_Or);
-        state.jumpOffset = GET_JUMP_OFFSET(pc.pc) - JSOpLength_And;
+      case JSOp::And: {
+        IC_SET_ARG_FROM_STACK(0, 0);
+        INVOKE_IC(ToBool);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        bool result = Value::fromRawBits(state.icResult).toBoolean();
         ADVANCE(JSOpLength_And);
-        state.value0 = stack[0].asValue();
-        goto ic_ToBool;
+        if (!result) {
+          ADVANCE(jumpOffset);
+        }
+        break;
       }
-      case JSOp::JumpIfTrue:
-      case JSOp::JumpIfFalse: {
-        static_assert(JSOpLength_JumpIfTrue == JSOpLength_JumpIfFalse);
-        state.jumpOffset = GET_JUMP_OFFSET(pc.pc) - JSOpLength_JumpIfTrue;
+      case JSOp::Or: {
+        IC_SET_ARG_FROM_STACK(0, 0);
+        INVOKE_IC(ToBool);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        bool result = Value::fromRawBits(state.icResult).toBoolean();
+        ADVANCE(JSOpLength_Or);
+        if (result) {
+          ADVANCE(jumpOffset);
+        }
+        break;
+      }
+      case JSOp::JumpIfTrue: {
+        IC_POP_ARG(0);
+        INVOKE_IC(ToBool);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        bool result = Value::fromRawBits(state.icResult).toBoolean();
         ADVANCE(JSOpLength_JumpIfTrue);
-        state.value0 = stack.pop().asValue();
-        goto ic_ToBool;
+        if (result) {
+          ADVANCE(jumpOffset);
+        }
+        break;
+      }
+      case JSOp::JumpIfFalse: {
+        IC_POP_ARG(0);
+        INVOKE_IC(ToBool);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        bool result = Value::fromRawBits(state.icResult).toBoolean();
+        ADVANCE(JSOpLength_JumpIfFalse);
+        if (!result) {
+          ADVANCE(jumpOffset);
+        }
+        break;
       }
 
       case JSOp::BitOr:
@@ -890,10 +971,11 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_BitOr == JSOpLength_Div);
         static_assert(JSOpLength_BitOr == JSOpLength_Mod);
         static_assert(JSOpLength_BitOr == JSOpLength_Pow);
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_Div);
-        goto ic_BinaryArith;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(BinaryArith);
+        IC_PUSH_RESULT();
+        END_OP(Div);
       }
 
       case JSOp::Eq:
@@ -1486,8 +1568,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = GET_ARGC(pc.pc);
         state.extraArgs = 2;
         state.spreadCall = false;
-        ADVANCE(JSOpLength_Call);
-        goto ic_Call;
+        INVOKE_IC(Call);
+        END_OP(Call);
       }
 
       case JSOp::SuperCall:
@@ -1498,8 +1580,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = GET_ARGC(pc.pc);
         state.extraArgs = 3;
         state.spreadCall = false;
-        ADVANCE(JSOpLength_SuperCall);
-        goto ic_Call;
+        INVOKE_IC(Call);
+        END_OP(SuperCall);
       }
 
       case JSOp::SpreadCall:
@@ -1510,8 +1592,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = 1;
         state.extraArgs = 2;
         state.spreadCall = true;
-        ADVANCE(JSOpLength_SpreadCall);
-        goto ic_Call;
+        INVOKE_IC(Call);
+        END_OP(SpreadCall);
       }
 
       case JSOp::SpreadSuperCall:
@@ -1520,8 +1602,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = 1;
         state.extraArgs = 3;
         state.spreadCall = true;
-        ADVANCE(JSOpLength_SpreadSuperCall);
-        goto ic_Call;
+        INVOKE_IC(Call);
+        END_OP(SpreadSuperCall);
       }
 
       case JSOp::OptimizeSpreadCall: {
@@ -2369,95 +2451,6 @@ ic_launch_stub:
 #define IC_OBJ(index, state_elem) \
   state.icVals[(index)] = ObjectValue(*state.state_elem.get()).asRawBits();
 #define IC_INT32(index, expr) state.icVals[(index)] = (expr);
-
-  IC_KIND(
-      Call, { IC_INT32(0, state.argc); },
-      {
-        uint32_t totalArgs =
-            state.argc +
-            state.extraArgs;  // this, callee, (cosntructing?), func args
-        Value* args = reinterpret_cast<Value*>(&stack[0]);
-        // Reverse values on the stack.
-        for (uint32_t i = 0; i < totalArgs / 2; i++) {
-          std::swap(args[i], args[totalArgs - 1 - i]);
-        }
-        {
-          PUSH_EXIT_FRAME();
-          if (state.spreadCall) {
-            if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
-              goto error;
-            }
-          } else {
-            if (!DoCallFallback(cx, frame, fallback, state.argc, args,
-                                &state.res)) {
-              goto error;
-            }
-          }
-        }
-        stack.popn(totalArgs);
-        PUSH(StackVal(state.res));
-      },
-      {});
-
-  IC_KIND(
-      UnaryArith, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoUnaryArithFallback(cx, frame, fallback, state.value0,
-                                  &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      BinaryArith,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoBinaryArithFallback(cx, frame, fallback, state.value0,
-                                   state.value1, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      ToBool, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
-          goto error;
-        }
-      },
-      {
-        switch (state.op) {
-          case JSOp::Not:
-            PUSH(StackVal(BooleanValue(!state.res.toBoolean())));
-            break;
-          case JSOp::Or:
-          case JSOp::JumpIfTrue: {
-            bool result = state.res.toBoolean();
-            if (result) {
-              ADVANCE(state.jumpOffset);
-            }
-            break;
-          }
-          case JSOp::And:
-          case JSOp::JumpIfFalse: {
-            bool result = state.res.toBoolean();
-            if (!result) {
-              ADVANCE(state.jumpOffset);
-            }
-            break;
-          }
-          default:
-            MOZ_CRASH("unexpected opcode");
-        }
-      });
 
   IC_KIND(
       Compare,
