@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -222,6 +222,7 @@ struct State {
 
   static const int kMaxICVals = 64;
   uint64_t icVals[kMaxICVals];
+  uint64_t icResult;
 
   State(JSContext* cx)
       : value0(cx),
@@ -321,7 +322,9 @@ enum class ICInterpretOpResult {
   Return,
 };
 
-static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
+static ICInterpretOpResult MOZ_ALWAYS_INLINE
+ICInterpretOp(State& state, ICCacheIRStub* cstub) {
+  printf("ICInterpretOp\n");
   CacheOp op = state.cacheIRReader.readOp();
   switch (op) {
     case CacheOp::ReturnFromIC:
@@ -434,7 +437,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
                                 .toObject()
                                 .as<NativeObject>();
       uintptr_t expectedShape =
-          state.cstub->stubInfo()->getStubRawWord(state.cstub, offsetOffset);
+          cstub->stubInfo()->getStubRawWord(cstub, offsetOffset);
       if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
         return ICInterpretOpResult::Fail;
       }
@@ -446,7 +449,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       uint32_t offsetOffset = state.cacheIRReader.stubOffset();
       uintptr_t offset =
-          state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+          cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
       ValOperandId valId = state.cacheIRReader.valOperandId();
       NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
                                 .toObject()
@@ -461,43 +464,37 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
 
     case CacheOp::LoadOperandResult: {
       ValOperandId valId = state.cacheIRReader.valOperandId();
-      Value val = Value::fromRawBits(state.icVals[valId.id()]);
-      state.res.set(val);
+      state.icResult = state.icVals[valId.id()];
       break;
     }
 
     case CacheOp::LoadObjectResult: {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
-      Value val = Value::fromRawBits(state.icVals[objId.id()]);
-      state.res.set(val);
+      state.icResult = state.icVals[objId.id()];
       break;
     }
 
     case CacheOp::LoadStringResult: {
       StringOperandId stringId = state.cacheIRReader.stringOperandId();
-      Value val = Value::fromRawBits(state.icVals[stringId.id()]);
-      state.res.set(val);
+      state.icResult = state.icVals[stringId.id()];
       break;
     }
 
     case CacheOp::LoadSymbolResult: {
       SymbolOperandId symbolId = state.cacheIRReader.symbolOperandId();
-      Value val = Value::fromRawBits(state.icVals[symbolId.id()]);
-      state.res.set(val);
+      state.icResult = state.icVals[symbolId.id()];
       break;
     }
 
     case CacheOp::LoadInt32Result: {
       Int32OperandId intId = state.cacheIRReader.int32OperandId();
-      int32_t value = int32_t(state.icVals[intId.id()]);
-      state.res.setInt32(value);
+      state.icResult = Int32Value(state.icVals[intId.id()]).asRawBits();
       break;
     }
 
     case CacheOp::LoadBigIntResult: {
       BigIntOperandId bigintId = state.cacheIRReader.bigIntOperandId();
-      Value val = Value::fromRawBits(state.icVals[bigintId.id()]);
-      state.res.set(val);
+      state.icResult = state.icVals[bigintId.id()];
       break;
     }
 
@@ -507,7 +504,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
       if (val.isInt32()) {
         val = DoubleValue(val.toInt32());
       }
-      state.res.set(val);
+      state.icResult = val.asRawBits();
       break;
     }
 
@@ -516,13 +513,13 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       uint32_t offsetOffset = state.cacheIRReader.stubOffset();
       uintptr_t offset =
-          state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+          cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
       NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
                                 .toObject()
                                 .as<NativeObject>();
       Value* slot =
           reinterpret_cast<Value*>(reinterpret_cast<uintptr_t>(nobj) + offset);
-      state.res.set(*slot);
+      state.icResult = slot->asRawBits();
       break;
     }
 
@@ -531,12 +528,12 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       uint32_t offsetOffset = state.cacheIRReader.stubOffset();
       uintptr_t offset =
-          state.cstub->stubInfo()->getStubRawInt32(state.cstub, offsetOffset);
+          cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
       NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
                                 .toObject()
                                 .as<NativeObject>();
       HeapSlot* slots = nobj->getSlotsUnchecked();
-      state.res.set(slots[offset / sizeof(Value)].get());
+      state.icResult = slots[offset / sizeof(Value)].get().asRawBits();
       break;
     }
 
@@ -552,7 +549,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
     if (result < INT32_MIN || result > INT32_MAX) {              \
       return ICInterpretOpResult::Fail;                          \
     }                                                            \
-    state.res.setInt32(int32_t(result));                         \
+    state.icResult = Int32Value(int32_t(result)).asRawBits();    \
     break;                                                       \
   }
 
@@ -582,7 +579,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
       if (value > INT32_MAX) {
         return ICInterpretOpResult::Fail;
       }
-      state.res.setInt32(int32_t(value));
+      state.icResult = Int32Value(int32_t(value)).asRawBits();
       break;
     }
 
@@ -620,7 +617,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
         default:
           MOZ_CRASH("Unexpected opcode");
       }
-      state.res.setBoolean(result);
+      state.icResult = BooleanValue(result).asRawBits();
       break;
     }
 
@@ -632,8 +629,59 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(State& state) {
   return ICInterpretOpResult::Ok;
 }
 
-static bool ICInterpret(JSContext* cx_, Stack& stack, BaselineFrame* frame,
-                        VMFrameManager& frameMgr, State& state) {}
+#define INVOKE_IC(kind)                           \
+  if (!IC##kind(frame, frameMgr, stack, state)) { \
+    goto error;                                   \
+  }
+
+#define DEFINE_IC(kind, fallback_body)                                 \
+  static bool IC##kind(BaselineFrame* frame, VMFrameManager& frameMgr, \
+                       Stack& stack, State& state) {                   \
+    ICStub* stub = frame->interpreterICEntry()->firstStub();           \
+    while (true) {                                                     \
+    next_stub:                                                         \
+      if (stub->isFallback()) {                                        \
+        ICFallbackStub* fallback = stub->toFallbackStub();             \
+        fallback_body;                                                 \
+        state.icResult = state.res.asRawBits();                        \
+        return true;                                                   \
+      error:                                                           \
+        return false;                                                  \
+      } else {                                                         \
+        ICCacheIRStub* cstub = stub->toCacheIRStub();                  \
+        cstub->incrementEnteredCount();                                \
+        new (&state.cacheIRReader) CacheIRReader(cstub->stubInfo());   \
+        while (true) {                                                 \
+          switch (ICInterpretOp(state, cstub)) {                       \
+            case ICInterpretOpResult::Fail:                            \
+              state.stub = state.stub->maybeNext();                    \
+              goto next_stub;                                          \
+            case ICInterpretOpResult::Ok:                              \
+              continue;                                                \
+            case ICInterpretOpResult::Return:                          \
+              return true;                                             \
+          }                                                            \
+        }                                                              \
+      }                                                                \
+    }                                                                  \
+  }
+
+#define IC_LOAD_VAL(state_elem, index) \
+  state.state_elem = Value::fromRawBits(state.icVals[(index)]);
+
+#define PUSH_EXIT_FRAME()      \
+  VMFrame cx(frameMgr, stack); \
+  if (!cx.success()) {         \
+    return false;              \
+  }
+
+DEFINE_IC(Typeof, {
+  IC_LOAD_VAL(value0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
+    goto error;
+  }
+});
 
 static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
@@ -672,12 +720,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 #define NEXT_IC() frame->interpreterICEntry()++;
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
-
-#define PUSH_EXIT_FRAME()      \
-  VMFrame cx(frameMgr, stack); \
-  if (!cx.success()) {         \
-    return false;              \
-  }
 
     state.op = JSOp(*pc.pc);
 
@@ -763,9 +805,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::Typeof:
       case JSOp::TypeofExpr: {
         static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
-        ADVANCE(JSOpLength_Typeof);
-        state.value0 = stack.pop().asValue();
-        goto ic_Typeof;
+        state.icVals[0] = stack.pop().asUInt64();
+        INVOKE_IC(Typeof);
+        PUSH(StackVal(state.icResult));
+        END_OP(Typeof);
       }
 
       case JSOp::Pos:
@@ -2257,14 +2300,19 @@ ic_launch_stub:
     new (&state.cacheIRReader) CacheIRReader(state.cstub->stubInfo());
   } while (0);
 
+  state.icResult = 0;
   while (true) {
-    switch (ICInterpretOp(state)) {
+    switch (ICInterpretOp(state, state.cstub)) {
       case ICInterpretOpResult::Fail:
+        printf("returned fail\n");
         state.stub = state.stub->maybeNext();
         goto ic_launch_stub;
       case ICInterpretOpResult::Ok:
+        printf("returned ok\n");
         continue;
       case ICInterpretOpResult::Return:
+        printf("returned\n");
+        state.res.set(Value::fromRawBits(state.icResult));
         goto* state.stubTail;
     }
   }
@@ -2281,12 +2329,14 @@ ic_launch_stub:
   while (0)                                                  \
     ;                                                        \
   ic_##kind##_fallback : do {                                \
+    printf("fallback: " #kind "\n");                         \
     ICFallbackStub* fallback = state.stub->toFallbackStub(); \
     fallback_body;                                           \
   }                                                          \
   while (0)                                                  \
     ;                                                        \
   ic_##kind##_tail : do {                                    \
+    printf("tail: " #kind "\n");                             \
     tail_body;                                               \
     NEXT_IC();                                               \
     goto dispatch;                                           \
@@ -2342,16 +2392,6 @@ ic_launch_stub:
         PUSH(StackVal(state.res));
       },
       {});
-
-  IC_KIND(
-      Typeof, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       UnaryArith, { IC_VAL(0, value0); },
