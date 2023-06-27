@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+//#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -639,6 +639,8 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 #define DEFINE_IC(kind, fallback_body)                                 \
   static bool IC##kind(BaselineFrame* frame, VMFrameManager& frameMgr, \
                        Stack& stack, State& state) {                   \
+    state.stub = nullptr;                                              \
+    state.cstub = nullptr;                                             \
     ICStub* stub = frame->interpreterICEntry()->firstStub();           \
     while (true) {                                                     \
     next_stub:                                                         \
@@ -908,9 +910,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         INVOKE_IC(ToBool);
         uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
-        ADVANCE(JSOpLength_And);
         if (!result) {
           ADVANCE(jumpOffset);
+        } else {
+          ADVANCE(JSOpLength_And);
         }
         break;
       }
@@ -919,9 +922,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         INVOKE_IC(ToBool);
         uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
-        ADVANCE(JSOpLength_Or);
         if (result) {
           ADVANCE(jumpOffset);
+        } else {
+          ADVANCE(JSOpLength_Or);
         }
         break;
       }
@@ -930,9 +934,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         INVOKE_IC(ToBool);
         uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
-        ADVANCE(JSOpLength_JumpIfTrue);
         if (result) {
           ADVANCE(jumpOffset);
+        } else {
+          ADVANCE(JSOpLength_JumpIfTrue);
         }
         break;
       }
@@ -941,9 +946,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         INVOKE_IC(ToBool);
         uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
-        ADVANCE(JSOpLength_JumpIfFalse);
         if (!result) {
           ADVANCE(jumpOffset);
+        } else {
+          ADVANCE(JSOpLength_JumpIfFalse);
         }
         break;
       }
