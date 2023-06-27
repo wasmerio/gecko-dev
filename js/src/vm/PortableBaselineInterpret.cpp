@@ -670,6 +670,8 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 
 #define IC_LOAD_VAL(state_elem, index) \
   state.state_elem = Value::fromRawBits(state.icVals[(index)]);
+#define IC_LOAD_OBJ(state_elem, index) \
+  state.state_elem = &Value::fromRawBits(state.icVals[(index)]).toObject();
 
 #define PUSH_EXIT_FRAME()      \
   VMFrame cx(frameMgr, stack); \
@@ -681,6 +683,14 @@ DEFINE_IC(Typeof, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(GetName, {
+  IC_LOAD_OBJ(obj0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
     goto error;
   }
 });
@@ -721,6 +731,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
   goto dispatch;
 
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
+
+#define IC_SET_ARG_FROM_STACK(index, stack_index) \
+  state.icVals[(index)] = stack[(stack_index)];
+#define IC_POP_ARG(index) state.icVals[(index)] = stack.pop().asUInt64();
+#define IC_SET_VAL_ARG(index, expr) state.icVals[(index)] = (expr).asRawBits();
+#define IC_SET_OBJ_ARG(index, expr) \
+  state.icVals[(index)] = ObjectValue(*(expr)).asRawBits();
+#define IC_PUSH_RESULT() PUSH(StackVal(state.icResult));
 
     state.op = JSOp(*pc.pc);
 
@@ -806,9 +824,9 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::Typeof:
       case JSOp::TypeofExpr: {
         static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
-        state.icVals[0] = stack.pop().asUInt64();
+        IC_POP_ARG(0);
         INVOKE_IC(Typeof);
-        PUSH(StackVal(state.icResult));
+        IC_PUSH_RESULT();
         END_OP(Typeof);
       }
 
@@ -1924,15 +1942,17 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         goto ic_BindName;
       }
       case JSOp::GetGName: {
-        state.obj0.set(
-            &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-        ADVANCE(JSOpLength_GetGName);
-        goto ic_GetName;
+        IC_SET_OBJ_ARG(
+            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        INVOKE_IC(GetName);
+        IC_PUSH_RESULT();
+        END_OP(GetGName);
       }
       case JSOp::GetName: {
-        state.obj0.set(frame->environmentChain());
-        ADVANCE(JSOpLength_GetName);
-        goto ic_GetName;
+        IC_SET_OBJ_ARG(0, frame->environmentChain());
+        INVOKE_IC(GetName);
+        IC_PUSH_RESULT();
+        END_OP(GetName);
       }
 
       case JSOp::GetArg: {
@@ -2349,16 +2369,6 @@ ic_launch_stub:
 #define IC_OBJ(index, state_elem) \
   state.icVals[(index)] = ObjectValue(*state.state_elem.get()).asRawBits();
 #define IC_INT32(index, expr) state.icVals[(index)] = (expr);
-
-  IC_KIND(
-      GetName, { IC_OBJ(0, obj0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
 
   IC_KIND(
       Call, { IC_INT32(0, state.argc); },
