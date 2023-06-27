@@ -105,12 +105,9 @@ class CompactBufferReader {
   }
   // Reads a value written by writeUnsigned15Bit.
   uint32_t readUnsigned15Bit() {
-    uint8_t byte = readByte();
-    uint32_t val = byte >> 1;
-    if (byte & 1) {
-      val |= uint32_t(readByte()) << 7;
-    }
-    return val;
+    uint8_t lo = readByte();
+    uint8_t hi = readByte();
+    return (uint32_t(hi) << 8) | lo;
   }
   void* readRawPointer() {
     uintptr_t ptrWord = 0;
@@ -161,13 +158,8 @@ class CompactBufferWriter {
   // small 15-bit values that fit in one or two variable-length-encoded bytes.
   // Must be read using readUnsigned15Bit.
   void writeUnsigned15Bit(uint32_t value) {
-    uint8_t byte1 = ((value & 0x7F) << 1) | (value > 0x7F);
-    writeByte(byte1);
-    value >>= 7;
-    if (value) {
-      MOZ_ASSERT(value <= 0xFF);
-      writeByte(value);
-    }
+    writeByte(value & 0xff);
+    writeByte((value >> 8) & 0xff);
   }
   void writeUnsigned(uint32_t value) {
     do {
