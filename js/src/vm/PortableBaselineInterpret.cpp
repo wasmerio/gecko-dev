@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -211,13 +211,7 @@ struct State {
   int argc;
   int extraArgs;
   bool spreadCall;
-  int32_t jumpOffset;
 
-  /* IC-related state */
-  ICStub* stub;
-  ICCacheIRStub* cstub;
-  void* fallbackIC;
-  void* stubTail;
   CacheIRReader cacheIRReader;
 
   static const int kMaxICVals = 64;
@@ -639,8 +633,6 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 #define DEFINE_IC(kind, fallback_body)                                 \
   static bool IC##kind(BaselineFrame* frame, VMFrameManager& frameMgr, \
                        Stack& stack, State& state) {                   \
-    state.stub = nullptr;                                              \
-    state.cstub = nullptr;                                             \
     ICStub* stub = frame->interpreterICEntry()->firstStub();           \
     while (true) {                                                     \
     next_stub:                                                         \
@@ -778,22 +770,153 @@ DEFINE_IC(In, {
 });
 
 DEFINE_IC(BindName, {
-    IC_LOAD_OBJ(obj0, 0);
-          PUSH_EXIT_FRAME();
-        if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
-          goto error;
-        }
-  });
+  IC_LOAD_OBJ(obj0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
+    goto error;
+  }
+});
 
 DEFINE_IC(SetProp, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-        PUSH_EXIT_FRAME();
-        if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
-                               state.value1)) {
-          goto error;
-        }
-  });
+  PUSH_EXIT_FRAME();
+  if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
+                         state.value1)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(NewObject, {
+  PUSH_EXIT_FRAME();
+  if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(GetProp, {
+  IC_LOAD_VAL(value0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(GetPropSuper, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0, &state.value1,
+                              &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(GetElem, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
+                         &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(GetElemSuper, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  IC_LOAD_VAL(value2, 2);
+  PUSH_EXIT_FRAME();
+  if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0, state.value1,
+                              state.value2, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(NewArray, {
+  PUSH_EXIT_FRAME();
+  if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(GetIntrinsic, {
+  PUSH_EXIT_FRAME();
+  if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(SetElem, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  IC_LOAD_VAL(value2, 2);
+  PUSH_EXIT_FRAME();
+  if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
+                         state.value1, state.value2)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(HasOwn, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
+                        &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(CheckPrivateField, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
+                                   state.value1, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(GetIterator, {
+  IC_LOAD_VAL(value0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(ToPropertyKey, {
+  IC_LOAD_VAL(value0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(OptimizeSpreadCall, {
+  IC_LOAD_VAL(value0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
+                                    &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(Rest, {
+  PUSH_EXIT_FRAME();
+  if (!DoRestFallback(cx, frame, fallback, &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(CloseIter, {
+  IC_LOAD_OBJ(obj0, 0);
+  PUSH_EXIT_FRAME();
+  if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
+    goto error;
+  }
+});
 
 static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
@@ -1070,9 +1193,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::ToPropertyKey: {
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_ToPropertyKey);
-        goto ic_ToPropertyKey;
+        IC_POP_ARG(0);
+        INVOKE_IC(ToPropertyKey);
+        IC_PUSH_RESULT();
+        END_OP(ToPropertyKey);
       }
 
       case JSOp::ToString: {
@@ -1149,12 +1273,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::NewInit: {
-        ADVANCE(JSOpLength_NewInit);
-        goto ic_NewObject;
+        INVOKE_IC(NewObject);
+        IC_PUSH_RESULT();
+        END_OP(NewInit);
       }
       case JSOp::NewObject: {
-        ADVANCE(JSOpLength_NewObject);
-        goto ic_NewObject;
+        INVOKE_IC(NewObject);
+        IC_PUSH_RESULT();
+        END_OP(NewObject);
       }
       case JSOp::Object: {
         PUSH(StackVal(ObjectValue(*script->getObject(pc.pc))));
@@ -1182,14 +1308,15 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_InitElem == JSOpLength_InitElemInc);
         static_assert(JSOpLength_InitElem == JSOpLength_SetElem);
         static_assert(JSOpLength_InitElem == JSOpLength_StrictSetElem);
-        state.value2 = stack.pop().asValue();
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack[0].asValue();
+        IC_POP_ARG(2);
+        IC_POP_ARG(1);
+        IC_SET_ARG_FROM_STACK(0, 0);
+        INVOKE_IC(SetElem);
         if (state.op == JSOp::InitElemInc) {
-          PUSH(StackVal(Int32Value(state.value1.toInt32() + 1)));
+          PUSH(StackVal(
+              Int32Value(Value::fromRawBits(state.icVals[1]).toInt32() + 1)));
         }
-        ADVANCE(JSOpLength_InitElem);
-        goto ic_SetElem;
+        END_OP(InitElem);
       }
 
       case JSOp::InitPropGetter:
@@ -1239,30 +1366,34 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::GetProp:
       case JSOp::GetBoundName: {
         static_assert(JSOpLength_GetProp == JSOpLength_GetBoundName);
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_GetProp);
-        goto ic_GetProp;
+        IC_POP_ARG(0);
+        INVOKE_IC(GetProp);
+        IC_PUSH_RESULT();
+        END_OP(GetProp);
       }
       case JSOp::GetPropSuper: {
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_GetPropSuper);
-        goto ic_GetPropSuper;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(GetPropSuper);
+        IC_PUSH_RESULT();
+        END_OP(GetPropSuper);
       }
 
       case JSOp::GetElem: {
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_GetElem);
-        goto ic_GetElem;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(GetElem);
+        IC_PUSH_RESULT();
+        END_OP(GetElem);
       }
 
       case JSOp::GetElemSuper: {
-        state.value2 = stack.pop().asValue();
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_GetElemSuper);
-        goto ic_GetElemSuper;
+        IC_POP_ARG(2);
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(GetElemSuper);
+        IC_PUSH_RESULT();
+        END_OP(GetElemSuper);
       }
 
       case JSOp::DelProp: {
@@ -1319,17 +1450,19 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::HasOwn: {
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_HasOwn);
-        goto ic_HasOwn;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(HasOwn);
+        IC_PUSH_RESULT();
+        END_OP(HasOwn);
       }
 
       case JSOp::CheckPrivateField: {
-        state.value1 = stack[1].asValue();
-        state.value0 = stack[0].asValue();
-        ADVANCE(JSOpLength_CheckPrivateField);
-        goto ic_CheckPrivateField;
+        IC_SET_ARG_FROM_STACK(1, 1);
+        IC_SET_ARG_FROM_STACK(0, 0);
+        INVOKE_IC(CheckPrivateField);
+        IC_PUSH_RESULT();
+        END_OP(CheckPrivateField);
       }
 
       case JSOp::NewPrivateName: {
@@ -1406,9 +1539,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Iter: {
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_Iter);
-        goto ic_GetIterator;
+        IC_POP_ARG(0);
+        INVOKE_IC(GetIterator);
+        IC_PUSH_RESULT();
+        END_OP(Iter);
       }
 
       case JSOp::MoreIter: {
@@ -1433,9 +1567,9 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::CloseIter: {
-        state.obj0 = &stack.pop().asValue().toObject();
-        ADVANCE(JSOpLength_CloseIter);
-        goto ic_CloseIter;
+        IC_SET_OBJ_ARG(0, &stack.pop().asValue().toObject());
+        INVOKE_IC(CloseIter);
+        END_OP(CloseIter);
       }
 
       case JSOp::CheckIsObj: {
@@ -1490,8 +1624,9 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::NewArray: {
-        ADVANCE(JSOpLength_NewArray);
-        goto ic_NewArray;
+        INVOKE_IC(NewArray);
+        IC_PUSH_RESULT();
+        END_OP(NewArray);
       }
 
       case JSOp::InitElemArray: {
@@ -1663,9 +1798,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::OptimizeSpreadCall: {
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_OptimizeSpreadCall);
-        goto ic_OptimizeSpreadCall;
+        IC_POP_ARG(0);
+        INVOKE_IC(OptimizeSpreadCall);
+        IC_PUSH_RESULT();
+        END_OP(OptimizeSpreadCall);
       }
 
       case JSOp::ImplicitThis: {
@@ -2068,15 +2204,17 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::BindGName: {
-        IC_SET_OBJ_ARG(0,
-            &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        IC_SET_OBJ_ARG(
+            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         state.name0.set(script->getName(pc.pc));
         INVOKE_IC(BindName);
+        IC_PUSH_RESULT();
         END_OP(BindGName);
       }
       case JSOp::BindName: {
         IC_SET_OBJ_ARG(0, frame->environmentChain());
         INVOKE_IC(BindName);
+        IC_PUSH_RESULT();
         END_OP(BindName);
       }
       case JSOp::GetGName: {
@@ -2152,8 +2290,9 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GetIntrinsic: {
-        ADVANCE(JSOpLength_GetIntrinsic);
-        goto ic_GetIntrinsic;
+        INVOKE_IC(GetIntrinsic);
+        IC_PUSH_RESULT();
+        END_OP(GetIntrinsic);
       }
 
       case JSOp::Callee: {
@@ -2195,17 +2334,17 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::InitLockedProp: {
         static_assert(JSOpLength_InitProp == JSOpLength_InitHiddenProp);
         static_assert(JSOpLength_InitProp == JSOpLength_InitLockedProp);
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack[0].asValue();
-        ADVANCE(JSOpLength_InitProp);
-        goto ic_SetProp;
+        IC_POP_ARG(1);
+        IC_SET_ARG_FROM_STACK(0, 0);
+        INVOKE_IC(SetProp);
+        END_OP(InitProp);
       }
       case JSOp::InitGLexical: {
-        state.value1 = stack[0].asValue();
-        state.value0.setObject(
-            frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-        ADVANCE(JSOpLength_InitGLexical);
-        goto ic_SetProp;
+        IC_SET_ARG_FROM_STACK(1, 0);
+        IC_SET_OBJ_ARG(
+            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        INVOKE_IC(SetProp);
+        END_OP(InitGLexical);
       }
 
       case JSOp::SetArg: {
@@ -2368,8 +2507,9 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Rest: {
-        ADVANCE(JSOpLength_Rest);
-        goto ic_Rest;
+        INVOKE_IC(Rest);
+        IC_PUSH_RESULT();
+        END_OP(Rest);
       }
 
       case JSOp::FunctionThis: {
@@ -2448,265 +2588,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         MOZ_CRASH("Bad opcode");
     }
   }
-
-ic_launch_stub:
-  do {
-    MOZ_ASSERT(state.stub);
-    if (state.stub->isFallback()) {
-      goto* state.fallbackIC;
-    }
-    state.cstub = state.stub->toCacheIRStub();
-    state.cstub->incrementEnteredCount();
-    new (&state.cacheIRReader) CacheIRReader(state.cstub->stubInfo());
-  } while (0);
-
-  state.icResult = 0;
-  while (true) {
-    switch (ICInterpretOp(state, state.cstub)) {
-      case ICInterpretOpResult::Fail:
-        state.stub = state.stub->maybeNext();
-        goto ic_launch_stub;
-      case ICInterpretOpResult::Ok:
-        continue;
-      case ICInterpretOpResult::Return:
-        state.res.set(Value::fromRawBits(state.icResult));
-        goto* state.stubTail;
-    }
-  }
-
-#define IC_KIND(kind, setup_body, fallback_body, tail_body)  \
-  ic_##kind : do {                                           \
-    TRACE_PRINTF("stub: " #kind "\n");                       \
-    state.stub = frame->interpreterICEntry()->firstStub();   \
-    state.fallbackIC = &&ic_##kind##_fallback;               \
-    state.stubTail = &&ic_##kind##_tail;                     \
-    setup_body;                                              \
-    goto ic_launch_stub;                                     \
-  }                                                          \
-  while (0)                                                  \
-    ;                                                        \
-  ic_##kind##_fallback : do {                                \
-    ICFallbackStub* fallback = state.stub->toFallbackStub(); \
-    fallback_body;                                           \
-  }                                                          \
-  while (0)                                                  \
-    ;                                                        \
-  ic_##kind##_tail : do {                                    \
-    tail_body;                                               \
-    NEXT_IC();                                               \
-    goto dispatch;                                           \
-  }                                                          \
-  while (0)
-
-// Setup for "registers" used by CacheIR ops. See
-// `BaselineCacheIRCompiler::init()`, together with the R0/R1/R2
-// setup in BaselineCodeGen.cpp's `emit_*` methods, for the
-// canonical index->value mappings.
-#define IC_VAL(index, state_elem) \
-  state.icVals[(index)] = state.state_elem.asRawBits();
-  // TODO: store Objects unboxed
-#define IC_OBJ(index, state_elem) \
-  state.icVals[(index)] = ObjectValue(*state.state_elem.get()).asRawBits();
-#define IC_INT32(index, expr) state.icVals[(index)] = (expr);
-
-  IC_KIND(
-      BindName, { IC_OBJ(0, obj0); },
-      {
-  
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      SetProp,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-  
-      },
-      {});
-
-  IC_KIND(
-      NewObject, {},
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      GetProp, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoGetPropFallback(cx, frame, fallback, &state.value0,
-                               &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      GetPropSuper, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0,
-                                    &state.value1, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      GetElem,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
-                               &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      GetElemSuper,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0,
-                                    state.value1, state.value2, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      NewArray, {},
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      GetIntrinsic, {},
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      SetElem,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-        IC_VAL(2, value2);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
-                               state.value1, state.value2)) {
-          goto error;
-        }
-      },
-      {});
-
-  IC_KIND(
-      HasOwn,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
-                              &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      CheckPrivateField,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
-                                         state.value1, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      GetIterator, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoGetIteratorFallback(cx, frame, fallback, state.value0,
-                                   &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      ToPropertyKey, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0,
-                                     &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      OptimizeSpreadCall, { IC_VAL(0, value0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
-                                          &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      Rest, {},
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoRestFallback(cx, frame, fallback, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      CloseIter, { IC_OBJ(0, obj0); },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
-          goto error;
-        }
-      },
-      {});
 
 error:
   TRACE_PRINTF("HandleException\n");
