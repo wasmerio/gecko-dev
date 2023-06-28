@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-//#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -747,6 +747,54 @@ DEFINE_IC(ToBool, {
   }
 });
 
+DEFINE_IC(Compare, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
+                         &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(InstanceOf, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
+                            &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(In, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+  PUSH_EXIT_FRAME();
+  if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
+                    &state.res)) {
+    goto error;
+  }
+});
+
+DEFINE_IC(BindName, {
+    IC_LOAD_OBJ(obj0, 0);
+          PUSH_EXIT_FRAME();
+        if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
+          goto error;
+        }
+  });
+
+DEFINE_IC(SetProp, {
+  IC_LOAD_VAL(value0, 0);
+  IC_LOAD_VAL(value1, 1);
+        PUSH_EXIT_FRAME();
+        if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
+                               state.value1)) {
+          goto error;
+        }
+  });
+
 static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
   State state(cx_);
@@ -999,24 +1047,26 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_Eq == JSOpLength_Gt);
         static_assert(JSOpLength_Eq == JSOpLength_Le);
         static_assert(JSOpLength_Eq == JSOpLength_Ge);
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_Eq);
-        goto ic_Compare;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(Compare);
+        IC_PUSH_RESULT();
+        END_OP(Eq);
       }
 
       case JSOp::Instanceof: {
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_Instanceof);
-        goto ic_InstanceOf;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(InstanceOf);
+        IC_PUSH_RESULT();
+        END_OP(Instanceof);
       }
 
       case JSOp::In: {
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        ADVANCE(JSOpLength_In);
-        goto ic_In;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        INVOKE_IC(In);
+        END_OP(In);
       }
 
       case JSOp::ToPropertyKey: {
@@ -2018,16 +2068,16 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::BindGName: {
-        state.obj0.set(
+        IC_SET_OBJ_ARG(0,
             &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
         state.name0.set(script->getName(pc.pc));
-        ADVANCE(JSOpLength_BindGName);
-        goto ic_BindName;
+        INVOKE_IC(BindName);
+        END_OP(BindGName);
       }
       case JSOp::BindName: {
-        state.obj0.set(frame->environmentChain());
-        ADVANCE(JSOpLength_BindName);
-        goto ic_BindName;
+        IC_SET_OBJ_ARG(0, frame->environmentChain());
+        INVOKE_IC(BindName);
+        END_OP(BindName);
       }
       case JSOp::GetGName: {
         IC_SET_OBJ_ARG(
@@ -2132,11 +2182,12 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_SetProp == JSOpLength_StrictSetName);
         static_assert(JSOpLength_SetProp == JSOpLength_SetGName);
         static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        PUSH(StackVal(state.value1));
-        ADVANCE(JSOpLength_SetProp);
-        goto ic_SetProp;
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        PUSH(StackVal(state.icVals[1]));
+        INVOKE_IC(SetProp);
+        IC_PUSH_RESULT();
+        END_OP(SetProp);
       }
 
       case JSOp::InitProp:
@@ -2459,57 +2510,9 @@ ic_launch_stub:
 #define IC_INT32(index, expr) state.icVals[(index)] = (expr);
 
   IC_KIND(
-      Compare,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
-                               &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      InstanceOf,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoInstanceOfFallback(cx, frame, fallback, state.value0,
-                                  state.value1, &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
-      In,
-      {
-        IC_VAL(0, value0);
-        IC_VAL(1, value1);
-      },
-      {
-        PUSH_EXIT_FRAME();
-        if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
-                          &state.res)) {
-          goto error;
-        }
-      },
-      { PUSH(StackVal(state.res)); });
-
-  IC_KIND(
       BindName, { IC_OBJ(0, obj0); },
       {
-        PUSH_EXIT_FRAME();
-        if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
-          goto error;
-        }
+  
       },
       { PUSH(StackVal(state.res)); });
 
@@ -2520,11 +2523,7 @@ ic_launch_stub:
         IC_VAL(1, value1);
       },
       {
-        PUSH_EXIT_FRAME();
-        if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
-                               state.value1)) {
-          goto error;
-        }
+  
       },
       {});
 
