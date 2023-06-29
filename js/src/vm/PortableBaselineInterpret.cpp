@@ -675,39 +675,40 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }                                \
   } while (0)
 
-#define DEFINE_IC(kind, arity, fallback_body)                          \
-  static bool IC##kind(BaselineFrame* frame, VMFrameManager& frameMgr, \
-                       Stack& stack, State& state) {                   \
-    ICStub* stub = frame->interpreterICEntry()->firstStub();           \
-    uint64_t inputs[(arity)];                                          \
-    SAVE_INPUTS(arity);                                                \
-    while (true) {                                                     \
-    next_stub:                                                         \
-      if (stub->isFallback()) {                                        \
-        ICFallbackStub* fallback = stub->toFallbackStub();             \
-        fallback_body;                                                 \
-        state.icResult = state.res.asRawBits();                        \
-        return true;                                                   \
-      error:                                                           \
-        return false;                                                  \
-      } else {                                                         \
-        ICCacheIRStub* cstub = stub->toCacheIRStub();                  \
-        cstub->incrementEnteredCount();                                \
-        new (&state.cacheIRReader) CacheIRReader(cstub->stubInfo());   \
-        while (true) {                                                 \
-          switch (ICInterpretOp(state, cstub)) {                       \
-            case ICInterpretOpResult::Fail:                            \
-              stub = stub->maybeNext();                                \
-              RESTORE_INPUTS(arity);                                   \
-              goto next_stub;                                          \
-            case ICInterpretOpResult::Ok:                              \
-              continue;                                                \
-            case ICInterpretOpResult::Return:                          \
-              return true;                                             \
-          }                                                            \
-        }                                                              \
-      }                                                                \
-    }                                                                  \
+#define DEFINE_IC(kind, arity, fallback_body)                                \
+  static bool MOZ_ALWAYS_INLINE IC##kind(BaselineFrame* frame,               \
+                                         VMFrameManager& frameMgr,           \
+                                         Stack& stack, State& state) {       \
+    ICStub* stub = frame->interpreterICEntry()->firstStub();                 \
+    uint64_t inputs[(arity)];                                                \
+    SAVE_INPUTS(arity);                                                      \
+    while (true) {                                                           \
+    next_stub:                                                               \
+      if (stub->isFallback()) {                                              \
+        ICFallbackStub* fallback = stub->toFallbackStub();                   \
+        fallback_body;                                                       \
+        state.icResult = state.res.asRawBits();                              \
+        return true;                                                         \
+      error:                                                                 \
+        return false;                                                        \
+      } else {                                                               \
+        ICCacheIRStub* cstub = stub->toCacheIRStub();                        \
+        cstub->incrementEnteredCount();                                      \
+        new (&state.cacheIRReader) CacheIRReader(cstub->stubInfo()->code()); \
+        while (true) {                                                       \
+          switch (ICInterpretOp(state, cstub)) {                             \
+            case ICInterpretOpResult::Fail:                                  \
+              stub = stub->maybeNext();                                      \
+              RESTORE_INPUTS(arity);                                         \
+              goto next_stub;                                                \
+            case ICInterpretOpResult::Ok:                                    \
+              continue;                                                      \
+            case ICInterpretOpResult::Return:                                \
+              return true;                                                   \
+          }                                                                  \
+        }                                                                    \
+      }                                                                      \
+    }                                                                        \
   }
 
 #define IC_LOAD_VAL(state_elem, index) \
