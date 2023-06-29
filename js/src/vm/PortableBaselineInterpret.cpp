@@ -346,6 +346,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
       if (!v.isObject()) {
         return ICInterpretOpResult::Fail;
       }
+      state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(&v.toObject());
       break;
     }
 
@@ -426,9 +427,8 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
       TRACE_PRINTF("GuardShape\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       uint32_t offsetOffset = state.cacheIRReader.stubOffset();
-      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                .toObject()
-                                .as<NativeObject>();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       uintptr_t expectedShape =
           cstub->stubInfo()->getStubRawWord(cstub, offsetOffset);
       if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
@@ -444,9 +444,8 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
       uintptr_t offset =
           cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
       ValOperandId valId = state.cacheIRReader.valOperandId();
-      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                .toObject()
-                                .as<NativeObject>();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       HeapSlot* slots = nobj->getSlotsUnchecked();
       Value val = Value::fromRawBits(state.icVals[valId.id()]);
       size_t dynSlot = offset / sizeof(Value);
@@ -463,19 +462,25 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 
     case CacheOp::LoadObjectResult: {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
-      state.icResult = state.icVals[objId.id()];
+      state.icResult =
+          ObjectValue(*reinterpret_cast<JSObject*>(state.icVals[objId.id()]))
+              .asRawBits();
       break;
     }
 
     case CacheOp::LoadStringResult: {
       StringOperandId stringId = state.cacheIRReader.stringOperandId();
-      state.icResult = state.icVals[stringId.id()];
+      state.icResult =
+          StringValue(reinterpret_cast<JSString*>(state.icVals[stringId.id()]))
+              .asRawBits();
       break;
     }
 
     case CacheOp::LoadSymbolResult: {
       SymbolOperandId symbolId = state.cacheIRReader.symbolOperandId();
-      state.icResult = state.icVals[symbolId.id()];
+      state.icResult = SymbolValue(reinterpret_cast<JS::Symbol*>(
+                                       state.icVals[symbolId.id()]))
+                           .asRawBits();
       break;
     }
 
@@ -487,7 +492,9 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 
     case CacheOp::LoadBigIntResult: {
       BigIntOperandId bigintId = state.cacheIRReader.bigIntOperandId();
-      state.icResult = state.icVals[bigintId.id()];
+      state.icResult = BigIntValue(reinterpret_cast<JS::BigInt*>(
+                                       state.icVals[bigintId.id()]))
+                           .asRawBits();
       break;
     }
 
@@ -507,9 +514,8 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
       uint32_t offsetOffset = state.cacheIRReader.stubOffset();
       uintptr_t offset =
           cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
-      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                .toObject()
-                                .as<NativeObject>();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       Value* slot =
           reinterpret_cast<Value*>(reinterpret_cast<uintptr_t>(nobj) + offset);
       state.icResult = slot->asRawBits();
@@ -522,9 +528,8 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
       uint32_t offsetOffset = state.cacheIRReader.stubOffset();
       uintptr_t offset =
           cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
-      NativeObject* nobj = &Value::fromRawBits(state.icVals[objId.id()])
-                                .toObject()
-                                .as<NativeObject>();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       HeapSlot* slots = nobj->getSlotsUnchecked();
       state.icResult = slots[offset / sizeof(Value)].get().asRawBits();
       break;
@@ -630,10 +635,14 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
   }                                               \
   NEXT_IC();
 
-#define DEFINE_IC(kind, fallback_body)                                 \
+#define DEFINE_IC(kind, arity, fallback_body)                          \
   static bool IC##kind(BaselineFrame* frame, VMFrameManager& frameMgr, \
                        Stack& stack, State& state) {                   \
     ICStub* stub = frame->interpreterICEntry()->firstStub();           \
+    uint64_t inputs[(arity)];                                          \
+    for (int i = 0; i < (arity); i++) {                                \
+      inputs[i] = state.icVals[i];                                     \
+    }                                                                  \
     while (true) {                                                     \
     next_stub:                                                         \
       if (stub->isFallback()) {                                        \
@@ -651,6 +660,9 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
           switch (ICInterpretOp(state, cstub)) {                       \
             case ICInterpretOpResult::Fail:                            \
               stub = stub->maybeNext();                                \
+              for (int i = 0; i < (arity); i++) {                      \
+                state.icVals[i] = inputs[i];                           \
+              }                                                        \
               goto next_stub;                                          \
             case ICInterpretOpResult::Ok:                              \
               continue;                                                \
@@ -665,7 +677,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 #define IC_LOAD_VAL(state_elem, index) \
   state.state_elem = Value::fromRawBits(state.icVals[(index)]);
 #define IC_LOAD_OBJ(state_elem, index) \
-  state.state_elem = &Value::fromRawBits(state.icVals[(index)]).toObject();
+  state.state_elem = reinterpret_cast<JSObject*>(state.icVals[(index)]);
 
 #define PUSH_EXIT_FRAME()      \
   VMFrame cx(frameMgr, stack); \
@@ -673,7 +685,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     return false;              \
   }
 
-DEFINE_IC(Typeof, {
+DEFINE_IC(Typeof, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -681,7 +693,7 @@ DEFINE_IC(Typeof, {
   }
 });
 
-DEFINE_IC(GetName, {
+DEFINE_IC(GetName, 1, {
   IC_LOAD_OBJ(obj0, 0);
   PUSH_EXIT_FRAME();
   if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
@@ -689,7 +701,7 @@ DEFINE_IC(GetName, {
   }
 });
 
-DEFINE_IC(Call, {
+DEFINE_IC(Call, 0, {
   uint32_t totalArgs =
       state.argc + state.extraArgs;  // this, callee, (cosntructing?), func args
   Value* args = reinterpret_cast<Value*>(&stack[0]);
@@ -713,7 +725,7 @@ DEFINE_IC(Call, {
   PUSH(StackVal(state.res));
 });
 
-DEFINE_IC(UnaryArith, {
+DEFINE_IC(UnaryArith, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -721,7 +733,7 @@ DEFINE_IC(UnaryArith, {
   }
 });
 
-DEFINE_IC(BinaryArith, {
+DEFINE_IC(BinaryArith, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -731,7 +743,7 @@ DEFINE_IC(BinaryArith, {
   }
 });
 
-DEFINE_IC(ToBool, {
+DEFINE_IC(ToBool, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -739,7 +751,7 @@ DEFINE_IC(ToBool, {
   }
 });
 
-DEFINE_IC(Compare, {
+DEFINE_IC(Compare, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -749,7 +761,7 @@ DEFINE_IC(Compare, {
   }
 });
 
-DEFINE_IC(InstanceOf, {
+DEFINE_IC(InstanceOf, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -759,7 +771,7 @@ DEFINE_IC(InstanceOf, {
   }
 });
 
-DEFINE_IC(In, {
+DEFINE_IC(In, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -769,7 +781,7 @@ DEFINE_IC(In, {
   }
 });
 
-DEFINE_IC(BindName, {
+DEFINE_IC(BindName, 1, {
   IC_LOAD_OBJ(obj0, 0);
   PUSH_EXIT_FRAME();
   if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
@@ -777,7 +789,7 @@ DEFINE_IC(BindName, {
   }
 });
 
-DEFINE_IC(SetProp, {
+DEFINE_IC(SetProp, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -787,14 +799,14 @@ DEFINE_IC(SetProp, {
   }
 });
 
-DEFINE_IC(NewObject, {
+DEFINE_IC(NewObject, 0, {
   PUSH_EXIT_FRAME();
   if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
 });
 
-DEFINE_IC(GetProp, {
+DEFINE_IC(GetProp, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
@@ -802,7 +814,7 @@ DEFINE_IC(GetProp, {
   }
 });
 
-DEFINE_IC(GetPropSuper, {
+DEFINE_IC(GetPropSuper, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -812,7 +824,7 @@ DEFINE_IC(GetPropSuper, {
   }
 });
 
-DEFINE_IC(GetElem, {
+DEFINE_IC(GetElem, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -822,7 +834,7 @@ DEFINE_IC(GetElem, {
   }
 });
 
-DEFINE_IC(GetElemSuper, {
+DEFINE_IC(GetElemSuper, 3, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   IC_LOAD_VAL(value2, 2);
@@ -833,21 +845,21 @@ DEFINE_IC(GetElemSuper, {
   }
 });
 
-DEFINE_IC(NewArray, {
+DEFINE_IC(NewArray, 0, {
   PUSH_EXIT_FRAME();
   if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
 });
 
-DEFINE_IC(GetIntrinsic, {
+DEFINE_IC(GetIntrinsic, 0, {
   PUSH_EXIT_FRAME();
   if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
 });
 
-DEFINE_IC(SetElem, {
+DEFINE_IC(SetElem, 3, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   IC_LOAD_VAL(value2, 2);
@@ -858,7 +870,7 @@ DEFINE_IC(SetElem, {
   }
 });
 
-DEFINE_IC(HasOwn, {
+DEFINE_IC(HasOwn, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -868,7 +880,7 @@ DEFINE_IC(HasOwn, {
   }
 });
 
-DEFINE_IC(CheckPrivateField, {
+DEFINE_IC(CheckPrivateField, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_EXIT_FRAME();
@@ -878,7 +890,7 @@ DEFINE_IC(CheckPrivateField, {
   }
 });
 
-DEFINE_IC(GetIterator, {
+DEFINE_IC(GetIterator, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -886,7 +898,7 @@ DEFINE_IC(GetIterator, {
   }
 });
 
-DEFINE_IC(ToPropertyKey, {
+DEFINE_IC(ToPropertyKey, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0, &state.res)) {
@@ -894,7 +906,7 @@ DEFINE_IC(ToPropertyKey, {
   }
 });
 
-DEFINE_IC(OptimizeSpreadCall, {
+DEFINE_IC(OptimizeSpreadCall, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_EXIT_FRAME();
   if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
@@ -903,14 +915,14 @@ DEFINE_IC(OptimizeSpreadCall, {
   }
 });
 
-DEFINE_IC(Rest, {
+DEFINE_IC(Rest, 0, {
   PUSH_EXIT_FRAME();
   if (!DoRestFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
 });
 
-DEFINE_IC(CloseIter, {
+DEFINE_IC(CloseIter, 1, {
   IC_LOAD_OBJ(obj0, 0);
   PUSH_EXIT_FRAME();
   if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
@@ -960,7 +972,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 #define IC_POP_ARG(index) state.icVals[(index)] = stack.pop().asUInt64();
 #define IC_SET_VAL_ARG(index, expr) state.icVals[(index)] = (expr).asRawBits();
 #define IC_SET_OBJ_ARG(index, expr) \
-  state.icVals[(index)] = ObjectValue(*(expr)).asRawBits();
+  state.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
 #define IC_PUSH_RESULT() PUSH(StackVal(state.icResult));
 
     state.op = JSOp(*pc.pc);
