@@ -2513,7 +2513,10 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
   CacheIRStubInfo* stubInfo;
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
+
   JitCode* code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
   if (!code) {
     // We have to generate stub code.
     TempAllocator temp(&cx->tempLifoAlloc());
@@ -2549,6 +2552,21 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
   }
 
   MOZ_ASSERT(code);
+#else   // !ENABLE_PORTABLE_BASELINE_INTERP
+  if (!stubInfo) {
+    stubInfo = CacheIRStubInfo::New(kind, ICStubEngine::Baseline, false,
+                                    stubDataOffset, writer);
+    if (!stubInfo) {
+      return ICAttachResult::OOM;
+    }
+
+    CacheIRStubKey key(stubInfo);
+    if (!jitZone->putBaselineCacheIRStubCode(lookup, key,
+                                             /* code = */ nullptr)) {
+      return ICAttachResult::OOM;
+    }
+  }
+#endif  // ENABLE_PORTABLE_BASELINE_INTERP
   MOZ_ASSERT(stubInfo);
   MOZ_ASSERT(stubInfo->stubDataSize() == writer.stubDataSize());
 
