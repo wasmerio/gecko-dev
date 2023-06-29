@@ -206,7 +206,6 @@ struct State {
   Rooted<JSAtom*> atom0;
   RootedFunction fun0;
   Rooted<Scope*> scope0;
-  JSOp op;
   int argc;
   int extraArgs;
   bool spreadCall;
@@ -1009,21 +1008,21 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
   state.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
 #define IC_PUSH_RESULT() PUSH(StackVal(state.icResult));
 
-    state.op = JSOp(*pc);
+    JSOp op = JSOp(*pc);
 
 #ifdef TRACE_INTERP
     printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
            "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
     printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(), pc,
-           CodeName(state.op),
+           CodeName(op),
            (int)(frame->interpreterICEntry() -
                  script->jitScript()->icScript()->icEntries()),
            frameMgr.cxForLocalUseOnly()->isExceptionPending());
     fflush(stdout);
 #endif
 
-    switch (state.op) {
+    switch (op) {
       case JSOp::Nop: {
         END_OP(Nop);
       }
@@ -1359,7 +1358,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         IC_POP_ARG(1);
         IC_SET_ARG_FROM_STACK(0, 0);
         INVOKE_IC(SetElem);
-        if (state.op == JSOp::InitElemInc) {
+        if (op == JSOp::InitElemInc) {
           PUSH(StackVal(
               Int32Value(Value::fromRawBits(state.icVals[1]).toInt32() + 1)));
         }
@@ -1545,7 +1544,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::StrictSetPropSuper: {
         // stack signature: receiver, lval, rval => rval
         static_assert(JSOpLength_SetPropSuper == JSOpLength_StrictSetPropSuper);
-        bool strict = state.op == JSOp::StrictSetPropSuper;
+        bool strict = op == JSOp::StrictSetPropSuper;
         state.value2 = stack.pop().asValue();  // rval
         state.value1 = stack.pop().asValue();  // lval
         state.value0 = stack.pop().asValue();  // receiver
@@ -1567,7 +1566,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::StrictSetElemSuper: {
         // stack signature: receiver, key, lval, rval => rval
         static_assert(JSOpLength_SetElemSuper == JSOpLength_StrictSetElemSuper);
-        bool strict = state.op == JSOp::StrictSetElemSuper;
+        bool strict = op == JSOp::StrictSetElemSuper;
         state.value3 = stack.pop().asValue();  // rval
         state.value2 = stack.pop().asValue();  // lval
         state.value1 = stack.pop().asValue();  // index
