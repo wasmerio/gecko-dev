@@ -93,11 +93,10 @@ struct Stack {
   }
 
   [[nodiscard]] bool push(StackVal v) {
-    StackVal* elem = allocate(sizeof(StackVal));
-    if (!elem) {
+    if (sp == base) {
       return false;
     }
-    *elem = v;
+    *--sp = v;
     return true;
   }
   StackVal pop() {
