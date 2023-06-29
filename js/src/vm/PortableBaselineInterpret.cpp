@@ -72,25 +72,24 @@ struct StackVal {
 };
 
 struct Stack {
-  StackVal** sp;
+  StackVal* sp;
   StackVal* fp;
   StackVal* base;
   StackVal* top;
 
   Stack(PortableBaselineStack& pbs)
-      : sp(reinterpret_cast<StackVal**>(&pbs.top)),
+      : sp(reinterpret_cast<StackVal*>(pbs.top)),
         fp(nullptr),
         base(reinterpret_cast<StackVal*>(pbs.base)),
         top(reinterpret_cast<StackVal*>(pbs.top)) {}
 
   [[nodiscard]] StackVal* allocate(size_t size) {
     if (reinterpret_cast<uintptr_t>(base) + size >
-        reinterpret_cast<uintptr_t>(*sp)) {
+        reinterpret_cast<uintptr_t>(sp)) {
       return nullptr;
     }
-    (*sp) =
-        reinterpret_cast<StackVal*>(reinterpret_cast<uintptr_t>(*sp) - size);
-    return *sp;
+    sp = reinterpret_cast<StackVal*>(reinterpret_cast<uintptr_t>(sp) - size);
+    return sp;
   }
 
   [[nodiscard]] bool push(StackVal v) {
@@ -102,16 +101,16 @@ struct Stack {
     return true;
   }
   StackVal pop() {
-    MOZ_ASSERT((*sp) + 1 <= top);
-    return *(*sp)++;
+    MOZ_ASSERT(sp + 1 <= top);
+    return *sp++;
   }
   void popn(size_t len) {
-    MOZ_ASSERT((*sp) + len <= top);
-    (*sp) += len;
+    MOZ_ASSERT(sp + len <= top);
+    sp += len;
   }
 
-  StackVal* cur() const { return *sp; }
-  void restore(StackVal* s) { *sp = s; }
+  StackVal* cur() const { return sp; }
+  void restore(StackVal* s) { sp = s; }
 
   uint32_t frameSize(BaselineFrame* curFrame) const {
     return sizeof(StackVal) * (reinterpret_cast<StackVal*>(fp) - cur());
@@ -181,7 +180,7 @@ struct Stack {
 
   void popExitFrame(StackVal* fp) {
     restore(fp);
-    (*sp) += 3;
+    sp += 3;
   }
 
   BaselineFrame* frameFromFP() {
@@ -189,7 +188,7 @@ struct Stack {
                                             BaselineFrame::Size());
   }
 
-  StackVal& operator[](size_t index) { return (*sp)[index]; }
+  StackVal& operator[](size_t index) { return sp[index]; }
 };
 
 struct State {
@@ -236,13 +235,6 @@ struct State {
         cacheIRReader(nullptr, nullptr) {}
 };
 
-struct PC {
-  jsbytecode* pc;
-
-  explicit PC(BaselineFrame* frame) : pc(frame->interpreterPC()) {}
-  void advance(BaselineFrame* frame, intptr_t delta) { pc += delta; }
-};
-
 class VMFrameManager {
   JSContext* cx;
   BaselineFrame* frame;
@@ -268,20 +260,26 @@ class VMFrame {
   Stack& stack;
   uint8_t* prevExitFP;
   StackVal* exitFP;
+  void* prevSavedStack;
 
  public:
-  VMFrame(VMFrameManager& mgr, Stack& stack_) : cx(mgr.cx), stack(stack_) {
+  VMFrame(VMFrameManager& mgr, Stack& stack_, jsbytecode* pc)
+      : cx(mgr.cx), stack(stack_) {
+    mgr.frame->interpreterPC() = pc;
     prevExitFP = cx->activation()->asJit()->packedExitFP();
     exitFP = stack.pushExitFrame(mgr.frame);
-    if (exitFP) {
-      cx->activation()->asJit()->setJSExitFP(
-          reinterpret_cast<uint8_t*>(exitFP));
+    if (!exitFP) {
+      return;
     }
+    cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(exitFP));
+    prevSavedStack = cx->portableBaselineStack().top;
+    cx->portableBaselineStack().top = reinterpret_cast<void*>(stack.sp);
   }
 
   ~VMFrame() {
     cx->activation()->asJit()->setPackedExitFP(prevExitFP);
     stack.popExitFrame(exitFP);
+    cx->portableBaselineStack().top = prevSavedStack;
   }
 
   operator JSContext*() const { return cx; }
@@ -629,10 +627,10 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 
 #define NEXT_IC() frame->interpreterICEntry()++;
 
-#define INVOKE_IC(kind)                           \
-  if (!IC##kind(frame, frameMgr, stack, state)) { \
-    goto error;                                   \
-  }                                               \
+#define INVOKE_IC(kind)                               \
+  if (!IC##kind(frame, frameMgr, stack, state, pc)) { \
+    goto error;                                       \
+  }                                                   \
   NEXT_IC();
 
 #define SAVE_INPUTS(arity)           \
@@ -676,11 +674,11 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
   } while (0)
 
 #define DEFINE_IC(kind, arity, fallback_body)                                \
-  static bool MOZ_ALWAYS_INLINE IC##kind(BaselineFrame* frame,               \
-                                         VMFrameManager& frameMgr,           \
-                                         Stack& stack, State& state) {       \
+  static bool MOZ_ALWAYS_INLINE IC##kind(                                    \
+      BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,          \
+      State& state, jsbytecode* pc) {                                        \
     ICStub* stub = frame->interpreterICEntry()->firstStub();                 \
-    uint64_t inputs[(arity)];                                                \
+    uint64_t inputs[3];                                                      \
     SAVE_INPUTS(arity);                                                      \
     while (true) {                                                           \
     next_stub:                                                               \
@@ -716,10 +714,10 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
 #define IC_LOAD_OBJ(state_elem, index) \
   state.state_elem = reinterpret_cast<JSObject*>(state.icVals[(index)]);
 
-#define PUSH_EXIT_FRAME()      \
-  VMFrame cx(frameMgr, stack); \
-  if (!cx.success()) {         \
-    return false;              \
+#define PUSH_EXIT_FRAME()          \
+  VMFrame cx(frameMgr, stack, pc); \
+  if (!cx.success()) {             \
+    return false;                  \
   }
 
 DEFINE_IC(Typeof, 1, {
@@ -975,7 +973,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
   BaselineFrame* frame = stack.frameFromFP();
   RootedScript script(cx_, frame->script());
-  PC pc(frame);
+  jsbytecode* pc = frame->interpreterPC();
 
   uint32_t nslots = script->nslots();
   for (uint32_t i = 0; i < nslots; i++) {
@@ -995,9 +993,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
   while (true) {
   dispatch:
-    frame->interpreterPC() = pc.pc;
 
-#define ADVANCE(delta) pc.advance(frame, (delta));
+#define ADVANCE(delta) pc += (delta);
 #define ADVANCE_AND_DISPATCH(delta) \
   ADVANCE(delta);                   \
   goto dispatch;
@@ -1012,14 +1009,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
   state.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
 #define IC_PUSH_RESULT() PUSH(StackVal(state.icResult));
 
-    state.op = JSOp(*pc.pc);
+    state.op = JSOp(*pc);
 
 #ifdef TRACE_INTERP
     printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
            "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
-    printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(),
-           pc.pc, CodeName(state.op),
+    printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(), pc,
+           CodeName(state.op),
            (int)(frame->interpreterICEntry() -
                  script->jitScript()->icScript()->icEntries()),
            frameMgr.cxForLocalUseOnly()->isExceptionPending());
@@ -1047,7 +1044,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(True);
       }
       case JSOp::Int32: {
-        PUSH(StackVal(Int32Value(GET_INT32(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_INT32(pc))));
         END_OP(Int32);
       }
       case JSOp::Zero: {
@@ -1059,33 +1056,33 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(One);
       }
       case JSOp::Int8: {
-        PUSH(StackVal(Int32Value(GET_INT8(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_INT8(pc))));
         END_OP(Int8);
       }
       case JSOp::Uint16: {
-        PUSH(StackVal(Int32Value(GET_UINT16(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_UINT16(pc))));
         END_OP(Uint16);
       }
       case JSOp::Uint24: {
-        PUSH(StackVal(Int32Value(GET_UINT24(pc.pc))));
+        PUSH(StackVal(Int32Value(GET_UINT24(pc))));
         END_OP(Uint24);
       }
       case JSOp::Double: {
-        PUSH(StackVal(GET_INLINE_VALUE(pc.pc)));
+        PUSH(StackVal(GET_INLINE_VALUE(pc)));
         END_OP(Double);
       }
       case JSOp::BigInt: {
-        PUSH(StackVal(JS::BigIntValue(script->getBigInt(pc.pc))));
+        PUSH(StackVal(JS::BigIntValue(script->getBigInt(pc))));
         END_OP(BigInt);
       }
       case JSOp::String: {
-        PUSH(StackVal(StringValue(script->getString(pc.pc))));
+        PUSH(StackVal(StringValue(script->getString(pc))));
         END_OP(String);
       }
       case JSOp::Symbol: {
         PUSH(StackVal(
             SymbolValue(frameMgr.cxForLocalUseOnly()->wellKnownSymbols().get(
-                GET_UINT8(pc.pc)))));
+                GET_UINT8(pc)))));
         END_OP(Symbol);
       }
       case JSOp::Void: {
@@ -1128,7 +1125,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::And: {
         IC_SET_ARG_FROM_STACK(0, 0);
         INVOKE_IC(ToBool);
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
         if (!result) {
           ADVANCE(jumpOffset);
@@ -1140,7 +1137,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::Or: {
         IC_SET_ARG_FROM_STACK(0, 0);
         INVOKE_IC(ToBool);
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
         if (result) {
           ADVANCE(jumpOffset);
@@ -1152,7 +1149,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::JumpIfTrue: {
         IC_POP_ARG(0);
         INVOKE_IC(ToBool);
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
         if (result) {
           ADVANCE(jumpOffset);
@@ -1164,7 +1161,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::JumpIfFalse: {
         IC_POP_ARG(0);
         INVOKE_IC(ToBool);
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc.pc);
+        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
         bool result = Value::fromRawBits(state.icResult).toBoolean();
         if (!result) {
           ADVANCE(jumpOffset);
@@ -1333,7 +1330,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(NewObject);
       }
       case JSOp::Object: {
-        PUSH(StackVal(ObjectValue(*script->getObject(pc.pc))));
+        PUSH(StackVal(ObjectValue(*script->getObject(pc))));
         END_OP(Object);
       }
       case JSOp::ObjWithProto: {
@@ -1380,10 +1377,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                       JSOpLength_InitHiddenPropSetter);
         state.obj1 = &stack.pop().asValue().toObject();  // val
         state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
-        state.name0 = script->getName(pc.pc);
+        state.name0 = script->getName(pc);
         {
           PUSH_EXIT_FRAME();
-          if (!InitPropGetterSetterOperation(cx, pc.pc, state.obj0, state.name0,
+          if (!InitPropGetterSetterOperation(cx, pc, state.obj0, state.name0,
                                              state.obj1)) {
             goto error;
           }
@@ -1405,8 +1402,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
         {
           PUSH_EXIT_FRAME();
-          if (!InitElemGetterSetterOperation(cx, pc.pc, state.obj0,
-                                             state.value0, state.obj1)) {
+          if (!InitElemGetterSetterOperation(cx, pc, state.obj0, state.value0,
+                                             state.obj1)) {
             goto error;
           }
         }
@@ -1448,7 +1445,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
       case JSOp::DelProp: {
         state.value0 = stack.pop().asValue();
-        state.name0 = script->getName(pc.pc);
+        state.name0 = script->getName(pc);
         bool res = false;
         {
           PUSH_EXIT_FRAME();
@@ -1461,7 +1458,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
       case JSOp::StrictDelProp: {
         state.value0 = stack.pop().asValue();
-        state.name0 = script->getName(pc.pc);
+        state.name0 = script->getName(pc);
         bool res = false;
         {
           PUSH_EXIT_FRAME();
@@ -1516,7 +1513,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::NewPrivateName: {
-        state.atom0 = script->getAtom(pc.pc);
+        state.atom0 = script->getAtom(pc);
         JS::Symbol* symbol;
         {
           PUSH_EXIT_FRAME();
@@ -1552,7 +1549,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.value2 = stack.pop().asValue();  // rval
         state.value1 = stack.pop().asValue();  // lval
         state.value0 = stack.pop().asValue();  // receiver
-        state.name0 = script->getName(pc.pc);
+        state.name0 = script->getName(pc);
         {
           PUSH_EXIT_FRAME();
           // SetPropertySuper(cx, lval, receiver, name, rval, strict)
@@ -1625,8 +1622,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::CheckIsObj: {
         if (!stack[0].asValue().isObject()) {
           PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(js::ThrowCheckIsObject(
-              cx, js::CheckIsObjectKind(GET_UINT8(pc.pc))));
+          MOZ_ALWAYS_FALSE(
+              js::ThrowCheckIsObject(cx, js::CheckIsObjectKind(GET_UINT8(pc))));
           goto error;
         }
         END_OP(CheckIsObj);
@@ -1685,7 +1682,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.obj0 = &stack[0].asValue().toObject();
         {
           PUSH_EXIT_FRAME();
-          InitElemArrayOperation(cx, pc.pc, state.obj0.as<ArrayObject>(),
+          InitElemArrayOperation(cx, pc, state.obj0.as<ArrayObject>(),
                                  state.value0);
         }
         END_OP(InitElemArray);
@@ -1700,7 +1697,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         JSObject* obj;
         {
           PUSH_EXIT_FRAME();
-          state.obj0 = script->getRegExp(pc.pc);
+          state.obj0 = script->getRegExp(pc);
           obj = CloneRegExpObject(cx, state.obj0.as<RegExpObject>());
           if (!obj) {
             goto error;
@@ -1711,7 +1708,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::Lambda: {
-        state.fun0 = script->getFunction(pc.pc);
+        state.fun0 = script->getFunction(pc);
         state.obj0 = frame->environmentChain();
         JSObject* res;
         {
@@ -1729,7 +1726,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         // fun, name => fun
         state.value0 = stack.pop().asValue();  // name
         state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
-        FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc.pc));
+        FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc));
         {
           PUSH_EXIT_FRAME();
           if (!SetFunctionName(cx, state.fun0, state.value0, prefixKind)) {
@@ -1766,7 +1763,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         // proto => obj
         state.obj0 = &stack.pop().asValue().toObject();  // proto
         state.obj1 = frame->environmentChain();
-        state.fun0 = script->getFunction(pc.pc);
+        state.fun0 = script->getFunction(pc);
         JSObject* obj;
         {
           PUSH_EXIT_FRAME();
@@ -1780,7 +1777,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::BuiltinObject: {
-        auto kind = BuiltinObjectKind(GET_UINT8(pc.pc));
+        auto kind = BuiltinObjectKind(GET_UINT8(pc));
         JSObject* builtin;
         {
           PUSH_EXIT_FRAME();
@@ -1806,7 +1803,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_Call == JSOpLength_CallContentIter);
         static_assert(JSOpLength_Call == JSOpLength_Eval);
         static_assert(JSOpLength_Call == JSOpLength_StrictEval);
-        state.argc = GET_ARGC(pc.pc);
+        state.argc = GET_ARGC(pc);
         state.extraArgs = 2;
         state.spreadCall = false;
         // IC handles stack -- we don't pop args or push result.
@@ -1819,7 +1816,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::NewContent: {
         static_assert(JSOpLength_SuperCall == JSOpLength_New);
         static_assert(JSOpLength_SuperCall == JSOpLength_NewContent);
-        state.argc = GET_ARGC(pc.pc);
+        state.argc = GET_ARGC(pc);
         state.extraArgs = 3;
         state.spreadCall = false;
         // IC handles stack -- we don't pop args or push result.
@@ -1860,7 +1857,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
       case JSOp::ImplicitThis: {
         state.obj0 = frame->environmentChain();
-        state.name0 = script->getName(pc.pc);
+        state.name0 = script->getName(pc);
         {
           PUSH_EXIT_FRAME();
           if (!ImplicitThisOperation(cx, state.obj0, state.name0, &state.res)) {
@@ -1872,7 +1869,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::CallSiteObj: {
-        JSObject* cso = script->getObject(pc.pc);
+        JSObject* cso = script->getObject(pc);
         MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
         MOZ_ASSERT(cso->as<ArrayObject>().containsPure(
             frameMgr.cxForLocalUseOnly()->names().raw));
@@ -1922,7 +1919,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         uint32_t frameSize = stack.frameSize(frame);
         {
           PUSH_EXIT_FRAME();
-          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc.pc)) {
+          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
             goto error;
           }
         }
@@ -1939,7 +1936,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         uint32_t frameSize = stack.frameSize(frame);
         {
           PUSH_EXIT_FRAME();
-          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc.pc)) {
+          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
             goto error;
           }
         }
@@ -1954,7 +1951,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.obj0 = &stack.pop().asValue().toObject();
         {
           PUSH_EXIT_FRAME();
-          if (!FinalSuspend(cx, state.obj0, pc.pc)) {
+          if (!FinalSuspend(cx, state.obj0, pc)) {
             goto error;
           }
         }
@@ -1989,7 +1986,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         // valueOrReason, gen => promise
         state.obj0 = &stack.pop().asValue().toObject();  // gen
         state.value0 = stack.pop().asValue();            // valueOrReason
-        auto resolveKind = AsyncFunctionResolveKind(GET_UINT8(pc.pc));
+        auto resolveKind = AsyncFunctionResolveKind(GET_UINT8(pc));
         JSObject* promise;
         {
           PUSH_EXIT_FRAME();
@@ -2034,7 +2031,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::ResumeKind: {
-        GeneratorResumeKind resumeKind = ResumeKindFromPC(pc.pc);
+        GeneratorResumeKind resumeKind = ResumeKindFromPC(pc);
         PUSH(StackVal(Int32Value(int32_t(resumeKind))));
         END_OP(ResumeKind);
       }
@@ -2061,29 +2058,29 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::JumpTarget: {
-        int32_t icIndex = GET_INT32(pc.pc);
+        int32_t icIndex = GET_INT32(pc);
         frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
         END_OP(JumpTarget);
       }
       case JSOp::LoopHead: {
-        int32_t icIndex = GET_INT32(pc.pc);
+        int32_t icIndex = GET_INT32(pc);
         frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
         END_OP(LoopHead);
       }
       case JSOp::AfterYield: {
-        int32_t icIndex = GET_INT32(pc.pc);
+        int32_t icIndex = GET_INT32(pc);
         frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
         END_OP(AfterYield);
       }
 
       case JSOp::Goto: {
-        ADVANCE(GET_JUMP_OFFSET(pc.pc));
+        ADVANCE(GET_JUMP_OFFSET(pc));
         break;
       }
 
       case JSOp::Coalesce: {
         if (!stack[0].asValue().isNullOrUndefined()) {
-          ADVANCE(GET_JUMP_OFFSET(pc.pc));
+          ADVANCE(GET_JUMP_OFFSET(pc));
           break;
         } else {
           END_OP(Coalesce);
@@ -2094,7 +2091,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         bool cond = stack.pop().asValue().toBoolean();
         if (cond) {
           stack.pop();
-          ADVANCE(GET_JUMP_OFFSET(pc.pc));
+          ADVANCE(GET_JUMP_OFFSET(pc));
           break;
         } else {
           END_OP(Case);
@@ -2103,14 +2100,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
       case JSOp::Default: {
         stack.pop();
-        ADVANCE(GET_JUMP_OFFSET(pc.pc));
+        ADVANCE(GET_JUMP_OFFSET(pc));
         break;
       }
 
       case JSOp::TableSwitch: {
-        int32_t len = GET_JUMP_OFFSET(pc.pc);
-        int32_t low = GET_JUMP_OFFSET(pc.pc + 1 * JUMP_OFFSET_LEN);
-        int32_t high = GET_JUMP_OFFSET(pc.pc + 2 * JUMP_OFFSET_LEN);
+        int32_t len = GET_JUMP_OFFSET(pc);
+        int32_t low = GET_JUMP_OFFSET(pc + 1 * JUMP_OFFSET_LEN);
+        int32_t high = GET_JUMP_OFFSET(pc + 2 * JUMP_OFFSET_LEN);
         Value v = stack.pop().asValue();
         int32_t i = 0;
         if (v.isInt32()) {
@@ -2123,8 +2120,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
         i = uint32_t(i) - uint32_t(low);
         if ((uint32_t(i) < uint32_t(high - low + 1))) {
-          len = script->tableSwitchCaseOffset(pc.pc, uint32_t(i)) -
-                script->pcToOffset(pc.pc);
+          len = script->tableSwitchCaseOffset(pc, uint32_t(i)) -
+                script->pcToOffset(pc);
         }
         ADVANCE(len);
         break;
@@ -2186,7 +2183,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::ThrowMsg: {
         {
           PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(ThrowMsgOperation(cx, GET_UINT8(pc.pc)));
+          MOZ_ALWAYS_FALSE(ThrowMsgOperation(cx, GET_UINT8(pc)));
           goto error;
         }
         END_OP(ThrowMsg);
@@ -2195,7 +2192,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::ThrowSetConst: {
         {
           PUSH_EXIT_FRAME();
-          ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, pc.pc);
+          ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, pc);
           goto error;
         }
         END_OP(ThrowSetConst);
@@ -2227,13 +2224,13 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(Uninitialized);
       }
       case JSOp::InitLexical: {
-        uint32_t i = GET_LOCALNO(pc.pc);
+        uint32_t i = GET_LOCALNO(pc);
         frame->unaliasedLocal(i) = stack[0].asValue();
         END_OP(InitLexical);
       }
 
       case JSOp::InitAliasedLexical: {
-        EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
         EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
         obj.setAliasedBinding(ec, stack[0].asValue());
         END_OP(InitAliasedLexical);
@@ -2242,7 +2239,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
           PUSH_EXIT_FRAME();
           ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
-                                    pc.pc);
+                                    pc);
           goto error;
         }
         END_OP(CheckLexical);
@@ -2251,7 +2248,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
           PUSH_EXIT_FRAME();
           ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
-                                    pc.pc);
+                                    pc);
           goto error;
         }
         END_OP(CheckAliasedLexical);
@@ -2260,7 +2257,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::BindGName: {
         IC_SET_OBJ_ARG(
             0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-        state.name0.set(script->getName(pc.pc));
+        state.name0.set(script->getName(pc));
         INVOKE_IC(BindName);
         IC_PUSH_RESULT();
         END_OP(BindGName);
@@ -2286,7 +2283,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GetArg: {
-        unsigned i = GET_ARGNO(pc.pc);
+        unsigned i = GET_ARGNO(pc);
         if (script->argsObjAliasesFormals()) {
           PUSH(StackVal(frame->argsObj().arg(i)));
         } else {
@@ -2296,13 +2293,13 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GetFrameArg: {
-        uint32_t i = GET_ARGNO(pc.pc);
+        uint32_t i = GET_ARGNO(pc);
         PUSH(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
         END_OP(GetFrameArg);
       }
 
       case JSOp::GetLocal: {
-        uint32_t i = GET_LOCALNO(pc.pc);
+        uint32_t i = GET_LOCALNO(pc);
         PUSH(StackVal(frame->unaliasedLocal(i)));
         END_OP(GetLocal);
       }
@@ -2323,7 +2320,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::GetAliasedDebugVar: {
         static_assert(JSOpLength_GetAliasedVar ==
                       JSOpLength_GetAliasedDebugVar);
-        EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
         EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
         PUSH(StackVal(obj.aliasedBinding(ec)));
         END_OP(GetAliasedVar);
@@ -2334,8 +2331,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.value0 = stack[0].asValue();
         {
           PUSH_EXIT_FRAME();
-          if (!GetImportOperation(cx, state.obj0, script, pc.pc,
-                                  &state.value0)) {
+          if (!GetImportOperation(cx, state.obj0, script, pc, &state.value0)) {
             goto error;
           }
         }
@@ -2355,7 +2351,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::EnvCallee: {
-        uint8_t numHops = GET_UINT8(pc.pc);
+        uint8_t numHops = GET_UINT8(pc);
         JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
         for (unsigned i = 0; i < numHops; i++) {
           env = &env->as<EnvironmentObject>().enclosingEnvironment();
@@ -2401,7 +2397,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::SetArg: {
-        unsigned i = GET_ARGNO(pc.pc);
+        unsigned i = GET_ARGNO(pc);
         if (script->argsObjAliasesFormals()) {
           frame->argsObj().setArg(i, stack[0].asValue());
         } else {
@@ -2411,13 +2407,13 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::SetLocal: {
-        uint32_t i = GET_LOCALNO(pc.pc);
+        uint32_t i = GET_LOCALNO(pc);
         frame->unaliasedLocal(i) = stack[0].asValue();
         END_OP(SetLocal);
       }
 
       case JSOp::SetAliasedVar: {
-        EnvironmentCoordinate ec = EnvironmentCoordinate(pc.pc);
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
         EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
         MOZ_ASSERT(!IsUninitializedLexical(obj.aliasedBinding(ec)));
         obj.setAliasedBinding(ec, stack[0].asValue());
@@ -2428,7 +2424,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.value0 = stack[0].asValue();
         {
           PUSH_EXIT_FRAME();
-          if (!SetIntrinsicOperation(cx, script, pc.pc, state.value0)) {
+          if (!SetIntrinsicOperation(cx, script, pc, state.value0)) {
             goto error;
           }
         }
@@ -2436,7 +2432,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::PushLexicalEnv: {
-        state.scope0 = script->getScope(pc.pc);
+        state.scope0 = script->getScope(pc);
         {
           PUSH_EXIT_FRAME();
           if (!frame->pushLexicalEnvironment(cx,
@@ -2474,7 +2470,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(FreshenLexicalEnv);
       }
       case JSOp::PushClassBodyEnv: {
-        state.scope0 = script->getScope(pc.pc);
+        state.scope0 = script->getScope(pc);
         {
           PUSH_EXIT_FRAME();
           if (!frame->pushClassBodyEnvironment(
@@ -2485,7 +2481,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(PushClassBodyEnv);
       }
       case JSOp::PushVarEnv: {
-        state.scope0 = script->getScope(pc.pc);
+        state.scope0 = script->getScope(pc);
         {
           PUSH_EXIT_FRAME();
           if (!frame->pushVarEnvironment(cx, state.scope0)) {
@@ -2495,7 +2491,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(PushVarEnv);
       }
       case JSOp::EnterWith: {
-        state.scope0 = script->getScope(pc.pc);
+        state.scope0 = script->getScope(pc);
         state.value0 = stack.pop().asValue();
         {
           PUSH_EXIT_FRAME();
@@ -2522,7 +2518,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::GlobalOrEvalDeclInstantiation: {
-        GCThingIndex lastFun = GET_GCTHING_INDEX(pc.pc);
+        GCThingIndex lastFun = GET_GCTHING_INDEX(pc);
         state.script0 = script;
         state.obj0 = frame->environmentChain();
         {
@@ -2536,7 +2532,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       }
 
       case JSOp::DelName: {
-        state.name0 = script->getName(pc.pc);
+        state.name0 = script->getName(pc);
         state.obj0 = frame->environmentChain();
         {
           PUSH_EXIT_FRAME();
@@ -2581,7 +2577,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(Pop);
       }
       case JSOp::PopN: {
-        uint32_t n = GET_UINT16(pc.pc);
+        uint32_t n = GET_UINT16(pc);
         stack.popn(n);
         END_OP(PopN);
       }
@@ -2598,7 +2594,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(Dup2);
       }
       case JSOp::DupAt: {
-        unsigned i = GET_UINT24(pc.pc);
+        unsigned i = GET_UINT24(pc);
         StackVal value = stack[i];
         PUSH(value);
         END_OP(DupAt);
@@ -2608,14 +2604,14 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         END_OP(Swap);
       }
       case JSOp::Pick: {
-        unsigned i = GET_UINT8(pc.pc);
+        unsigned i = GET_UINT8(pc);
         StackVal tmp = stack[i];
         memmove(&stack[1], &stack[0], sizeof(StackVal) * i);
         stack[0] = tmp;
         END_OP(Pick);
       }
       case JSOp::Unpick: {
-        unsigned i = GET_UINT8(pc.pc);
+        unsigned i = GET_UINT8(pc);
         StackVal tmp = stack[0];
         memmove(&stack[0], &stack[1], sizeof(StackVal) * i);
         stack[i] = tmp;
@@ -2659,12 +2655,12 @@ error:
         stack.pop();  // fake return address
         return false;
       case ExceptionResumeKind::Catch:
-        pc.pc = frame->interpreterPC();
-        TRACE_PRINTF(" -> catch to pc %p\n", pc.pc);
+        pc = frame->interpreterPC();
+        TRACE_PRINTF(" -> catch to pc %p\n", pc);
         goto dispatch;
       case ExceptionResumeKind::Finally:
-        pc.pc = frame->interpreterPC();
-        TRACE_PRINTF(" -> finally to pc %p\n", pc.pc);
+        pc = frame->interpreterPC();
+        TRACE_PRINTF(" -> finally to pc %p\n", pc);
         PUSH(StackVal(rfe.exception));
         PUSH(StackVal(BooleanValue(true)));
         goto dispatch;
