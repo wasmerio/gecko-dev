@@ -635,14 +635,52 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
   }                                               \
   NEXT_IC();
 
+#define SAVE_INPUTS(arity)           \
+  do {                               \
+    switch (arity) {                 \
+      case 0:                        \
+        break;                       \
+      case 1:                        \
+        inputs[0] = state.icVals[0]; \
+        break;                       \
+      case 2:                        \
+        inputs[0] = state.icVals[0]; \
+        inputs[1] = state.icVals[1]; \
+        break;                       \
+      case 3:                        \
+        inputs[0] = state.icVals[0]; \
+        inputs[1] = state.icVals[1]; \
+        inputs[2] = state.icVals[2]; \
+        break;                       \
+    }                                \
+  } while (0)
+
+#define RESTORE_INPUTS(arity)        \
+  do {                               \
+    switch (arity) {                 \
+      case 0:                        \
+        break;                       \
+      case 1:                        \
+        state.icVals[0] = inputs[0]; \
+        break;                       \
+      case 2:                        \
+        state.icVals[0] = inputs[0]; \
+        state.icVals[1] = inputs[1]; \
+        break;                       \
+      case 3:                        \
+        state.icVals[0] = inputs[0]; \
+        state.icVals[1] = inputs[1]; \
+        state.icVals[2] = inputs[2]; \
+        break;                       \
+    }                                \
+  } while (0)
+
 #define DEFINE_IC(kind, arity, fallback_body)                          \
   static bool IC##kind(BaselineFrame* frame, VMFrameManager& frameMgr, \
                        Stack& stack, State& state) {                   \
     ICStub* stub = frame->interpreterICEntry()->firstStub();           \
     uint64_t inputs[(arity)];                                          \
-    for (int i = 0; i < (arity); i++) {                                \
-      inputs[i] = state.icVals[i];                                     \
-    }                                                                  \
+    SAVE_INPUTS(arity);                                                \
     while (true) {                                                     \
     next_stub:                                                         \
       if (stub->isFallback()) {                                        \
@@ -660,9 +698,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
           switch (ICInterpretOp(state, cstub)) {                       \
             case ICInterpretOpResult::Fail:                            \
               stub = stub->maybeNext();                                \
-              for (int i = 0; i < (arity); i++) {                      \
-                state.icVals[i] = inputs[i];                           \
-              }                                                        \
+              RESTORE_INPUTS(arity);                                   \
               goto next_stub;                                          \
             case ICInterpretOpResult::Ok:                              \
               continue;                                                \
