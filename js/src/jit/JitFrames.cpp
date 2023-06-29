@@ -472,22 +472,26 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
         script->resetWarmUpCounterToDelayIonCompilation();
 
         // Resume at the start of the catch block.
-        const BaselineInterpreter& interp =
-            cx->runtime()->jitRuntime()->baselineInterpreter();
         frame.baselineFrame()->setInterpreterFields(*pc);
         rfe->kind = ExceptionResumeKind::Catch;
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+        const BaselineInterpreter& interp =
+          cx->runtime()->jitRuntime()->baselineInterpreter();
         rfe->target = interp.interpretOpAddr().value;
+#endif
         return true;
       }
 
       case TryNoteKind::Finally: {
         SettleOnTryNote(cx, tn, frame, ei, rfe, pc);
 
-        const BaselineInterpreter& interp =
-            cx->runtime()->jitRuntime()->baselineInterpreter();
         frame.baselineFrame()->setInterpreterFields(*pc);
         rfe->kind = ExceptionResumeKind::Finally;
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+        const BaselineInterpreter& interp =
+          cx->runtime()->jitRuntime()->baselineInterpreter();
         rfe->target = interp.interpretOpAddr().value;
+#endif
 
         // Drop the exception instead of leaking cross compartment data.
         if (!cx->getPendingException(
