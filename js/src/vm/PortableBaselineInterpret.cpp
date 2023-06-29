@@ -140,6 +140,7 @@ struct Stack {
         reinterpret_cast<uintptr_t>(prevFP) - reinterpret_cast<uintptr_t>(fp);
     frame->setDebugFrameSize(frameSize);
 #endif
+
     return frame;
   }
 
@@ -979,15 +980,16 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
   }
   ret->setUndefined();
 
+  VMFrameManager frameMgr(cx_, frame);
+
   if (CalleeTokenIsFunction(frame->calleeToken())) {
     JSFunction* func = CalleeTokenToFunction(frame->calleeToken());
     frame->setEnvironmentChain(func->environment());
     if (func->needsFunctionEnvironmentObjects()) {
-      TRY(js::InitFunctionEnvironmentObjects(cx_, frame));
+      PUSH_EXIT_FRAME();
+      TRY(js::InitFunctionEnvironmentObjects(cx, frame));
     }
   }
-
-  VMFrameManager frameMgr(cx_, frame);
 
   while (true) {
   dispatch:
