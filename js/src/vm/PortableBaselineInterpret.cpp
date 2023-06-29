@@ -43,7 +43,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) printf(__VA_ARGS__)
@@ -1189,6 +1189,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         IC_POP_ARG(1);
         IC_POP_ARG(0);
         INVOKE_IC(In);
+        IC_PUSH_RESULT();
         END_OP(In);
       }
 
@@ -1759,6 +1760,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = GET_ARGC(pc.pc);
         state.extraArgs = 2;
         state.spreadCall = false;
+        // IC handles stack -- we don't pop args or push result.
         INVOKE_IC(Call);
         END_OP(Call);
       }
@@ -1771,6 +1773,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = GET_ARGC(pc.pc);
         state.extraArgs = 3;
         state.spreadCall = false;
+        // IC handles stack -- we don't pop args or push result.
         INVOKE_IC(Call);
         END_OP(SuperCall);
       }
@@ -1783,6 +1786,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = 1;
         state.extraArgs = 2;
         state.spreadCall = true;
+        // IC handles stack -- we don't pop args or push result.
         INVOKE_IC(Call);
         END_OP(SpreadCall);
       }
@@ -1793,6 +1797,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.argc = 1;
         state.extraArgs = 3;
         state.spreadCall = true;
+        // IC handles stack -- we don't pop args or push result.
         INVOKE_IC(Call);
         END_OP(SpreadSuperCall);
       }
@@ -2325,7 +2330,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         IC_POP_ARG(0);
         PUSH(StackVal(state.icVals[1]));
         INVOKE_IC(SetProp);
-        IC_PUSH_RESULT();
         END_OP(SetProp);
       }
 
