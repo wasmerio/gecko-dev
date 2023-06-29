@@ -66,9 +66,10 @@ class CompactBufferReader {
  public:
   CompactBufferReader(const uint8_t* start, const uint8_t* end)
       : buffer_(start), end_(end) {}
+  CompactBufferReader(const uint8_t* start) : buffer_(start), end_(nullptr) {}
   inline explicit CompactBufferReader(const CompactBufferWriter& writer);
   uint8_t readByte() {
-    MOZ_ASSERT(buffer_ < end_);
+    MOZ_ASSERT_IF(!!end_, buffer_ < end_);
     return *buffer_++;
   }
   uint32_t readFixedUint32_t() {
@@ -105,9 +106,9 @@ class CompactBufferReader {
   }
   // Reads a value written by writeUnsigned15Bit.
   uint32_t readUnsigned15Bit() {
-    uint8_t lo = readByte();
-    uint8_t hi = readByte();
-    return (uint32_t(hi) << 8) | lo;
+    uint16_t value = *reinterpret_cast<const uint16_t*>(buffer_);
+    buffer_ += 2;
+    return value;
   }
   void* readRawPointer() {
     uintptr_t ptrWord = 0;
@@ -118,14 +119,17 @@ class CompactBufferReader {
   }
 
   bool more() const {
+    if (!end_) {
+      return false;
+    }
     MOZ_ASSERT(buffer_ <= end_);
     return buffer_ < end_;
   }
 
   void seek(const uint8_t* start, uint32_t offset) {
     buffer_ = start + offset;
-    MOZ_ASSERT(start < end_);
-    MOZ_ASSERT(buffer_ <= end_);
+    MOZ_ASSERT_IF(!!end_, start < end_);
+    MOZ_ASSERT_IF(!!end_, buffer_ <= end_);
   }
 
   const uint8_t* currentPosition() const { return buffer_; }
