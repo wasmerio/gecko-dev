@@ -269,7 +269,7 @@ class ICCacheIRStub final : public ICStub {
 
  public:
   ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
-      : ICStub(stubCode->raw(), /* isFallback = */ false),
+      : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false),
         stubInfo_(stubInfo) {}
 
   ICStub* next() const { return next_; }
