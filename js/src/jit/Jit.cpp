@@ -34,7 +34,8 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
   MOZ_ASSERT(code != cx->runtime()->jitRuntime()->interpreterStub().value);
   MOZ_ASSERT(IsBaselineInterpreterEnabled());
 #else
-  MOZ_ASSERT(IsPortableBaselineInterpreterEnabled());
+  MOZ_ASSERT(IsBaselineInterpreterEnabled() ||
+             IsPortableBaselineInterpreterEnabled());
 #endif
 
   AutoCheckRecursionLimit recursion(cx);
@@ -154,7 +155,7 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
 // Call the per-script interpreter entry trampoline.
 bool js::jit::EnterInterpreterEntryTrampoline(uint8_t* code, JSContext* cx,
                                               RunState* state) {
-  using EnterTrampolineCodePtr = bool (*)(JSContext* cx, RunState*);
+  using EnterTrampolineCodePtr = bool (*)(JSContext * cx, RunState*);
   auto funcPtr = JS_DATA_TO_FUNC_PTR(EnterTrampolineCodePtr, code);
   return CALL_GENERATED_2(funcPtr, cx, state);
 }
@@ -230,8 +231,8 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
         break;
       }
     }
-    
-#else // !ENABLE_PORTABLE_BASELINE_INTERP
+
+#else  // !ENABLE_PORTABLE_BASELINE_INTERP
 
     // Try to enter the Portable Baseline Interpreter.
     if (IsPortableBaselineInterpreterEnabled()) {
