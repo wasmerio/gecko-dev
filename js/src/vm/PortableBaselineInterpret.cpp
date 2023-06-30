@@ -46,7 +46,11 @@
 // #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
-#  define TRACE_PRINTF(...) printf(__VA_ARGS__)
+#  define TRACE_PRINTF(...) \
+    do {                    \
+      printf(__VA_ARGS__);  \
+      fflush(stdout);       \
+    } while (0)
 #else
 #  define TRACE_PRINTF(...) \
     do {                    \
@@ -206,7 +210,6 @@ struct State {
   Rooted<JSAtom*> atom0;
   RootedFunction fun0;
   Rooted<Scope*> scope0;
-  int argc;
   int extraArgs;
   bool spreadCall;
 
@@ -314,7 +317,8 @@ enum class ICInterpretOpResult {
 };
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
-ICInterpretOp(State& state, ICCacheIRStub* cstub) {
+ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
+              State& state, ICCacheIRStub* cstub) {
   CacheOp op = state.cacheIRReader.readOp();
   switch (op) {
     case CacheOp::ReturnFromIC:
@@ -348,6 +352,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardToString: {
+      TRACE_PRINTF("GuardToString\n");
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isString()) {
@@ -358,6 +363,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardToSymbol: {
+      TRACE_PRINTF("GuardToSymbol\n");
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isSymbol()) {
@@ -368,6 +374,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardToBigInt: {
+      TRACE_PRINTF("GuardToBigInt\n");
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isBigInt()) {
@@ -378,6 +385,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardToBoolean: {
+      TRACE_PRINTF("GuardToBoolean\n");
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isBoolean()) {
@@ -388,6 +396,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardIsNullOrUndefined: {
+      TRACE_PRINTF("GuardIsNullOrUndefined\n");
       ObjOperandId inputId = state.cacheIRReader.objOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isNullOrUndefined()) {
@@ -397,6 +406,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardIsNull: {
+      TRACE_PRINTF("GuardIsNull\n");
       ObjOperandId inputId = state.cacheIRReader.objOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isNull()) {
@@ -406,6 +416,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardIsUndefined: {
+      TRACE_PRINTF("GuardIsUndefined\n");
       ObjOperandId inputId = state.cacheIRReader.objOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isUndefined()) {
@@ -415,6 +426,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardNonDoubleType: {
+      TRACE_PRINTF("GuardNonDoubleType\n");
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       ValueType type = state.cacheIRReader.valueType();
       Value val = Value::fromRawBits(state.icVals[inputId.id()]);
@@ -492,6 +504,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::LoadObject: {
+      TRACE_PRINTF("LoadObject\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       uint32_t objOffset = state.cacheIRReader.stubOffset();
       intptr_t obj = cstub->stubInfo()->getStubRawWord(cstub, objOffset);
@@ -500,18 +513,21 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::LoadOperandResult: {
+      TRACE_PRINTF("LoadOperandResult\n");
       ValOperandId valId = state.cacheIRReader.valOperandId();
       state.icResult = state.icVals[valId.id()];
       break;
     }
 
     case CacheOp::LoadValueResult: {
+      TRACE_PRINTF("LoadValueResult\n");
       uint32_t valOffset = state.cacheIRReader.stubOffset();
       state.icResult = cstub->stubInfo()->getStubRawInt64(cstub, valOffset);
       break;
     }
 
     case CacheOp::LoadObjectResult: {
+      TRACE_PRINTF("LoadObjectResult\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       state.icResult =
           ObjectValue(*reinterpret_cast<JSObject*>(state.icVals[objId.id()]))
@@ -520,6 +536,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::LoadStringResult: {
+      TRACE_PRINTF("LoadStringResult\n");
       StringOperandId stringId = state.cacheIRReader.stringOperandId();
       state.icResult =
           StringValue(reinterpret_cast<JSString*>(state.icVals[stringId.id()]))
@@ -528,6 +545,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::LoadSymbolResult: {
+      TRACE_PRINTF("LoadSymbolResult\n");
       SymbolOperandId symbolId = state.cacheIRReader.symbolOperandId();
       state.icResult = SymbolValue(reinterpret_cast<JS::Symbol*>(
                                        state.icVals[symbolId.id()]))
@@ -536,12 +554,14 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::LoadInt32Result: {
+      TRACE_PRINTF("LoadInt32Result\n");
       Int32OperandId intId = state.cacheIRReader.int32OperandId();
       state.icResult = Int32Value(state.icVals[intId.id()]).asRawBits();
       break;
     }
 
     case CacheOp::LoadBigIntResult: {
+      TRACE_PRINTF("LoadBigIntResult\n");
       BigIntOperandId bigintId = state.cacheIRReader.bigIntOperandId();
       state.icResult = BigIntValue(reinterpret_cast<JS::BigInt*>(
                                        state.icVals[bigintId.id()]))
@@ -550,12 +570,19 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::LoadDoubleResult: {
+      TRACE_PRINTF("LoadDoubleResult\n");
       NumberOperandId numId = state.cacheIRReader.numberOperandId();
       Value val = Value::fromRawBits(state.icVals[numId.id()]);
       if (val.isInt32()) {
         val = DoubleValue(val.toInt32());
       }
       state.icResult = val.asRawBits();
+      break;
+    }
+
+    case CacheOp::LoadBooleanResult: {
+      TRACE_PRINTF("LoadBooleanResult\n");
+      state.icResult = BooleanValue(state.cacheIRReader.readBool()).asRawBits();
       break;
     }
 
@@ -583,6 +610,26 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
           reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       HeapSlot* slots = nobj->getSlotsUnchecked();
       state.icResult = slots[offset / sizeof(Value)].get().asRawBits();
+      break;
+    }
+
+    case CacheOp::LoadArgumentDynamicSlot: {
+      TRACE_PRINTF("LoadArgumentDynamicSlot\n");
+      ValOperandId resultId = state.cacheIRReader.valOperandId();
+      Int32OperandId argcId = state.cacheIRReader.int32OperandId();
+      uint8_t slotIndex = state.cacheIRReader.readByte();
+      int32_t argc = int32_t(state.icVals[argcId.id()]);
+      Value val = stack[slotIndex + argc].asValue();
+      state.icVals[resultId.id()] = val.asRawBits();
+      break;
+    }
+
+    case CacheOp::LoadArgumentFixedSlot: {
+      TRACE_PRINTF("LoadArgumentFixedSlot\n");
+      ValOperandId resultId = state.cacheIRReader.valOperandId();
+      uint8_t slotIndex = state.cacheIRReader.readByte();
+      Value val = stack[slotIndex].asValue();
+      state.icVals[resultId.id()] = val.asRawBits();
       break;
     }
 
@@ -622,6 +669,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
       });
 
     case CacheOp::Int32IncResult: {
+      TRACE_PRINTF("Int32IncResult\n");
       Int32OperandId intId = state.cacheIRReader.int32OperandId();
       int64_t value = int64_t(int32_t(state.icVals[intId.id()]));
       value++;
@@ -747,7 +795,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
         cstub->incrementEnteredCount();                                      \
         new (&state.cacheIRReader) CacheIRReader(cstub->stubInfo()->code()); \
         while (true) {                                                       \
-          switch (ICInterpretOp(state, cstub)) {                             \
+          switch (ICInterpretOp(frame, frameMgr, stack, state, cstub)) {     \
             case ICInterpretOpResult::Fail:                                  \
               stub = stub->maybeNext();                                      \
               RESTORE_INPUTS(arity);                                         \
@@ -789,9 +837,10 @@ DEFINE_IC(GetName, 1, {
   }
 });
 
-DEFINE_IC(Call, 0, {
+DEFINE_IC(Call, 1, {
+  uint32_t argc = uint32_t(state.icVals[0]);
   uint32_t totalArgs =
-      state.argc + state.extraArgs;  // this, callee, (cosntructing?), func args
+      argc + state.extraArgs;  // this, callee, (cosntructing?), func args
   Value* args = reinterpret_cast<Value*>(&stack[0]);
   // Reverse values on the stack.
   for (uint32_t i = 0; i < totalArgs / 2; i++) {
@@ -804,7 +853,7 @@ DEFINE_IC(Call, 0, {
         goto error;
       }
     } else {
-      if (!DoCallFallback(cx, frame, fallback, state.argc, args, &state.res)) {
+      if (!DoCallFallback(cx, frame, fallback, argc, args, &state.res)) {
         goto error;
       }
     }
@@ -1857,7 +1906,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         static_assert(JSOpLength_Call == JSOpLength_CallContentIter);
         static_assert(JSOpLength_Call == JSOpLength_Eval);
         static_assert(JSOpLength_Call == JSOpLength_StrictEval);
-        state.argc = GET_ARGC(pc);
+        state.icVals[0] = GET_ARGC(pc);
         state.extraArgs = 2;
         state.spreadCall = false;
         // IC handles stack -- we don't pop args or push result.
@@ -1870,7 +1919,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::NewContent: {
         static_assert(JSOpLength_SuperCall == JSOpLength_New);
         static_assert(JSOpLength_SuperCall == JSOpLength_NewContent);
-        state.argc = GET_ARGC(pc);
+        state.icVals[0] = GET_ARGC(pc);
         state.extraArgs = 3;
         state.spreadCall = false;
         // IC handles stack -- we don't pop args or push result.
@@ -1883,7 +1932,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::StrictSpreadEval: {
         static_assert(JSOpLength_SpreadCall == JSOpLength_SpreadEval);
         static_assert(JSOpLength_SpreadCall == JSOpLength_StrictSpreadEval);
-        state.argc = 1;
+        state.icVals[0] = 1;
         state.extraArgs = 2;
         state.spreadCall = true;
         // IC handles stack -- we don't pop args or push result.
@@ -1894,7 +1943,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
       case JSOp::SpreadSuperCall:
       case JSOp::SpreadNew: {
         static_assert(JSOpLength_SpreadSuperCall == JSOpLength_SpreadNew);
-        state.argc = 1;
+        state.icVals[0] = 1;
         state.extraArgs = 3;
         state.spreadCall = true;
         // IC handles stack -- we don't pop args or push result.
