@@ -1,13 +1,14 @@
 - implement await/resume
 
-- start to implement interpreter for CacheIR
-  - (X) u64 array for "registers" / operandIDs
-  - (X) tail (post-IC-return) dispatch and fallback dispatch based on
-    "IC kind" state
-  - use *only* icVals; don't use the rooted storage in `state` unless
-    we go to the fallback. (Avoid some data movement and the barriers
-    too.)
-  - make ICs a separate call, and integrate tails into main interp body
-  - thread the interp dispatch (computed-goto-table)
-  - use raw value writes; ensure no barriers occur on stack
-  - optimize CacheIR fetch further?
+- pass all jit-tests
+
+- implement as many CacheIR ops as needed to completely cover markdown renderer
+- opts:
+  - "next-op fusion": cover a few likely next ops with if-goto
+    - for bonus points, make these edges acyclic; then the wasm compilation can
+      handle it too without any loop-backedges
+  - cover a few common cases (e.g. int32 compare/arith) without doing ICs at all
+  - cache unchanging values (stubInfo?) as needed
+
+- weval the IC interp and PBL interp loops
+  - memory-rename the stack and icVals too

@@ -336,7 +336,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     case CacheOp::GuardToObject: {
-      ObjOperandId inputId = state.cacheIRReader.objOperandId();
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       TRACE_PRINTF("GuardToObject: icVal %" PRIx64 "\n",
                    state.icVals[inputId.id()]);
@@ -344,6 +344,46 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
         return ICInterpretOpResult::Fail;
       }
       state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(&v.toObject());
+      break;
+    }
+
+    case CacheOp::GuardToString: {
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (!v.isString()) {
+        return ICInterpretOpResult::Fail;
+      }
+      state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toString());
+      break;
+    }
+
+    case CacheOp::GuardToSymbol: {
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (!v.isSymbol()) {
+        return ICInterpretOpResult::Fail;
+      }
+      state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toSymbol());
+      break;
+    }
+
+    case CacheOp::GuardToBigInt: {
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (!v.isBigInt()) {
+        return ICInterpretOpResult::Fail;
+      }
+      state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toBigInt());
+      break;
+    }
+
+    case CacheOp::GuardToBoolean: {
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
+      Value v = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (!v.isBoolean()) {
+        return ICInterpretOpResult::Fail;
+      }
+      state.icVals[inputId.id()] = v.toBoolean() ? 1 : 0;
       break;
     }
 
@@ -451,9 +491,23 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
       break;
     }
 
+    case CacheOp::LoadObject: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t objOffset = state.cacheIRReader.stubOffset();
+      intptr_t obj = cstub->stubInfo()->getStubRawWord(cstub, objOffset);
+      state.icVals[objId.id()] = obj;
+      break;
+    }
+
     case CacheOp::LoadOperandResult: {
       ValOperandId valId = state.cacheIRReader.valOperandId();
       state.icResult = state.icVals[valId.id()];
+      break;
+    }
+
+    case CacheOp::LoadValueResult: {
+      uint32_t valOffset = state.cacheIRReader.stubOffset();
+      state.icResult = cstub->stubInfo()->getStubRawInt64(cstub, valOffset);
       break;
     }
 
@@ -617,7 +671,7 @@ ICInterpretOp(State& state, ICCacheIRStub* cstub) {
     }
 
     default:
-      TRACE_PRINTF("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+      printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
       return ICInterpretOpResult::Fail;
   }
 
