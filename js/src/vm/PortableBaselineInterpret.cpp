@@ -15,6 +15,8 @@
 
 #include "jsapi.h"
 
+#include "builtin/DataViewObject.h"
+#include "builtin/MapObject.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -486,12 +488,145 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::GuardSpecificFunction: {
+      TRACE_PRINTF("GuardSpecificFunction\n");
+      ObjOperandId funId = state.cacheIRReader.objOperandId();
+      uint32_t expectedOffset = state.cacheIRReader.stubOffset();
+      uint32_t nargsAndFlagsOffset = state.cacheIRReader.stubOffset();
+      (void)nargsAndFlagsOffset; // Unused.
+      uintptr_t expected =
+          cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
+      if (expected != state.icVals[funId.id()]) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardSpecificObject: {
+      TRACE_PRINTF("GuardSpecificObject\n");
+      ObjOperandId funId = state.cacheIRReader.objOperandId();
+      uint32_t expectedOffset = state.cacheIRReader.stubOffset();
+      uintptr_t expected =
+          cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
+      if (expected != state.icVals[funId.id()]) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardSpecificAtom: {
+      TRACE_PRINTF("GuardSpecificAtom\n");
+      StringOperandId strId = state.cacheIRReader.stringOperandId();
+      uint32_t expectedOffset = state.cacheIRReader.stubOffset();
+      uintptr_t expected =
+          cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
+      if (expected != state.icVals[strId.id()]) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardSpecificSymbol: {
+      TRACE_PRINTF("GuardSpecificSymbol\n");
+      SymbolOperandId symId = state.cacheIRReader.symbolOperandId();
+      uint32_t expectedOffset = state.cacheIRReader.stubOffset();
+      uintptr_t expected =
+          cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
+      if (expected != state.icVals[symId.id()]) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardSpecificInt32: {
+      TRACE_PRINTF("GuardSpecificInt32\n");
+      Int32OperandId int32Id = state.cacheIRReader.int32OperandId();
+      uint32_t expectedOffset = state.cacheIRReader.stubOffset();
+      uint32_t expected =
+          cstub->stubInfo()->getStubRawInt32(cstub, expectedOffset);
+      if (expected != uint32_t(state.icVals[int32Id.id()])) {
+        return ICInterpretOpResult::Fail;
+      }
+      break;
+    }
+
+    case CacheOp::GuardClass: {
+      TRACE_PRINTF("GuardClass\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      GuardClassKind kind = state.cacheIRReader.guardClassKind();
+      JSObject* object = reinterpret_cast<JSObject*>(state.icVals[objId.id()]);
+      switch (kind) {
+        case GuardClassKind::Array:
+          if (object->getClass() != &ArrayObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::PlainObject:
+          if (object->getClass() != &PlainObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::ArrayBuffer:
+          if (object->getClass() != &ArrayBufferObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::SharedArrayBuffer:
+          if (object->getClass() != &SharedArrayBufferObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::DataView:
+          if (object->getClass() != &DataViewObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::MappedArguments:
+          if (object->getClass() != &MappedArgumentsObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::UnmappedArguments:
+          if (object->getClass() != &UnmappedArgumentsObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::WindowProxy:
+          if (object->getClass() != frameMgr.cxForLocalUseOnly()
+                                        ->runtime()
+                                        ->maybeWindowProxyClass()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::JSFunction:
+          if (!object->is<JSFunction>()) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::Set:
+          if (object->getClass() != &SetObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::Map:
+          if (object->getClass() != &MapObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+        case GuardClassKind::BoundFunction:
+          if (object->getClass() != &BoundFunctionObject::class_) {
+            return ICInterpretOpResult::Fail;
+          }
+          break;
+      }
+      break;
+    }
+
     case CacheOp::StoreDynamicSlot: {
       TRACE_PRINTF("StoreDynamicSlot\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       uint32_t offsetOffset = state.cacheIRReader.stubOffset();
-      uintptr_t offset =
-          cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+      uint32_t offset = cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
       ValOperandId valId = state.cacheIRReader.valOperandId();
       NativeObject* nobj =
           reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
