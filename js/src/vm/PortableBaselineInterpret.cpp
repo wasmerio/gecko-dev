@@ -493,7 +493,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ObjOperandId funId = state.cacheIRReader.objOperandId();
       uint32_t expectedOffset = state.cacheIRReader.stubOffset();
       uint32_t nargsAndFlagsOffset = state.cacheIRReader.stubOffset();
-      (void)nargsAndFlagsOffset; // Unused.
+      (void)nargsAndFlagsOffset;  // Unused.
       uintptr_t expected =
           cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
       if (expected != state.icVals[funId.id()]) {
@@ -850,6 +850,37 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           MOZ_CRASH("Unexpected opcode");
       }
       state.icResult = BooleanValue(result).asRawBits();
+      break;
+    }
+
+    case CacheOp::CallScriptedFunction: {
+      ObjOperandId calleeId = state.cacheIRReader.objOperandId();
+      JSFunction* callee = reinterpret_cast<JSFunction*>(state.icVals[calleeId.id()]);
+      Int32OperandId argcId = state.cacheIRReader.int32OperandId();
+      uint32_t argc = uint32_t(state.icVals[argcId.id()]);
+      CallFlags flags = state.cacheIRReader.callFlags();
+      uint32_t argcFixed = state.cacheIRReader.uint32Immediate();
+
+      // For now, fail any constructing or different-realm cases.
+      if (flags.isConstructing() || flags.isSameRealm()) {
+        return ICInterpretOpResult::Fail;
+      }
+
+      // For now, fail any arg-underflow case.
+      if (argc < callee->nargs()) {
+        return ICInterpretOpResult::Fail;
+      }
+
+      // TODO: push a stub frame; include descriptor of parent baseline frame.
+
+      // TODO: push args in correct order.
+
+      // TODO: push calleeToken (from calleeId) and baseline-stub frame descriptor.
+
+      // call PortableBaselineInterpret directly.
+
+      // pop frame and set retval.
+      
       break;
     }
 
