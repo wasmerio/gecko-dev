@@ -207,6 +207,8 @@ struct State {
   RootedObject obj0;
   RootedObject obj1;
   RootedObject obj2;
+  RootedString str0;
+  RootedString str1;
   RootedScript script0;
   Rooted<PropertyName*> name0;
   Rooted<jsid> id0;
@@ -231,6 +233,8 @@ struct State {
         obj0(cx),
         obj1(cx),
         obj2(cx),
+        str0(cx),
+        str1(cx),
         script0(cx),
         name0(cx),
         id0(cx),
@@ -324,10 +328,7 @@ enum class ICInterpretOpResult {
   Error,
 };
 
-#define PUSH_IC_FRAME()                               \
-  PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error); \
-  stack[0] =                                          \
-      StackVal(nullptr); /* replace ExitFrameType with the "IC stub reg" */
+#define PUSH_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
 ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
@@ -864,6 +865,20 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::GuardGlobalGeneration: {
+      TRACE_PRINTF("GuardFunctionScript\n");
+      uint32_t expectedOffset = state.cacheIRReader.stubOffset();
+      uint32_t generationAddrOffset = state.cacheIRReader.stubOffset();
+      uint32_t expected =
+          cstub->stubInfo()->getStubRawInt32(cstub, expectedOffset);
+      uint32_t* generationAddr = reinterpret_cast<uint32_t*>(
+          cstub->stubInfo()->getStubRawWord(cstub, generationAddrOffset));
+      if (*generationAddr != expected) {
+        return ICInterpretOpResult::NextIC;
+      }
+      break;
+    }
+
     case CacheOp::GuardFunctionScript: {
       TRACE_PRINTF("GuardFunctionScript\n");
       ObjOperandId funId = state.cacheIRReader.objOperandId();
@@ -957,6 +972,50 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
         return ICInterpretOpResult::Error;
       }
 
+      break;
+    }
+
+    case CacheOp::AssertPropertyLookup: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t idOffset = state.cacheIRReader.stubOffset();
+      uint32_t slotOffset = state.cacheIRReader.stubOffset();
+      // Debug-only assertion; we can ignore.
+      (void)objId;
+      (void)idOffset;
+      (void)slotOffset;
+      break;
+    }
+
+    case CacheOp::CallInt32ToString: {
+      Int32OperandId inputId = state.cacheIRReader.int32OperandId();
+      StringOperandId resultId = state.cacheIRReader.stringOperandId();
+      int32_t input = int32_t(state.icVals[inputId.id()]);
+      JSLinearString* str =
+          Int32ToStringPure(frameMgr.cxForLocalUseOnly(), input);
+      if (str) {
+        state.icVals[resultId.id()] = reinterpret_cast<uintptr_t>(str);
+      } else {
+        return ICInterpretOpResult::NextIC;
+      }
+      break;
+    }
+
+    case CacheOp::CallStringConcatResult: {
+      StringOperandId lhsId = state.cacheIRReader.stringOperandId();
+      StringOperandId rhsId = state.cacheIRReader.stringOperandId();
+      // We don't push a frame and do a CanGC invocation here; we do a
+      // pure (NoGC) invocation only, because it's cheaper.
+      FakeRooted<JSString*> lhs(
+          nullptr, reinterpret_cast<JSString*>(state.icVals[lhsId.id()]));
+      FakeRooted<JSString*> rhs(
+          nullptr, reinterpret_cast<JSString*>(state.icVals[rhsId.id()]));
+      JSString* result =
+          ConcatStrings<NoGC>(frameMgr.cxForLocalUseOnly(), lhs, rhs);
+      if (result) {
+        state.icResult = StringValue(result).asRawBits();
+      } else {
+        return ICInterpretOpResult::NextIC;
+      }
       break;
     }
 
