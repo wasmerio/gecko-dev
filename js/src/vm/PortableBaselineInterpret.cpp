@@ -85,7 +85,7 @@ struct Stack {
 
   Stack(PortableBaselineStack& pbs)
       : sp(reinterpret_cast<StackVal*>(pbs.top)),
-        fp(nullptr),
+        fp(sp),
         base(reinterpret_cast<StackVal*>(pbs.base)),
         top(reinterpret_cast<StackVal*>(pbs.top)) {}
 
@@ -107,11 +107,13 @@ struct Stack {
   }
   StackVal pop() {
     MOZ_ASSERT(sp + 1 <= top);
+    MOZ_ASSERT(sp < fp);
     return *sp++;
   }
   void popn(size_t len) {
     MOZ_ASSERT(sp + len <= top);
     sp += len;
+    MOZ_ASSERT(sp <= fp);
   }
 
   StackVal* cur() const { return sp; }
@@ -122,13 +124,12 @@ struct Stack {
   }
 
   [[nodiscard]] BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
-#ifdef DEBUG
-    auto* prevFP = fp;
-#endif
+    TRACE_PRINTF("pushFrame: sp = %p fp = %p\n", sp, fp);
     if (!push(StackVal(fp))) {
       return nullptr;
     }
     fp = cur();
+    TRACE_PRINTF("pushFrame: new fp = %p\n", fp);
 
     BaselineFrame* frame =
         reinterpret_cast<BaselineFrame*>(allocate(BaselineFrame::Size()));
@@ -142,23 +143,34 @@ struct Stack {
     frame->setICScript(script->jitScript()->icScript());
     frame->setInterpreterFields(script->code());
 #ifdef DEBUG
-    uintptr_t frameSize =
-        reinterpret_cast<uintptr_t>(prevFP) - reinterpret_cast<uintptr_t>(fp);
-    frame->setDebugFrameSize(frameSize);
+    frame->setDebugFrameSize(0);
 #endif
-
     return frame;
   }
 
   void popFrame(JSContext* cx) {
     StackVal* newTOS = fp + 1;
     fp = reinterpret_cast<StackVal*>(fp->asVoidPtr());
+    MOZ_ASSERT(fp);
+    TRACE_PRINTF("popFrame: fp = %p\n", fp);
     restore(newTOS);
   }
 
   [[nodiscard]] StackVal* pushExitFrame(BaselineFrame* prevFrame) {
     uint8_t* prevFP =
         reinterpret_cast<uint8_t*>(prevFrame) + BaselineFrame::Size();
+    MOZ_ASSERT(reinterpret_cast<StackVal*>(prevFP) == fp);
+#ifdef DEBUG
+    MOZ_ASSERT(fp != nullptr);
+    uintptr_t frameSize =
+        reinterpret_cast<uintptr_t>(fp) - reinterpret_cast<uintptr_t>(cur());
+    MOZ_ASSERT(reinterpret_cast<uintptr_t>(fp) >=
+               reinterpret_cast<uintptr_t>(cur()));
+    TRACE_PRINTF("pushExitFrame: fp = %p cur() = %p -> frameSize = %d\n", fp,
+                 cur(), int(frameSize));
+    MOZ_ASSERT(frameSize >= BaselineFrame::Size());
+    prevFrame->setDebugFrameSize(frameSize);
+#endif
 
     if (!push(StackVal(
             MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)))) {
@@ -172,22 +184,19 @@ struct Stack {
     }
     StackVal* exitFP = cur();
     fp = exitFP;
+    TRACE_PRINTF(" -> fp = %p\n", fp);
     if (!push(StackVal(uint64_t(ExitFrameType::Bare)))) {
       return nullptr;
     }
-#ifdef DEBUG
-    uintptr_t frameSize =
-        (reinterpret_cast<uintptr_t>(prevFP) -
-         reinterpret_cast<uintptr_t>(exitFP) - ExitFrameLayout::Size());
-    MOZ_ASSERT(frameSize <= 0xffffffff);
-    prevFrame->setDebugFrameSize(uint32_t(frameSize));
-#endif
     return exitFP;
   }
 
   void popExitFrame(StackVal* fp) {
-    restore(fp);
-    sp += 3;
+    StackVal* prevFP = reinterpret_cast<StackVal*>(fp->asVoidPtr());
+    MOZ_ASSERT(prevFP);
+    restore(fp + 3);
+    this->fp = prevFP;
+    TRACE_PRINTF("popExitFrame: fp -> %p sp -> %p\n", fp, sp);
   }
 
   BaselineFrame* frameFromFP() {
