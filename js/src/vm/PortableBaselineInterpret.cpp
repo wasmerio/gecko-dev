@@ -489,14 +489,40 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
     case CacheOp::GuardShape: {
       TRACE_PRINTF("GuardShape\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
-      uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+      uint32_t shapeOffset = state.cacheIRReader.stubOffset();
       NativeObject* nobj =
           reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       uintptr_t expectedShape =
-          cstub->stubInfo()->getStubRawWord(cstub, offsetOffset);
+          cstub->stubInfo()->getStubRawWord(cstub, shapeOffset);
       if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
         return ICInterpretOpResult::NextIC;
       }
+      break;
+    }
+
+    case CacheOp::GuardProto: {
+      TRACE_PRINTF("GuardProto\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t protoOffset = state.cacheIRReader.stubOffset();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      uintptr_t expectedProto =
+          cstub->stubInfo()->getStubRawWord(cstub, protoOffset);
+      if (reinterpret_cast<uintptr_t>(nobj->staticPrototype()) !=
+          expectedProto) {
+        return ICInterpretOpResult::NextIC;
+      }
+      break;
+    }
+
+    case CacheOp::LoadProto: {
+      TRACE_PRINTF("LoadProto\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      ObjOperandId resultId = state.cacheIRReader.objOperandId();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      state.icVals[resultId.id()] =
+          reinterpret_cast<uintptr_t>(nobj->staticPrototype());
       break;
     }
 
@@ -691,6 +717,15 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::LoadConstantStringResult: {
+      TRACE_PRINTF("LoadConstantStringResult\n");
+      uint32_t offset = state.cacheIRReader.stubOffset();
+      JSString* str = reinterpret_cast<JSString*>(
+          cstub->stubInfo()->getStubRawWord(cstub, offset));
+      state.icResult = StringValue(str).asRawBits();
+      break;
+    }
+
     case CacheOp::LoadSymbolResult: {
       TRACE_PRINTF("LoadSymbolResult\n");
       SymbolOperandId symbolId = state.cacheIRReader.symbolOperandId();
@@ -862,6 +897,63 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           MOZ_CRASH("Unexpected opcode");
       }
       state.icResult = BooleanValue(result).asRawBits();
+      break;
+    }
+
+    case CacheOp::CompareStringResult: {
+      TRACE_PRINTF("CompareStringResult\n");
+      JSOp op = state.cacheIRReader.jsop();
+      StringOperandId lhsId = state.cacheIRReader.stringOperandId();
+      StringOperandId rhsId = state.cacheIRReader.stringOperandId();
+      state.str0 = reinterpret_cast<JSString*>(state.icVals[lhsId.id()]);
+      state.str1 = reinterpret_cast<JSString*>(state.icVals[rhsId.id()]);
+      {
+        PUSH_IC_FRAME();
+        bool result;
+        switch (op) {
+          case JSOp::Eq:
+          case JSOp::StrictEq:
+            if (!StringsEqual<EqualityKind::Equal>(cx, state.str0, state.str1,
+                                                   &result)) {
+              return ICInterpretOpResult::Error;
+            }
+            break;
+          case JSOp::Ne:
+          case JSOp::StrictNe:
+            if (!StringsEqual<EqualityKind::NotEqual>(cx, state.str0,
+                                                      state.str1, &result)) {
+              return ICInterpretOpResult::Error;
+            }
+            break;
+          case JSOp::Lt:
+            if (!StringsCompare<ComparisonKind::LessThan>(
+                    cx, state.str0, state.str1, &result)) {
+              return ICInterpretOpResult::Error;
+            }
+            break;
+          case JSOp::Ge:
+            if (!StringsCompare<ComparisonKind::GreaterThanOrEqual>(
+                    cx, state.str0, state.str1, &result)) {
+              return ICInterpretOpResult::Error;
+            }
+            break;
+          case JSOp::Le:
+            if (!StringsCompare<ComparisonKind::GreaterThanOrEqual>(
+                    cx, state.str1, state.str0, &result)) {
+              return ICInterpretOpResult::Error;
+            }
+            break;
+          case JSOp::Gt:
+            if (!StringsCompare<ComparisonKind::LessThan>(
+                    cx, state.str1, state.str0, &result)) {
+              return ICInterpretOpResult::Error;
+            }
+            break;
+          default:
+            MOZ_CRASH("bad opcode");
+        }
+        state.icResult = BooleanValue(result).asRawBits();
+      }
       break;
     }
 
