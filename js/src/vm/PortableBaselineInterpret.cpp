@@ -896,8 +896,11 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
-    case CacheOp::CallScriptedFunction: {
-      TRACE_PRINTF("CallScriptedFunction\n");
+    case CacheOp::CallScriptedFunction:
+    case CacheOp::CallNativeFunction: {
+      bool isNative = op == CacheOp::CallNativeFunction;
+      TRACE_PRINTF("CallScriptedFunction / CallNativeFunction (native: %d)\n",
+                   isNative);
       ObjOperandId calleeId = state.cacheIRReader.objOperandId();
       JSFunction* callee =
           reinterpret_cast<JSFunction*>(state.icVals[calleeId.id()]);
@@ -906,6 +909,10 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       CallFlags flags = state.cacheIRReader.callFlags();
       uint32_t argcFixed = state.cacheIRReader.uint32Immediate();
       (void)argcFixed;
+      bool ignoresRv = false;
+      if (isNative) {
+        ignoresRv = state.cacheIRReader.readBool();
+      }
 
       // For now, fail any constructing or different-realm cases.
       if (flags.isConstructing() || !flags.isSameRealm()) {
@@ -924,11 +931,11 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
         return ICInterpretOpResult::NextIC;
       }
 
-      const uint32_t extra =
-          1;  // for now; when we support ctors, that is one more.
+      uint32_t extra = 1 + flags.isConstructing() + isNative;
       uint32_t totalArgs = argc + extra;
 
-      // Push one extra slot to save the return value in a rooted place.
+      // Push one extra slot to save the return value in a rooted
+      // place.
       if (!stack.push(StackVal(UndefinedValue()))) {
         return ICInterpretOpResult::Error;
       }
@@ -947,6 +954,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
             return ICInterpretOpResult::Error;
           }
         }
+        Value* args = reinterpret_cast<Value*>(stack.cur());
 
         if (!stack.push(StackVal(
                 CalleeToToken(callee, /* isConstructing = */ false)))) {
@@ -960,9 +968,19 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           return ICInterpretOpResult::Error;
         }
 
-        if (!PortableBaselineInterpret(cx, stack, /* envChain = */ nullptr,
-                                       ret)) {
-          return ICInterpretOpResult::Error;
+        if (isNative) {
+          JSNative native = ignoresRv
+                                ? callee->jitInfo()->ignoresReturnValueMethod
+                                : callee->native();
+          if (!native(cx, argc, args)) {
+            return ICInterpretOpResult::Error;
+          }
+          *ret = args[0];
+        } else {
+          if (!PortableBaselineInterpret(cx, stack, /* envChain = */ nullptr,
+                                         ret)) {
+            return ICInterpretOpResult::Error;
+          }
         }
       }
 
