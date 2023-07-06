@@ -171,6 +171,7 @@ struct Stack {
       return nullptr;
     }
     StackVal* exitFP = cur();
+    fp = exitFP;
     if (!push(StackVal(uint64_t(ExitFrameType::Bare)))) {
       return nullptr;
     }
@@ -300,10 +301,8 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
   return env->as<EnvironmentObject>();
 }
 
-// TODO: check all stack pushes for overflow
-// TODO: convert all (except OOM) `return false`s into exception-handling path
-// TODO: VM-call frames around ICs (and calls into runtime?) Mechanism
-// in general surrounding "escapes"; use this to cache SP, PC as well.
+static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
+                                      JSObject* envChain, Value* ret);
 
 #define TRY(x)    \
   if (!(x)) {     \
@@ -312,15 +311,27 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
 
 #define PUSH(val) TRY(stack.push(val));
 
+#define PUSH_EXIT_FRAME_OR_RET(value) \
+  VMFrame cx(frameMgr, stack, pc);    \
+  if (!cx.success()) {                \
+    return value;                     \
+  }
+
 enum class ICInterpretOpResult {
-  Fail,
+  NextIC,
   Ok,
   Return,
+  Error,
 };
+
+#define PUSH_IC_FRAME()                               \
+  PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error); \
+  stack[0] =                                          \
+      StackVal(nullptr); /* replace ExitFrameType with the "IC stub reg" */
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
 ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
-              State& state, ICCacheIRStub* cstub) {
+              State& state, ICCacheIRStub* cstub, jsbytecode* pc) {
   CacheOp op = state.cacheIRReader.readOp();
   switch (op) {
     case CacheOp::ReturnFromIC:
@@ -333,7 +344,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       TRACE_PRINTF("GuardToInt32 (%d): icVal %" PRIx64 "\n", inputId.id(),
                    state.icVals[inputId.id()]);
       if (!v.isInt32()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       // N.B.: we don't need to unbox because the low 32 bits are
       // already the int32 itself, and we are careful when using
@@ -347,7 +358,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       TRACE_PRINTF("GuardToObject: icVal %" PRIx64 "\n",
                    state.icVals[inputId.id()]);
       if (!v.isObject()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(&v.toObject());
       break;
@@ -358,7 +369,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isString()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toString());
       break;
@@ -369,7 +380,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isSymbol()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toSymbol());
       break;
@@ -380,7 +391,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isBigInt()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       state.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toBigInt());
       break;
@@ -391,7 +402,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ValOperandId inputId = state.cacheIRReader.valOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isBoolean()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       state.icVals[inputId.id()] = v.toBoolean() ? 1 : 0;
       break;
@@ -402,7 +413,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ObjOperandId inputId = state.cacheIRReader.objOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isNullOrUndefined()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -412,7 +423,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ObjOperandId inputId = state.cacheIRReader.objOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isNull()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -422,7 +433,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ObjOperandId inputId = state.cacheIRReader.objOperandId();
       Value v = Value::fromRawBits(state.icVals[inputId.id()]);
       if (!v.isUndefined()) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -435,37 +446,37 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       switch (type) {
         case ValueType::String:
           if (!val.isString()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case ValueType::Symbol:
           if (!val.isSymbol()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case ValueType::BigInt:
           if (!val.isBigInt()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case ValueType::Int32:
           if (!val.isInt32()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case ValueType::Boolean:
           if (!val.isBoolean()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case ValueType::Undefined:
           if (!val.isUndefined()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case ValueType::Null:
           if (!val.isNull()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         default:
@@ -483,7 +494,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       uintptr_t expectedShape =
           cstub->stubInfo()->getStubRawWord(cstub, offsetOffset);
       if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -497,7 +508,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       uintptr_t expected =
           cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
       if (expected != state.icVals[funId.id()]) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -509,7 +520,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       uintptr_t expected =
           cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
       if (expected != state.icVals[funId.id()]) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -521,7 +532,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       uintptr_t expected =
           cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
       if (expected != state.icVals[strId.id()]) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -533,7 +544,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       uintptr_t expected =
           cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
       if (expected != state.icVals[symId.id()]) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -545,7 +556,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       uint32_t expected =
           cstub->stubInfo()->getStubRawInt32(cstub, expectedOffset);
       if (expected != uint32_t(state.icVals[int32Id.id()])) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       break;
     }
@@ -558,64 +569,64 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       switch (kind) {
         case GuardClassKind::Array:
           if (object->getClass() != &ArrayObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::PlainObject:
           if (object->getClass() != &PlainObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::ArrayBuffer:
           if (object->getClass() != &ArrayBufferObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::SharedArrayBuffer:
           if (object->getClass() != &SharedArrayBufferObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::DataView:
           if (object->getClass() != &DataViewObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::MappedArguments:
           if (object->getClass() != &MappedArgumentsObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::UnmappedArguments:
           if (object->getClass() != &UnmappedArgumentsObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::WindowProxy:
           if (object->getClass() != frameMgr.cxForLocalUseOnly()
                                         ->runtime()
                                         ->maybeWindowProxyClass()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::JSFunction:
           if (!object->is<JSFunction>()) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::Set:
           if (object->getClass() != &SetObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::Map:
           if (object->getClass() != &MapObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
         case GuardClassKind::BoundFunction:
           if (object->getClass() != &BoundFunctionObject::class_) {
-            return ICInterpretOpResult::Fail;
+            return ICInterpretOpResult::NextIC;
           }
           break;
       }
@@ -778,7 +789,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
     extra_check;                                                 \
     int64_t result = lhs op rhs;                                 \
     if (result < INT32_MIN || result > INT32_MAX) {              \
-      return ICInterpretOpResult::Fail;                          \
+      return ICInterpretOpResult::NextIC;                        \
     }                                                            \
     state.icResult = Int32Value(int32_t(result)).asRawBits();    \
     break;                                                       \
@@ -789,17 +800,17 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       INT32_OP(Mul, *, {});
       INT32_OP(Div, /, {
         if (rhs == 0) {
-          return ICInterpretOpResult::Fail;
+          return ICInterpretOpResult::NextIC;
         }
       });
       INT32_OP(Mod, %, {
         if (rhs == 0) {
-          return ICInterpretOpResult::Fail;
+          return ICInterpretOpResult::NextIC;
         }
       });
       INT32_OP(Pow, <<, {
         if (rhs >= 32 || rhs < 0) {
-          return ICInterpretOpResult::Fail;
+          return ICInterpretOpResult::NextIC;
         }
       });
 
@@ -809,7 +820,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       int64_t value = int64_t(int32_t(state.icVals[intId.id()]));
       value++;
       if (value > INT32_MAX) {
-        return ICInterpretOpResult::Fail;
+        return ICInterpretOpResult::NextIC;
       }
       state.icResult = Int32Value(int32_t(value)).asRawBits();
       break;
@@ -853,40 +864,105 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::GuardFunctionScript: {
+      TRACE_PRINTF("GuardFunctionScript\n");
+      ObjOperandId funId = state.cacheIRReader.objOperandId();
+      JSFunction* fun = reinterpret_cast<JSFunction*>(state.icVals[funId.id()]);
+      uint32_t expectedOffset = state.cacheIRReader.stubOffset();
+      BaseScript* expected = reinterpret_cast<BaseScript*>(
+          cstub->stubInfo()->getStubRawWord(cstub, expectedOffset));
+      uint32_t nargsFlagsAndOffset = state.cacheIRReader.stubOffset();
+      (void)nargsFlagsAndOffset;
+
+      if (!fun->hasBaseScript() || fun->baseScript() != expected) {
+        return ICInterpretOpResult::NextIC;
+      }
+
+      break;
+    }
+
     case CacheOp::CallScriptedFunction: {
+      TRACE_PRINTF("CallScriptedFunction\n");
       ObjOperandId calleeId = state.cacheIRReader.objOperandId();
-      JSFunction* callee = reinterpret_cast<JSFunction*>(state.icVals[calleeId.id()]);
+      JSFunction* callee =
+          reinterpret_cast<JSFunction*>(state.icVals[calleeId.id()]);
       Int32OperandId argcId = state.cacheIRReader.int32OperandId();
       uint32_t argc = uint32_t(state.icVals[argcId.id()]);
       CallFlags flags = state.cacheIRReader.callFlags();
       uint32_t argcFixed = state.cacheIRReader.uint32Immediate();
+      (void)argcFixed;
 
       // For now, fail any constructing or different-realm cases.
-      if (flags.isConstructing() || flags.isSameRealm()) {
-        return ICInterpretOpResult::Fail;
+      if (flags.isConstructing() || !flags.isSameRealm()) {
+        TRACE_PRINTF("failing: constructing or not same realm\n");
+        return ICInterpretOpResult::NextIC;
+      }
+      // And support only "standard" arg formats.
+      if (flags.getArgFormat() != CallFlags::Standard) {
+        TRACE_PRINTF("failing: not standard arg format\n");
+        return ICInterpretOpResult::NextIC;
       }
 
       // For now, fail any arg-underflow case.
       if (argc < callee->nargs()) {
-        return ICInterpretOpResult::Fail;
+        TRACE_PRINTF("failing: too few args\n");
+        return ICInterpretOpResult::NextIC;
       }
 
-      // TODO: push a stub frame; include descriptor of parent baseline frame.
+      const uint32_t extra =
+          1;  // for now; when we support ctors, that is one more.
+      uint32_t totalArgs = argc + extra;
 
-      // TODO: push args in correct order.
+      // Push one extra slot to save the return value in a rooted place.
+      if (!stack.push(StackVal(UndefinedValue()))) {
+        return ICInterpretOpResult::Error;
+      }
+      Value* ret = reinterpret_cast<Value*>(stack.cur());
 
-      // TODO: push calleeToken (from calleeId) and baseline-stub frame descriptor.
+      {
+        PUSH_IC_FRAME();
 
-      // call PortableBaselineInterpret directly.
+        StackVal* origArgs =
+            stack.fp + sizeof(BaselineStubFrameLayout) / sizeof(StackVal) +
+            /* retval slot */ 1;
 
-      // pop frame and set retval.
-      
+        // Push args.
+        for (uint32_t i = 0; i < totalArgs; i++) {
+          if (!stack.push(origArgs[i])) {
+            return ICInterpretOpResult::Error;
+          }
+        }
+
+        if (!stack.push(StackVal(
+                CalleeToToken(callee, /* isConstructing = */ false)))) {
+          return ICInterpretOpResult::Error;
+        }
+        if (!stack.push(StackVal(MakeFrameDescriptorForJitCall(
+                FrameType::BaselineStub, totalArgs)))) {
+          return ICInterpretOpResult::Error;
+        }
+        if (!stack.push(StackVal(nullptr))) {  // fake return address.
+          return ICInterpretOpResult::Error;
+        }
+
+        if (!PortableBaselineInterpret(cx, stack, /* envChain = */ nullptr,
+                                       ret)) {
+          return ICInterpretOpResult::Error;
+        }
+      }
+
+      Value retVal = *ret;
+      stack.popn(totalArgs + /* ret slot */ 1);
+      if (!stack.push(StackVal(retVal))) {
+        return ICInterpretOpResult::Error;
+      }
+
       break;
     }
 
     default:
       printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
-      return ICInterpretOpResult::Fail;
+      return ICInterpretOpResult::NextIC;
   }
 
   return ICInterpretOpResult::Ok;
@@ -961,8 +1037,8 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
         cstub->incrementEnteredCount();                                      \
         new (&state.cacheIRReader) CacheIRReader(cstub->stubInfo()->code()); \
         while (true) {                                                       \
-          switch (ICInterpretOp(frame, frameMgr, stack, state, cstub)) {     \
-            case ICInterpretOpResult::Fail:                                  \
+          switch (ICInterpretOp(frame, frameMgr, stack, state, cstub, pc)) { \
+            case ICInterpretOpResult::NextIC:                                \
               stub = stub->maybeNext();                                      \
               RESTORE_INPUTS(arity);                                         \
               goto next_stub;                                                \
@@ -970,6 +1046,8 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
               continue;                                                      \
             case ICInterpretOpResult::Return:                                \
               return true;                                                   \
+            case ICInterpretOpResult::Error:                                 \
+              return false;                                                  \
           }                                                                  \
         }                                                                    \
       }                                                                      \
@@ -981,11 +1059,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
 #define IC_LOAD_OBJ(state_elem, index) \
   state.state_elem = reinterpret_cast<JSObject*>(state.icVals[(index)]);
 
-#define PUSH_EXIT_FRAME()          \
-  VMFrame cx(frameMgr, stack, pc); \
-  if (!cx.success()) {             \
-    return false;                  \
-  }
+#define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(false)
 
 DEFINE_IC(Typeof, 1, {
   IC_LOAD_VAL(value0, 0);
