@@ -110,6 +110,10 @@ class CompactBufferReader {
     buffer_ += 2;
     return value;
   }
+  uint32_t peekUnsigned15Bit() {
+    uint16_t value = *reinterpret_cast<const uint16_t*>(buffer_);
+    return value;
+  }
   void* readRawPointer() {
     uintptr_t ptrWord = 0;
     for (unsigned i = 0; i < sizeof(uintptr_t); i++) {
