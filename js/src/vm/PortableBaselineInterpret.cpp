@@ -337,7 +337,9 @@ enum class ICInterpretOpResult {
   Error,
 };
 
-#define PUSH_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
+#define PUSH_IC_FRAME()                               \
+  PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error); \
+  stack[0] = StackVal(cstub);
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
 ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
@@ -777,7 +779,6 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
-#if 0
     case CacheOp::LoadFixedSlotResult: {
       TRACE_PRINTF("LoadFixedSlotResult\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
@@ -795,7 +796,6 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       state.icResult = slot->asRawBits();
       break;
     }
-#endif
 
     case CacheOp::LoadDynamicSlotResult: {
       TRACE_PRINTF("LoadDynamicSlotResult\n");
@@ -821,17 +821,16 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
-#if 0
     case CacheOp::LoadArgumentFixedSlot: {
       TRACE_PRINTF("LoadArgumentFixedSlot\n");
       ValOperandId resultId = state.cacheIRReader.valOperandId();
       uint8_t slotIndex = state.cacheIRReader.readByte();
       Value val = stack[slotIndex].asValue();
-      TRACE_PRINTF(" -> slot %d: val %" PRIx64 "\n", int(slotIndex), val.asRawBits());
+      TRACE_PRINTF(" -> slot %d: val %" PRIx64 "\n", int(slotIndex),
+                   val.asRawBits());
       state.icVals[resultId.id()] = val.asRawBits();
       break;
     }
-#endif
 
 #define INT32_OP(name, op, extra_check)                          \
   case CacheOp::Int32##name##Result: {                           \
@@ -1006,8 +1005,6 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
-#if 1
-
     case CacheOp::CallScriptedFunction:
     case CacheOp::CallNativeFunction: {
       bool isNative = op == CacheOp::CallNativeFunction;
@@ -1049,10 +1046,9 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       {
         PUSH_IC_FRAME();
 
-        // Args above baseline frame, plus the extra retval slot added
-        // above.
+        // Args above baseline frame.
         StackVal* origArgs =
-            stack.fp + sizeof(BaselineStubFrameLayout) / sizeof(StackVal) + 1;
+            stack.fp + sizeof(BaselineStubFrameLayout) / sizeof(StackVal);
 
         // Push args.
         for (uint32_t i = 0; i < totalArgs; i++) {
@@ -1083,8 +1079,9 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           }
           state.icResult = args[0].asRawBits();
         } else {
-          if (!PortableBaselineInterpret(cx, stack, /* envChain = */ nullptr,
-                                         reinterpret_cast<Value*>(&state.icResult))) {
+          if (!PortableBaselineInterpret(
+                  cx, stack, /* envChain = */ nullptr,
+                  reinterpret_cast<Value*>(&state.icResult))) {
             return ICInterpretOpResult::Error;
           }
         }
@@ -1092,8 +1089,6 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
 
       break;
     }
-
-#endif
 
     case CacheOp::AssertPropertyLookup: {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
@@ -1239,11 +1234,13 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
 #define IC_LOAD_OBJ(state_elem, index) \
   state.state_elem = reinterpret_cast<JSObject*>(state.icVals[(index)]);
 
-#define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(false)
+#define PUSH_FALLBACK_IC_FRAME() \
+  PUSH_EXIT_FRAME_OR_RET(false); \
+  stack[0] = StackVal(fallback);
 
 DEFINE_IC(Typeof, 1, {
   IC_LOAD_VAL(value0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
     goto error;
   }
@@ -1251,7 +1248,7 @@ DEFINE_IC(Typeof, 1, {
 
 DEFINE_IC(GetName, 1, {
   IC_LOAD_OBJ(obj0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
     goto error;
   }
@@ -1269,7 +1266,7 @@ DEFINE_IC(Call, 1, {
     std::swap(args[i], args[totalArgs - 1 - i]);
   }
   {
-    PUSH_EXIT_FRAME();
+    PUSH_FALLBACK_IC_FRAME();
     if (state.spreadCall) {
       if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
         goto error;
@@ -1284,7 +1281,7 @@ DEFINE_IC(Call, 1, {
 
 DEFINE_IC(UnaryArith, 1, {
   IC_LOAD_VAL(value0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
     goto error;
   }
@@ -1293,7 +1290,7 @@ DEFINE_IC(UnaryArith, 1, {
 DEFINE_IC(BinaryArith, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
                              &state.res)) {
     goto error;
@@ -1302,7 +1299,7 @@ DEFINE_IC(BinaryArith, 2, {
 
 DEFINE_IC(ToBool, 1, {
   IC_LOAD_VAL(value0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
     goto error;
   }
@@ -1311,7 +1308,7 @@ DEFINE_IC(ToBool, 1, {
 DEFINE_IC(Compare, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
                          &state.res)) {
     goto error;
@@ -1321,7 +1318,7 @@ DEFINE_IC(Compare, 2, {
 DEFINE_IC(InstanceOf, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
                             &state.res)) {
     goto error;
@@ -1331,7 +1328,7 @@ DEFINE_IC(InstanceOf, 2, {
 DEFINE_IC(In, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
                     &state.res)) {
     goto error;
@@ -1340,7 +1337,7 @@ DEFINE_IC(In, 2, {
 
 DEFINE_IC(BindName, 1, {
   IC_LOAD_OBJ(obj0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
     goto error;
   }
@@ -1349,7 +1346,7 @@ DEFINE_IC(BindName, 1, {
 DEFINE_IC(SetProp, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
                          state.value1)) {
     goto error;
@@ -1357,7 +1354,7 @@ DEFINE_IC(SetProp, 2, {
 });
 
 DEFINE_IC(NewObject, 0, {
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoNewObjectFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
@@ -1365,7 +1362,7 @@ DEFINE_IC(NewObject, 0, {
 
 DEFINE_IC(GetProp, 1, {
   IC_LOAD_VAL(value0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
     goto error;
   }
@@ -1374,7 +1371,7 @@ DEFINE_IC(GetProp, 1, {
 DEFINE_IC(GetPropSuper, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0, &state.value1,
                               &state.res)) {
     goto error;
@@ -1384,7 +1381,7 @@ DEFINE_IC(GetPropSuper, 2, {
 DEFINE_IC(GetElem, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
                          &state.res)) {
     goto error;
@@ -1395,7 +1392,7 @@ DEFINE_IC(GetElemSuper, 3, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   IC_LOAD_VAL(value2, 2);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0, state.value1,
                               state.value2, &state.res)) {
     goto error;
@@ -1403,14 +1400,14 @@ DEFINE_IC(GetElemSuper, 3, {
 });
 
 DEFINE_IC(NewArray, 0, {
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoNewArrayFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
 });
 
 DEFINE_IC(GetIntrinsic, 0, {
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoGetIntrinsicFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
@@ -1420,7 +1417,7 @@ DEFINE_IC(SetElem, 3, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   IC_LOAD_VAL(value2, 2);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
                          state.value1, state.value2)) {
     goto error;
@@ -1430,7 +1427,7 @@ DEFINE_IC(SetElem, 3, {
 DEFINE_IC(HasOwn, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
                         &state.res)) {
     goto error;
@@ -1440,7 +1437,7 @@ DEFINE_IC(HasOwn, 2, {
 DEFINE_IC(CheckPrivateField, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
                                    state.value1, &state.res)) {
     goto error;
@@ -1449,7 +1446,7 @@ DEFINE_IC(CheckPrivateField, 2, {
 
 DEFINE_IC(GetIterator, 1, {
   IC_LOAD_VAL(value0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
     goto error;
   }
@@ -1457,7 +1454,7 @@ DEFINE_IC(GetIterator, 1, {
 
 DEFINE_IC(ToPropertyKey, 1, {
   IC_LOAD_VAL(value0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0, &state.res)) {
     goto error;
   }
@@ -1465,7 +1462,7 @@ DEFINE_IC(ToPropertyKey, 1, {
 
 DEFINE_IC(OptimizeSpreadCall, 1, {
   IC_LOAD_VAL(value0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
                                     &state.res)) {
     goto error;
@@ -1473,7 +1470,7 @@ DEFINE_IC(OptimizeSpreadCall, 1, {
 });
 
 DEFINE_IC(Rest, 0, {
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoRestFallback(cx, frame, fallback, &state.res)) {
     goto error;
   }
@@ -1481,11 +1478,13 @@ DEFINE_IC(Rest, 0, {
 
 DEFINE_IC(CloseIter, 1, {
   IC_LOAD_OBJ(obj0, 0);
-  PUSH_EXIT_FRAME();
+  PUSH_FALLBACK_IC_FRAME();
   if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
     goto error;
   }
 });
+
+#define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(false)
 
 static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
                                       JSObject* envChain, Value* ret) {
