@@ -447,7 +447,7 @@ bool BaselineCacheIRCompiler::emitGuardSpecificAtom(StringOperandId strId,
                                liveVolatileFloatRegs());
   masm.PushRegsInMask(volatileRegs);
 
-  using Fn = bool (*)(JSString* str1, JSString* str2);
+  using Fn = bool (*)(JSString * str1, JSString * str2);
   masm.setupUnalignedABICall(scratch);
   masm.loadPtr(atomAddr, scratch);
   masm.passABIArg(scratch);
@@ -898,7 +898,7 @@ bool BaselineCacheIRCompiler::emitAddAndStoreSlotShared(
                          liveVolatileFloatRegs());
     masm.PushRegsInMask(save);
 
-    using Fn = bool (*)(JSContext* cx, NativeObject* obj, uint32_t newCount);
+    using Fn = bool (*)(JSContext * cx, NativeObject * obj, uint32_t newCount);
     masm.setupUnalignedABICall(scratch1);
     masm.loadJSContext(scratch1);
     masm.passABIArg(scratch1);
@@ -1448,7 +1448,7 @@ void BaselineCacheIRCompiler::emitAtomizeString(Register str, Register temp,
                          liveVolatileFloatRegs());
     masm.PushRegsInMask(save);
 
-    using Fn = JSAtom* (*)(JSContext* cx, JSString* str);
+    using Fn = JSAtom* (*)(JSContext * cx, JSString * str);
     masm.setupUnalignedABICall(temp);
     masm.loadJSContext(temp);
     masm.passABIArg(temp);
@@ -1836,7 +1836,7 @@ bool BaselineCacheIRCompiler::emitCallAddOrUpdateSparseElementHelper(
   masm.Push(id);
   masm.Push(obj);
 
-  using Fn = bool (*)(JSContext* cx, Handle<NativeObject*> obj, int32_t int_id,
+  using Fn = bool (*)(JSContext * cx, Handle<NativeObject*> obj, int32_t int_id,
                       HandleValue v, bool strict);
   callVM<Fn, AddOrUpdateSparseElementHelper>(masm);
 
@@ -2554,8 +2554,13 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
   MOZ_ASSERT(code);
 #else   // !ENABLE_PORTABLE_BASELINE_INTERP
   if (!stubInfo) {
-    stubInfo = CacheIRStubInfo::New(kind, ICStubEngine::Baseline, false,
-                                    stubDataOffset, writer);
+    // We lie that all stubs make GC calls; this is simpler than
+    // iterating over ops to determine if it is actually the base, and
+    // we don't invoke the BaselineCacheIRCompiler so we otherwise
+    // don't know for sure.
+    stubInfo = CacheIRStubInfo::New(kind, ICStubEngine::Baseline,
+                                    /* makes GC calls = */ true, stubDataOffset,
+                                    writer);
     if (!stubInfo) {
       return ICAttachResult::OOM;
     }

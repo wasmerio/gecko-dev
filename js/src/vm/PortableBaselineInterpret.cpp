@@ -45,7 +45,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -156,14 +156,11 @@ struct Stack {
     restore(newTOS);
   }
 
-  [[nodiscard]] StackVal* pushExitFrame(BaselineFrame* prevFrame) {
-    uint8_t* prevFP =
-        reinterpret_cast<uint8_t*>(prevFrame) + BaselineFrame::Size();
-    MOZ_ASSERT(reinterpret_cast<StackVal*>(prevFP) == fp);
+  void setFrameSize(BaselineFrame* prevFrame) {
 #ifdef DEBUG
     MOZ_ASSERT(fp != nullptr);
     uintptr_t frameSize =
-        reinterpret_cast<uintptr_t>(fp) - reinterpret_cast<uintptr_t>(cur());
+      reinterpret_cast<uintptr_t>(fp) - reinterpret_cast<uintptr_t>(cur());
     MOZ_ASSERT(reinterpret_cast<uintptr_t>(fp) >=
                reinterpret_cast<uintptr_t>(cur()));
     TRACE_PRINTF("pushExitFrame: fp = %p cur() = %p -> frameSize = %d\n", fp,
@@ -171,6 +168,13 @@ struct Stack {
     MOZ_ASSERT(frameSize >= BaselineFrame::Size());
     prevFrame->setDebugFrameSize(frameSize);
 #endif
+  }
+
+  [[nodiscard]] StackVal* pushExitFrame(BaselineFrame* prevFrame) {
+    uint8_t* prevFP =
+        reinterpret_cast<uint8_t*>(prevFrame) + BaselineFrame::Size();
+    MOZ_ASSERT(reinterpret_cast<StackVal*>(prevFP) == fp);
+    setFrameSize(prevFrame);
 
     if (!push(StackVal(
             MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)))) {
@@ -338,8 +342,7 @@ enum class ICInterpretOpResult {
 };
 
 #define PUSH_IC_FRAME()                               \
-  PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error); \
-  stack[0] = StackVal(cstub);
+  PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
 ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
@@ -1042,13 +1045,13 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
 
       uint32_t extra = 1 + flags.isConstructing() + isNative;
       uint32_t totalArgs = argc + extra;
+      StackVal* origArgs = stack.cur();
 
       {
         PUSH_IC_FRAME();
-
-        // Args above baseline frame.
-        StackVal* origArgs =
-            stack.fp + sizeof(BaselineStubFrameLayout) / sizeof(StackVal);
+        // This will not be an Exit frame but a BaselinStub frame, so
+        // replace the ExitFrameType with the ICStub pointer.
+        stack[0] = StackVal(cstub);
 
         // Push args.
         for (uint32_t i = 0; i < totalArgs; i++) {
@@ -1136,7 +1139,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
     }
 
     default:
-      printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+      // printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
       return ICInterpretOpResult::NextIC;
   }
 
@@ -1235,8 +1238,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
   state.state_elem = reinterpret_cast<JSObject*>(state.icVals[(index)]);
 
 #define PUSH_FALLBACK_IC_FRAME() \
-  PUSH_EXIT_FRAME_OR_RET(false); \
-  stack[0] = StackVal(fallback);
+  PUSH_EXIT_FRAME_OR_RET(false);
 
 DEFINE_IC(Typeof, 1, {
   IC_LOAD_VAL(value0, 0);
