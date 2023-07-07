@@ -682,8 +682,8 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
       NativeObject* nobj =
           reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
-      GCPtr<Value>* slot =
-        reinterpret_cast<GCPtr<Value>*>(reinterpret_cast<uintptr_t>(nobj) + offset);
+      GCPtr<Value>* slot = reinterpret_cast<GCPtr<Value>*>(
+          reinterpret_cast<uintptr_t>(nobj) + offset);
       Value val = Value::fromRawBits(state.icVals[valId.id()]);
       slot->set(val);
       break;
@@ -710,6 +710,17 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       uint32_t objOffset = state.cacheIRReader.stubOffset();
       intptr_t obj = cstub->stubInfo()->getStubRawWord(cstub, objOffset);
+      state.icVals[objId.id()] = obj;
+      break;
+    }
+
+    case CacheOp::LoadProtoObject: {
+      TRACE_PRINTF("LoadProtoObject\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t objOffset = state.cacheIRReader.stubOffset();
+      intptr_t obj = cstub->stubInfo()->getStubRawWord(cstub, objOffset);
+      ObjOperandId receiverObjId = state.cacheIRReader.objOperandId();
+      (void)receiverObjId;
       state.icVals[objId.id()] = obj;
       break;
     }
@@ -825,6 +836,24 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       HeapSlot* slots = nobj->getSlotsUnchecked();
       state.icResult = slots[offset / sizeof(Value)].get().asRawBits();
+      break;
+    }
+
+    case CacheOp::GuardDynamicSlotIsSpecificObject: {
+      TRACE_PRINTF("GuardDynamicSlotIsSpecificObject\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      ObjOperandId expectedId = state.cacheIRReader.objOperandId();
+      uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+      uintptr_t offset =
+          cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      HeapSlot* slots = nobj->getSlotsUnchecked();
+      uintptr_t actual = slots[offset / sizeof(Value)].get().asRawBits();
+      uintptr_t expected = state.icVals[expectedId.id()];
+      if (actual != expected) {
+        return ICInterpretOpResult::NextIC;
+      }
       break;
     }
 
