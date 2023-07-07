@@ -45,7 +45,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -1061,6 +1061,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
         }
         Value* args = reinterpret_cast<Value*>(stack.cur());
 
+        TRACE_PRINTF("pushing callee: %p\n", callee);
         if (!stack.push(StackVal(
                 CalleeToToken(callee, /* isConstructing = */ false)))) {
           return ICInterpretOpResult::Error;
@@ -1512,6 +1513,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
     if (func->needsFunctionEnvironmentObjects()) {
       PUSH_EXIT_FRAME();
       TRY(js::InitFunctionEnvironmentObjects(cx, frame));
+      TRACE_PRINTF("callee is func %p; created environment object: %p\n", func, frame->environmentChain());
     }
   }
 
