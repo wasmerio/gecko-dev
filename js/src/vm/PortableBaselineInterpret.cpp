@@ -45,7 +45,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -160,7 +160,7 @@ struct Stack {
 #ifdef DEBUG
     MOZ_ASSERT(fp != nullptr);
     uintptr_t frameSize =
-      reinterpret_cast<uintptr_t>(fp) - reinterpret_cast<uintptr_t>(cur());
+        reinterpret_cast<uintptr_t>(fp) - reinterpret_cast<uintptr_t>(cur());
     MOZ_ASSERT(reinterpret_cast<uintptr_t>(fp) >=
                reinterpret_cast<uintptr_t>(cur()));
     TRACE_PRINTF("pushExitFrame: fp = %p cur() = %p -> frameSize = %d\n", fp,
@@ -341,8 +341,7 @@ enum class ICInterpretOpResult {
   Error,
 };
 
-#define PUSH_IC_FRAME()                               \
-  PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
+#define PUSH_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
 ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
@@ -674,6 +673,22 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::StoreFixedSlot: {
+      TRACE_PRINTF("StoreFixedSlot\n");
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      uint32_t offsetOffset = state.cacheIRReader.stubOffset();
+      ValOperandId valId = state.cacheIRReader.valOperandId();
+      uintptr_t offset =
+          cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      GCPtr<Value>* slot =
+        reinterpret_cast<GCPtr<Value>*>(reinterpret_cast<uintptr_t>(nobj) + offset);
+      Value val = Value::fromRawBits(state.icVals[valId.id()]);
+      slot->set(val);
+      break;
+    }
+
     case CacheOp::StoreDynamicSlot: {
       TRACE_PRINTF("StoreDynamicSlot\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
@@ -977,6 +992,59 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::CompareNullUndefinedResult: {
+      TRACE_PRINTF("CompareNullUndefinedResult\n");
+      JSOp op = state.cacheIRReader.jsop();
+      bool isUndefined = state.cacheIRReader.readBool();
+      ValOperandId inputId = state.cacheIRReader.valOperandId();
+      Value val = Value::fromRawBits(state.icVals[inputId.id()]);
+      if (val.isObject() && val.toObject().getClass()->isProxyObject()) {
+        return ICInterpretOpResult::NextIC;
+      }
+
+      bool result;
+      switch (op) {
+        case JSOp::Eq:
+          result = val.isUndefined() || val.isNull() ||
+                   (val.isObject() &&
+                    val.toObject().getClass()->emulatesUndefined());
+          break;
+        case JSOp::Ne:
+          result = !(val.isUndefined() || val.isNull() ||
+                     (val.isObject() &&
+                      val.toObject().getClass()->emulatesUndefined()));
+          break;
+        case JSOp::StrictEq:
+          result = isUndefined ? val.isUndefined() : val.isNull();
+          break;
+        case JSOp::StrictNe:
+          result = !(isUndefined ? val.isUndefined() : val.isNull());
+          break;
+        default:
+          MOZ_CRASH("bad opcode");
+      }
+      state.icResult = BooleanValue(result).asRawBits();
+      break;
+    }
+
+    case CacheOp::GuardToInt32Index: {
+      TRACE_PRINTF("GuardToInt32Index\n");
+      ValOperandId valId = state.cacheIRReader.valOperandId();
+      Int32OperandId resultId = state.cacheIRReader.int32OperandId();
+      Value val = Value::fromRawBits(state.icVals[valId.id()]);
+      if (val.isInt32()) {
+        state.icVals[resultId.id()] = val.toInt32();
+        break;
+      } else if (val.isDouble()) {
+        double doubleVal = val.toDouble();
+        if (doubleVal >= double(INT32_MIN) && doubleVal <= double(INT32_MAX)) {
+          state.icVals[resultId.id()] = int32_t(doubleVal);
+          break;
+        }
+      }
+      return ICInterpretOpResult::NextIC;
+    }
+
     case CacheOp::GuardGlobalGeneration: {
       TRACE_PRINTF("GuardFunctionScript\n");
       uint32_t expectedOffset = state.cacheIRReader.stubOffset();
@@ -1140,7 +1208,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
     }
 
     default:
-      // printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+      printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
       return ICInterpretOpResult::NextIC;
   }
 
@@ -1238,8 +1306,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
 #define IC_LOAD_OBJ(state_elem, index) \
   state.state_elem = reinterpret_cast<JSObject*>(state.icVals[(index)]);
 
-#define PUSH_FALLBACK_IC_FRAME() \
-  PUSH_EXIT_FRAME_OR_RET(false);
+#define PUSH_FALLBACK_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(false);
 
 DEFINE_IC(Typeof, 1, {
   IC_LOAD_VAL(value0, 0);
@@ -1513,7 +1580,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
     if (func->needsFunctionEnvironmentObjects()) {
       PUSH_EXIT_FRAME();
       TRY(js::InitFunctionEnvironmentObjects(cx, frame));
-      TRACE_PRINTF("callee is func %p; created environment object: %p\n", func, frame->environmentChain());
+      TRACE_PRINTF("callee is func %p; created environment object: %p\n", func,
+                   frame->environmentChain());
     }
   }
 
