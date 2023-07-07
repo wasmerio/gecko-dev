@@ -766,6 +766,15 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::LoadInt32Constant: {
+      TRACE_PRINTF("LoadInt32Constant\n");
+      uint32_t valueOffset = state.cacheIRReader.stubOffset();
+      Int32OperandId resultId = state.cacheIRReader.int32OperandId();
+      uint32_t value = cstub->stubInfo()->getStubRawInt32(cstub, valueOffset);
+      state.icVals[resultId.id()] = value;
+      break;
+    }
+
     case CacheOp::LoadSymbolResult: {
       TRACE_PRINTF("LoadSymbolResult\n");
       SymbolOperandId symbolId = state.cacheIRReader.symbolOperandId();
@@ -1274,6 +1283,109 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::LoadStringLengthResult: {
+      StringOperandId strId = state.cacheIRReader.stringOperandId();
+      JSString* str = reinterpret_cast<JSString*>(state.icVals[strId.id()]);
+      size_t length = str->length();
+      if (length > size_t(INT32_MAX)) {
+        return ICInterpretOpResult::NextIC;
+      }
+      state.icResult = Int32Value(length).asRawBits();
+      break;
+    }
+
+    case CacheOp::LoadStringCharResult: {
+      StringOperandId strId = state.cacheIRReader.stringOperandId();
+      Int32OperandId indexId = state.cacheIRReader.int32OperandId();
+      bool handleOOB = state.cacheIRReader.readBool();
+
+      JSString* str =
+          reinterpret_cast<JSLinearString*>(state.icVals[strId.id()]);
+      int32_t index = int32_t(state.icVals[indexId.id()]);
+      JSString* result = nullptr;
+      if (index < 0 || size_t(index) >= str->length()) {
+        if (handleOOB) {
+          // Return an empty string.
+          result = frameMgr.cxForLocalUseOnly()->names().empty;
+        } else {
+          return ICInterpretOpResult::NextIC;
+        }
+      } else {    
+        char16_t c;
+        // Guaranteed to be always work because this CacheIR op is
+        // always preceded by LinearizeForCharAccess.
+        MOZ_ALWAYS_TRUE(str->getChar(/* cx = */ nullptr, index, &c));
+        StaticStrings& sstr = frameMgr.cxForLocalUseOnly()->staticStrings();
+        if (sstr.hasUnit(c)) {
+          result = sstr.getUnit(c);
+        } else {
+          PUSH_IC_FRAME();
+          result = StringFromCharCode(cx, c);
+          if (!result) {
+            return ICInterpretOpResult::Error;
+          }
+        }
+      }
+      state.icResult = reinterpret_cast<uintptr_t>(result);
+      break;
+    }
+
+    case CacheOp::LoadStringCharCodeResult: {
+      StringOperandId strId = state.cacheIRReader.stringOperandId();
+      Int32OperandId indexId = state.cacheIRReader.int32OperandId();
+      bool handleOOB = state.cacheIRReader.readBool();
+
+      JSString* str =
+          reinterpret_cast<JSLinearString*>(state.icVals[strId.id()]);
+      int32_t index = int32_t(state.icVals[indexId.id()]);
+      Value result;
+      if (index < 0 || size_t(index) >= str->length()) {
+        if (handleOOB) {
+          // Return NaN.
+          result = JS::NaNValue();
+        } else {
+          return ICInterpretOpResult::NextIC;
+        }
+      } else {
+        char16_t c;
+        // Guaranteed to be always work because this CacheIR op is
+        // always preceded by LinearizeForCharAccess.
+        MOZ_ALWAYS_TRUE(str->getChar(/* cx = */ nullptr, index, &c));
+        result = Int32Value(c);
+      }
+      state.icResult = result.asRawBits();
+      break;
+    }
+
+    case CacheOp::LinearizeForCharAccess: {
+      StringOperandId strId = state.cacheIRReader.stringOperandId();
+      Int32OperandId indexId = state.cacheIRReader.int32OperandId();
+      StringOperandId resultId = state.cacheIRReader.stringOperandId();
+      JSString* str =
+          reinterpret_cast<JSLinearString*>(state.icVals[strId.id()]);
+      (void)indexId;
+
+      if (!str->isRope()) {
+        state.icVals[resultId.id()] = reinterpret_cast<uintptr_t>(str);
+      } else {
+        PUSH_IC_FRAME();
+        JSLinearString* result = LinearizeForCharAccess(cx, str);
+        if (!result) {
+          return ICInterpretOpResult::Error;
+        }
+        state.icVals[resultId.id()] = reinterpret_cast<uintptr_t>(result);
+      }
+      break;
+    }
+
+    case CacheOp::LoadStringTruthyResult: {
+      StringOperandId strId = state.cacheIRReader.stringOperandId();
+      JSString* str =
+          reinterpret_cast<JSLinearString*>(state.icVals[strId.id()]);
+      state.icResult = BooleanValue(str->length() > 0).asRawBits();
+      break;
+    }
+
     case CacheOp::LoadDenseElementResult: {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       Int32OperandId indexId = state.cacheIRReader.int32OperandId();
@@ -1314,7 +1426,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
     }
 
     default:
-      // printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+      //printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
       return ICInterpretOpResult::NextIC;
   }
 
