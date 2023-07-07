@@ -408,6 +408,9 @@ class ObjectElements {
 
   bool isPacked() const { return !(flags & NON_PACKED); }
 
+  uint32_t getLength() const { return length; }
+  uint32_t getInitializedLength() const { return initializedLength; }
+
   JS::PropertyAttributes elementAttributes() const {
     if (isFrozen()) {
       return {JS::PropertyAttribute::Enumerable};

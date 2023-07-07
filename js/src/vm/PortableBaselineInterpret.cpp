@@ -1056,6 +1056,17 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::LoadObjectTruthyResult: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      JSObject* obj = reinterpret_cast<JSObject*>(state.icVals[objId.id()]);
+      const JSClass* cls = obj->getClass();
+      if (cls->isProxyObject()) {
+        return ICInterpretOpResult::NextIC;
+      }
+      state.icResult = BooleanValue(!cls->emulatesUndefined()).asRawBits();
+      break;
+    }
+
     case CacheOp::GuardToInt32Index: {
       TRACE_PRINTF("GuardToInt32Index\n");
       ValOperandId valId = state.cacheIRReader.valOperandId();
@@ -1236,8 +1247,74 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::LoadInt32ArrayLength: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      Int32OperandId resultId = state.cacheIRReader.int32OperandId();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      ObjectElements* elems = nobj->getElementsHeader();
+      uint32_t length = elems->getLength();
+      if (length > uint32_t(INT32_MAX)) {
+        return ICInterpretOpResult::NextIC;
+      }
+      state.icVals[resultId.id()] = length;
+      break;
+    }
+
+    case CacheOp::LoadInt32ArrayLengthResult: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      ObjectElements* elems = nobj->getElementsHeader();
+      uint32_t length = elems->getLength();
+      if (length > uint32_t(INT32_MAX)) {
+        return ICInterpretOpResult::NextIC;
+      }
+      state.icResult = Int32Value(length).asRawBits();
+      break;
+    }
+
+    case CacheOp::LoadDenseElementResult: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      Int32OperandId indexId = state.cacheIRReader.int32OperandId();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      ObjectElements* elems = nobj->getElementsHeader();
+      int32_t index = int32_t(state.icVals[indexId.id()]);
+      if (index < 0 || uint32_t(index) >= elems->getInitializedLength()) {
+        return ICInterpretOpResult::NextIC;
+      }
+      HeapSlot* slot = &elems->elements()[index];
+      Value val = slot->get();
+      if (val.isMagic()) {
+        return ICInterpretOpResult::NextIC;
+      }
+      state.icResult = val.asRawBits();
+      break;
+    }
+
+    case CacheOp::StoreDenseElement: {
+      ObjOperandId objId = state.cacheIRReader.objOperandId();
+      Int32OperandId indexId = state.cacheIRReader.int32OperandId();
+      ValOperandId valId = state.cacheIRReader.valOperandId();
+      NativeObject* nobj =
+          reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
+      ObjectElements* elems = nobj->getElementsHeader();
+      int32_t index = int32_t(state.icVals[indexId.id()]);
+      if (index < 0 || uint32_t(index) >= elems->getInitializedLength()) {
+        return ICInterpretOpResult::NextIC;
+      }
+      HeapSlot* slot = &elems->elements()[index];
+      if (slot->get().isMagic()) {
+        return ICInterpretOpResult::NextIC;
+      }
+      Value val = Value::fromRawBits(state.icVals[valId.id()]);
+      slot->set(nobj, HeapSlot::Element, index, val);
+      break;
+    }
+
     default:
-      printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+      // printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
       return ICInterpretOpResult::NextIC;
   }
 
