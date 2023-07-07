@@ -922,6 +922,8 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           return ICInterpretOpResult::NextIC;
         }
       });
+      INT32_OP(BitAnd, &, {});
+      INT32_OP(BitOr, |, {});
 
     case CacheOp::Int32IncResult: {
       TRACE_PRINTF("Int32IncResult\n");
@@ -970,6 +972,25 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           MOZ_CRASH("Unexpected opcode");
       }
       state.icResult = BooleanValue(result).asRawBits();
+      break;
+    }
+
+    case CacheOp::Int32MinMax: {
+      bool isMax = state.cacheIRReader.readBool();
+      Int32OperandId lhsId = state.cacheIRReader.int32OperandId();
+      Int32OperandId rhsId = state.cacheIRReader.int32OperandId();
+      Int32OperandId resultId = state.cacheIRReader.int32OperandId();
+      int32_t lhs = int32_t(state.icVals[lhsId.id()]);
+      int32_t rhs = int32_t(state.icVals[rhsId.id()]);
+      int32_t result = ((lhs > rhs) ^ isMax) ? rhs : lhs;
+      state.icVals[resultId.id()] = result;
+      break;
+    }
+
+    case CacheOp::IsObjectResult: {
+      ValOperandId valId = state.cacheIRReader.valOperandId();
+      Value val = Value::fromRawBits(state.icVals[valId.id()]);
+      state.icResult = BooleanValue(val.isObject()).asRawBits();
       break;
     }
 
@@ -1310,7 +1331,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
         } else {
           return ICInterpretOpResult::NextIC;
         }
-      } else {    
+      } else {
         char16_t c;
         // Guaranteed to be always work because this CacheIR op is
         // always preceded by LinearizeForCharAccess.
@@ -1386,6 +1407,13 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::LoadInt32TruthyResult: {
+      ValOperandId valId = state.cacheIRReader.valOperandId();
+      int32_t val = int32_t(state.icVals[valId.id()]);
+      state.icResult = BooleanValue(val != 0).asRawBits();
+      break;
+    }
+
     case CacheOp::LoadDenseElementResult: {
       ObjOperandId objId = state.cacheIRReader.objOperandId();
       Int32OperandId indexId = state.cacheIRReader.int32OperandId();
@@ -1425,8 +1453,18 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+    case CacheOp::GuardNoAllocationMetadataBuilder: {
+      uint32_t builderAddrOffset = state.cacheIRReader.stubOffset();
+      uintptr_t builderAddr =
+          cstub->stubInfo()->getStubRawWord(cstub, builderAddrOffset);
+      if (*reinterpret_cast<uintptr_t*>(builderAddr) != 0) {
+        return ICInterpretOpResult::NextIC;
+      }
+      break;
+    }
+
     default:
-      //printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
+      printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
       return ICInterpretOpResult::NextIC;
   }
 
