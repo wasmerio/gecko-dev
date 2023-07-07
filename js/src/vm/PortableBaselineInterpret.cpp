@@ -777,7 +777,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
-#if 1
+#if 0
     case CacheOp::LoadFixedSlotResult: {
       TRACE_PRINTF("LoadFixedSlotResult\n");
       ObjOperandId objId = state.cacheIRReader.objOperandId();
@@ -788,8 +788,10 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           reinterpret_cast<NativeObject*>(state.icVals[objId.id()]);
       Value* slot =
           reinterpret_cast<Value*>(reinterpret_cast<uintptr_t>(nobj) + offset);
-      TRACE_PRINTF("LoadFixedSlotResult: obj %p offsetOffset %d offset %d slotPtr %p slot %" PRIx64 "\n",
-             nobj, int(offsetOffset), int(offset), slot, slot->asRawBits());
+      TRACE_PRINTF(
+          "LoadFixedSlotResult: obj %p offsetOffset %d offset %d slotPtr %p "
+          "slot %" PRIx64 "\n",
+          nobj, int(offsetOffset), int(offset), slot, slot->asRawBits());
       state.icResult = slot->asRawBits();
       break;
     }
@@ -819,6 +821,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
+#if 0
     case CacheOp::LoadArgumentFixedSlot: {
       TRACE_PRINTF("LoadArgumentFixedSlot\n");
       ValOperandId resultId = state.cacheIRReader.valOperandId();
@@ -828,6 +831,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       state.icVals[resultId.id()] = val.asRawBits();
       break;
     }
+#endif
 
 #define INT32_OP(name, op, extra_check)                          \
   case CacheOp::Int32##name##Result: {                           \
@@ -1002,7 +1006,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       break;
     }
 
-#if 0
+#if 1
 
     case CacheOp::CallScriptedFunction:
     case CacheOp::CallNativeFunction: {
@@ -1042,13 +1046,6 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
       uint32_t extra = 1 + flags.isConstructing() + isNative;
       uint32_t totalArgs = argc + extra;
 
-      // Push one extra slot to save the return value in a rooted
-      // place.
-      if (!stack.push(StackVal(UndefinedValue()))) {
-        return ICInterpretOpResult::Error;
-      }
-      Value* ret = reinterpret_cast<Value*>(stack.cur());
-
       {
         PUSH_IC_FRAME();
 
@@ -1084,16 +1081,15 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           if (!native(cx, argc, args)) {
             return ICInterpretOpResult::Error;
           }
-          *ret = args[0];
+          state.icResult = args[0].asRawBits();
         } else {
           if (!PortableBaselineInterpret(cx, stack, /* envChain = */ nullptr,
-                                         ret)) {
+                                         reinterpret_cast<Value*>(&state.icResult))) {
             return ICInterpretOpResult::Error;
           }
         }
       }
 
-      state.icResult = ret->asRawBits();
       break;
     }
 
@@ -1125,6 +1121,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
     }
 
     case CacheOp::CallStringConcatResult: {
+      TRACE_PRINTF("CallStringConcatResult\n");
       StringOperandId lhsId = state.cacheIRReader.stringOperandId();
       StringOperandId rhsId = state.cacheIRReader.stringOperandId();
       // We don't push a frame and do a CanGC invocation here; we do a
@@ -1265,7 +1262,8 @@ DEFINE_IC(Call, 1, {
   uint32_t totalArgs =
       argc + state.extraArgs;  // this, callee, (cosntructing?), func args
   Value* args = reinterpret_cast<Value*>(&stack[0]);
-  TRACE_PRINTF("Call fallback: argc %d totalArgs %d args %p\n", argc, totalArgs, args);
+  TRACE_PRINTF("Call fallback: argc %d totalArgs %d args %p\n", argc, totalArgs,
+               args);
   // Reverse values on the stack.
   for (uint32_t i = 0; i < totalArgs / 2; i++) {
     std::swap(args[i], args[totalArgs - 1 - i]);
@@ -1545,6 +1543,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
            (int)(frame->interpreterICEntry() -
                  script->jitScript()->icScript()->icEntries()),
            frameMgr.cxForLocalUseOnly()->isExceptionPending());
+    printf("TOS tag: %d\n", int(stack[0].asValue().asRawBits() >> 47));
     fflush(stdout);
 #endif
 
@@ -2374,7 +2373,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.extraArgs = 3;
         state.spreadCall = true;
         INVOKE_IC(Call);
-        stack.popn(3);
+        stack.popn(4);
         PUSH(StackVal(Value::fromRawBits(state.icResult)));
         END_OP(SpreadSuperCall);
       }
@@ -2590,710 +2589,707 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
 
       case JSOp::JumpTarget: {
         int32_t icIndex = GET_INT32(pc);
-        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;END_OP(JumpTarget);
-        }
-        case JSOp::LoopHead: {
-          int32_t icIndex = GET_INT32(pc);
-          frame->interpreterICEntry() =
-              frame->icScript()->icEntries() + icIndex;
-          END_OP(LoopHead);
-        }
-        case JSOp::AfterYield: {
-          int32_t icIndex = GET_INT32(pc);
-          frame->interpreterICEntry() =
-              frame->icScript()->icEntries() + icIndex;
-          END_OP(AfterYield);
-        }
+        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+        END_OP(JumpTarget);
+      }
+      case JSOp::LoopHead: {
+        int32_t icIndex = GET_INT32(pc);
+        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+        END_OP(LoopHead);
+      }
+      case JSOp::AfterYield: {
+        int32_t icIndex = GET_INT32(pc);
+        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+        END_OP(AfterYield);
+      }
 
-        case JSOp::Goto: {
+      case JSOp::Goto: {
+        ADVANCE(GET_JUMP_OFFSET(pc));
+        break;
+      }
+
+      case JSOp::Coalesce: {
+        if (!stack[0].asValue().isNullOrUndefined()) {
           ADVANCE(GET_JUMP_OFFSET(pc));
           break;
+        } else {
+          END_OP(Coalesce);
         }
+      }
 
-        case JSOp::Coalesce: {
-          if (!stack[0].asValue().isNullOrUndefined()) {
-            ADVANCE(GET_JUMP_OFFSET(pc));
-            break;
-          } else {
-            END_OP(Coalesce);
-          }
-        }
-
-        case JSOp::Case: {
-          bool cond = stack.pop().asValue().toBoolean();
-          if (cond) {
-            stack.pop();
-            ADVANCE(GET_JUMP_OFFSET(pc));
-            break;
-          } else {
-            END_OP(Case);
-          }
-        }
-
-        case JSOp::Default: {
+      case JSOp::Case: {
+        bool cond = stack.pop().asValue().toBoolean();
+        if (cond) {
           stack.pop();
           ADVANCE(GET_JUMP_OFFSET(pc));
           break;
+        } else {
+          END_OP(Case);
         }
+      }
 
-        case JSOp::TableSwitch: {
-          int32_t len = GET_JUMP_OFFSET(pc);
-          int32_t low = GET_JUMP_OFFSET(pc + 1 * JUMP_OFFSET_LEN);
-          int32_t high = GET_JUMP_OFFSET(pc + 2 * JUMP_OFFSET_LEN);
-          Value v = stack.pop().asValue();
-          int32_t i = 0;
-          if (v.isInt32()) {
-            i = v.toInt32();
-          } else if (!v.isDouble() ||
-                     !mozilla::NumberEqualsInt32(v.toDouble(), &i)) {
-            ADVANCE(len);
-            break;
-          }
+      case JSOp::Default: {
+        stack.pop();
+        ADVANCE(GET_JUMP_OFFSET(pc));
+        break;
+      }
 
-          i = uint32_t(i) - uint32_t(low);
-          if ((uint32_t(i) < uint32_t(high - low + 1))) {
-            len = script->tableSwitchCaseOffset(pc, uint32_t(i)) -
-                  script->pcToOffset(pc);
-          }
+      case JSOp::TableSwitch: {
+        int32_t len = GET_JUMP_OFFSET(pc);
+        int32_t low = GET_JUMP_OFFSET(pc + 1 * JUMP_OFFSET_LEN);
+        int32_t high = GET_JUMP_OFFSET(pc + 2 * JUMP_OFFSET_LEN);
+        Value v = stack.pop().asValue();
+        int32_t i = 0;
+        if (v.isInt32()) {
+          i = v.toInt32();
+        } else if (!v.isDouble() ||
+                   !mozilla::NumberEqualsInt32(v.toDouble(), &i)) {
           ADVANCE(len);
           break;
         }
 
-        case JSOp::Return: {
-          *ret = stack.pop().asValue();
-          stack.popFrame(frameMgr.cxForLocalUseOnly());
-          stack.pop();  // fake return address
-          return true;
+        i = uint32_t(i) - uint32_t(low);
+        if ((uint32_t(i) < uint32_t(high - low + 1))) {
+          len = script->tableSwitchCaseOffset(pc, uint32_t(i)) -
+                script->pcToOffset(pc);
         }
+        ADVANCE(len);
+        break;
+      }
 
-        case JSOp::GetRval: {
+      case JSOp::Return: {
+        *ret = stack.pop().asValue();
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+      }
+
+      case JSOp::GetRval: {
+        PUSH(StackVal(*ret));
+        END_OP(GetRval);
+      }
+
+      case JSOp::SetRval: {
+        *ret = stack.pop().asValue();
+        END_OP(SetRval);
+      }
+
+      case JSOp::RetRval: {
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+      }
+
+      case JSOp::CheckReturn: {
+        Value thisval = stack.pop().asValue();
+        if (ret->isObject()) {
           PUSH(StackVal(*ret));
-          END_OP(GetRval);
-        }
-
-        case JSOp::SetRval: {
-          *ret = stack.pop().asValue();
-          END_OP(SetRval);
-        }
-
-        case JSOp::RetRval: {
-          stack.popFrame(frameMgr.cxForLocalUseOnly());
-          stack.pop();  // fake return address
-          return true;
-        }
-
-        case JSOp::CheckReturn: {
-          Value thisval = stack.pop().asValue();
-          if (ret->isObject()) {
-            PUSH(StackVal(*ret));
-          } else if (!ret->isUndefined()) {
-            PUSH_EXIT_FRAME();
-            state.value0 = *ret;
-            ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK,
-                             state.value0, nullptr);
-            goto error;
-          } else if (thisval.isMagic(JS_UNINITIALIZED_LEXICAL)) {
-            PUSH_EXIT_FRAME();
-            MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
-            goto error;
-          } else {
-            PUSH(StackVal(thisval));
-          }
-          END_OP(CheckReturn);
-        }
-
-        case JSOp::Throw: {
-          state.value0 = stack.pop().asValue();
-          {
-            PUSH_EXIT_FRAME();
-            MOZ_ALWAYS_FALSE(ThrowOperation(cx, state.value0));
-            goto error;
-          }
-          END_OP(Throw);
-        }
-
-        case JSOp::ThrowMsg: {
-          {
-            PUSH_EXIT_FRAME();
-            MOZ_ALWAYS_FALSE(ThrowMsgOperation(cx, GET_UINT8(pc)));
-            goto error;
-          }
-          END_OP(ThrowMsg);
-        }
-
-        case JSOp::ThrowSetConst: {
-          {
-            PUSH_EXIT_FRAME();
-            ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, pc);
-            goto error;
-          }
-          END_OP(ThrowSetConst);
-        }
-
-        case JSOp::Try:
-        case JSOp::TryDestructuring: {
-          static_assert(JSOpLength_Try == JSOpLength_TryDestructuring);
-          END_OP(Try);
-        }
-
-        case JSOp::Exception: {
-          {
-            PUSH_EXIT_FRAME();
-            if (!GetAndClearException(cx, &state.res)) {
-              goto error;
-            }
-          }
-          PUSH(StackVal(state.res));
-          END_OP(Exception);
-        }
-
-        case JSOp::Finally: {
-          END_OP(Finally);
-        }
-
-        case JSOp::Uninitialized: {
-          PUSH(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
-          END_OP(Uninitialized);
-        }
-        case JSOp::InitLexical: {
-          uint32_t i = GET_LOCALNO(pc);
-          frame->unaliasedLocal(i) = stack[0].asValue();
-          END_OP(InitLexical);
-        }
-
-        case JSOp::InitAliasedLexical: {
-          EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
-          EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-          obj.setAliasedBinding(ec, stack[0].asValue());
-          END_OP(InitAliasedLexical);
-        }
-        case JSOp::CheckLexical: {
-          if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
-            PUSH_EXIT_FRAME();
-            ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
-                                      pc);
-            goto error;
-          }
-          END_OP(CheckLexical);
-        }
-        case JSOp::CheckAliasedLexical: {
-          if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
-            PUSH_EXIT_FRAME();
-            ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
-                                      pc);
-            goto error;
-          }
-          END_OP(CheckAliasedLexical);
-        }
-
-        case JSOp::BindGName: {
-          IC_SET_OBJ_ARG(
-              0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-          state.name0.set(script->getName(pc));
-          INVOKE_IC(BindName);
-          IC_PUSH_RESULT();
-          END_OP(BindGName);
-        }
-        case JSOp::BindName: {
-          IC_SET_OBJ_ARG(0, frame->environmentChain());
-          INVOKE_IC(BindName);
-          IC_PUSH_RESULT();
-          END_OP(BindName);
-        }
-        case JSOp::GetGName: {
-          IC_SET_OBJ_ARG(
-              0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-          INVOKE_IC(GetName);
-          IC_PUSH_RESULT();
-          END_OP(GetGName);
-        }
-        case JSOp::GetName: {
-          IC_SET_OBJ_ARG(0, frame->environmentChain());
-          INVOKE_IC(GetName);
-          IC_PUSH_RESULT();
-          END_OP(GetName);
-        }
-
-        case JSOp::GetArg: {
-          unsigned i = GET_ARGNO(pc);
-          if (script->argsObjAliasesFormals()) {
-            PUSH(StackVal(frame->argsObj().arg(i)));
-          } else {
-            PUSH(StackVal(frame->unaliasedFormal(i)));
-          }
-          END_OP(GetArg);
-        }
-
-        case JSOp::GetFrameArg: {
-          uint32_t i = GET_ARGNO(pc);
-          PUSH(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
-          END_OP(GetFrameArg);
-        }
-
-        case JSOp::GetLocal: {
-          uint32_t i = GET_LOCALNO(pc);
-          TRACE_PRINTF(" -> local: %d\n", int(i));
-          PUSH(StackVal(frame->unaliasedLocal(i)));
-          END_OP(GetLocal);
-        }
-
-        case JSOp::ArgumentsLength: {
-          PUSH(StackVal(Int32Value(frame->numActualArgs())));
-          END_OP(ArgumentsLength);
-        }
-
-        case JSOp::GetActualArg: {
-          MOZ_ASSERT(!script->needsArgsObj());
-          uint32_t index = stack[0].asValue().toInt32();
-          stack[0] = StackVal(frame->unaliasedActual(index));
-          END_OP(GetActualArg);
-        }
-
-        case JSOp::GetAliasedVar:
-        case JSOp::GetAliasedDebugVar: {
-          static_assert(JSOpLength_GetAliasedVar ==
-                        JSOpLength_GetAliasedDebugVar);
-          EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
-          EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-          PUSH(StackVal(obj.aliasedBinding(ec)));
-          END_OP(GetAliasedVar);
-        }
-
-        case JSOp::GetImport: {
-          state.obj0 = frame->environmentChain();
-          state.value0 = stack[0].asValue();
-          {
-            PUSH_EXIT_FRAME();
-            if (!GetImportOperation(cx, state.obj0, script, pc,
-                                    &state.value0)) {
-              goto error;
-            }
-          }
-          stack[0] = StackVal(state.value0);
-          END_OP(GetImport);
-        }
-
-        case JSOp::GetIntrinsic: {
-          INVOKE_IC(GetIntrinsic);
-          IC_PUSH_RESULT();
-          END_OP(GetIntrinsic);
-        }
-
-        case JSOp::Callee: {
-          PUSH(StackVal(frame->calleev()));
-          END_OP(Callee);
-        }
-
-        case JSOp::EnvCallee: {
-          uint8_t numHops = GET_UINT8(pc);
-          JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
-          for (unsigned i = 0; i < numHops; i++) {
-            env = &env->as<EnvironmentObject>().enclosingEnvironment();
-          }
-          PUSH(StackVal(ObjectValue(env->as<CallObject>().callee())));
-          END_OP(EnvCallee);
-        }
-
-        case JSOp::SetProp:
-        case JSOp::StrictSetProp:
-        case JSOp::SetName:
-        case JSOp::StrictSetName:
-        case JSOp::SetGName:
-        case JSOp::StrictSetGName: {
-          static_assert(JSOpLength_SetProp == JSOpLength_StrictSetProp);
-          static_assert(JSOpLength_SetProp == JSOpLength_SetName);
-          static_assert(JSOpLength_SetProp == JSOpLength_StrictSetName);
-          static_assert(JSOpLength_SetProp == JSOpLength_SetGName);
-          static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
-          IC_POP_ARG(1);
-          IC_POP_ARG(0);
-          PUSH(StackVal(state.icVals[1]));
-          INVOKE_IC(SetProp);
-          END_OP(SetProp);
-        }
-
-        case JSOp::InitProp:
-        case JSOp::InitHiddenProp:
-        case JSOp::InitLockedProp: {
-          static_assert(JSOpLength_InitProp == JSOpLength_InitHiddenProp);
-          static_assert(JSOpLength_InitProp == JSOpLength_InitLockedProp);
-          IC_POP_ARG(1);
-          IC_SET_ARG_FROM_STACK(0, 0);
-          INVOKE_IC(SetProp);
-          END_OP(InitProp);
-        }
-        case JSOp::InitGLexical: {
-          IC_SET_ARG_FROM_STACK(1, 0);
-          IC_SET_OBJ_ARG(
-              0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-          INVOKE_IC(SetProp);
-          END_OP(InitGLexical);
-        }
-
-        case JSOp::SetArg: {
-          unsigned i = GET_ARGNO(pc);
-          if (script->argsObjAliasesFormals()) {
-            frame->argsObj().setArg(i, stack[0].asValue());
-          } else {
-            frame->unaliasedFormal(i) = stack[0].asValue();
-          }
-          END_OP(SetArg);
-        }
-
-        case JSOp::SetLocal: {
-          uint32_t i = GET_LOCALNO(pc);
-          TRACE_PRINTF(" -> local: %d\n", int(i));
-          frame->unaliasedLocal(i) = stack[0].asValue();
-          END_OP(SetLocal);
-        }
-
-        case JSOp::SetAliasedVar: {
-          EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
-          EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-          MOZ_ASSERT(!IsUninitializedLexical(obj.aliasedBinding(ec)));
-          obj.setAliasedBinding(ec, stack[0].asValue());
-          END_OP(SetAliasedVar);
-        }
-
-        case JSOp::SetIntrinsic: {
-          state.value0 = stack[0].asValue();
-          {
-            PUSH_EXIT_FRAME();
-            if (!SetIntrinsicOperation(cx, script, pc, state.value0)) {
-              goto error;
-            }
-          }
-          END_OP(SetIntrinsic);
-        }
-
-        case JSOp::PushLexicalEnv: {
-          state.scope0 = script->getScope(pc);
-          {
-            PUSH_EXIT_FRAME();
-            if (!frame->pushLexicalEnvironment(
-                    cx, state.scope0.as<LexicalScope>())) {
-              goto error;
-            }
-          }
-          END_OP(PushLexicalEnv);
-        }
-        case JSOp::PopLexicalEnv: {
-          frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
-          END_OP(PopLexicalEnv);
-        }
-        case JSOp::DebugLeaveLexicalEnv: {
-          END_OP(DebugLeaveLexicalEnv);
-        }
-
-        case JSOp::RecreateLexicalEnv: {
-          {
-            PUSH_EXIT_FRAME();
-            if (!frame->recreateLexicalEnvironment(cx)) {
-              goto error;
-            }
-          }
-          END_OP(RecreateLexicalEnv);
-        }
-
-        case JSOp::FreshenLexicalEnv: {
-          {
-            PUSH_EXIT_FRAME();
-            if (!frame->freshenLexicalEnvironment(cx)) {
-              goto error;
-            }
-          }
-          END_OP(FreshenLexicalEnv);
-        }
-        case JSOp::PushClassBodyEnv: {
-          state.scope0 = script->getScope(pc);
-          {
-            PUSH_EXIT_FRAME();
-            if (!frame->pushClassBodyEnvironment(
-                    cx, state.scope0.as<ClassBodyScope>())) {
-              goto error;
-            }
-          }
-          END_OP(PushClassBodyEnv);
-        }
-        case JSOp::PushVarEnv: {
-          state.scope0 = script->getScope(pc);
-          {
-            PUSH_EXIT_FRAME();
-            if (!frame->pushVarEnvironment(cx, state.scope0)) {
-              goto error;
-            }
-          }
-          END_OP(PushVarEnv);
-        }
-        case JSOp::EnterWith: {
-          state.scope0 = script->getScope(pc);
-          state.value0 = stack.pop().asValue();
-          {
-            PUSH_EXIT_FRAME();
-            if (!EnterWithOperation(cx, frame, state.value0,
-                                    state.scope0.as<WithScope>())) {
-              goto error;
-            }
-          }
-          END_OP(EnterWith);
-        }
-        case JSOp::LeaveWith: {
-          frame->popOffEnvironmentChain<WithEnvironmentObject>();
-          END_OP(LeaveWith);
-        }
-        case JSOp::BindVar: {
-          state.obj0 = frame->environmentChain();
-          JSObject* varObj;
-          {
-            PUSH_EXIT_FRAME();
-            varObj = BindVarOperation(cx, state.obj0);
-          }
-          PUSH(StackVal(ObjectValue(*varObj)));
-          END_OP(BindVar);
-        }
-
-        case JSOp::GlobalOrEvalDeclInstantiation: {
-          GCThingIndex lastFun = GET_GCTHING_INDEX(pc);
-          state.script0 = script;
-          state.obj0 = frame->environmentChain();
-          {
-            PUSH_EXIT_FRAME();
-            if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
-                                               lastFun)) {
-              goto error;
-            }
-          }
-          END_OP(GlobalOrEvalDeclInstantiation);
-        }
-
-        case JSOp::DelName: {
-          state.name0 = script->getName(pc);
-          state.obj0 = frame->environmentChain();
-          {
-            PUSH_EXIT_FRAME();
-            if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
-              goto error;
-            }
-          }
-          PUSH(StackVal(state.res));
-          END_OP(DelName);
-        }
-
-        case JSOp::Arguments: {
-          {
-            PUSH_EXIT_FRAME();
-            if (!NewArgumentsObject(cx, frame, &state.res)) {
-              goto error;
-            }
-          }
-          PUSH(StackVal(state.res));
-          END_OP(Arguments);
-        }
-
-        case JSOp::Rest: {
-          INVOKE_IC(Rest);
-          IC_PUSH_RESULT();
-          END_OP(Rest);
-        }
-
-        case JSOp::FunctionThis: {
-          {
-            PUSH_EXIT_FRAME();
-            if (!js::GetFunctionThis(cx, frame, &state.res)) {
-              goto error;
-            }
-          }
-          PUSH(StackVal(state.res));
-          END_OP(FunctionThis);
-        }
-
-        case JSOp::Pop: {
-          stack.pop();
-          END_OP(Pop);
-        }
-        case JSOp::PopN: {
-          uint32_t n = GET_UINT16(pc);
-          stack.popn(n);
-          END_OP(PopN);
-        }
-        case JSOp::Dup: {
-          StackVal value = stack[0];
-          PUSH(value);
-          END_OP(Dup);
-        }
-        case JSOp::Dup2: {
-          StackVal value1 = stack[0];
-          StackVal value2 = stack[1];
-          PUSH(value2);
-          PUSH(value1);
-          END_OP(Dup2);
-        }
-        case JSOp::DupAt: {
-          unsigned i = GET_UINT24(pc);
-          StackVal value = stack[i];
-          PUSH(value);
-          END_OP(DupAt);
-        }
-        case JSOp::Swap: {
-          std::swap(stack[0], stack[1]);
-          END_OP(Swap);
-        }
-        case JSOp::Pick: {
-          unsigned i = GET_UINT8(pc);
-          StackVal tmp = stack[i];
-          memmove(&stack[1], &stack[0], sizeof(StackVal) * i);
-          stack[0] = tmp;
-          END_OP(Pick);
-        }
-        case JSOp::Unpick: {
-          unsigned i = GET_UINT8(pc);
-          StackVal tmp = stack[0];
-          memmove(&stack[0], &stack[1], sizeof(StackVal) * i);
-          stack[i] = tmp;
-          END_OP(Unpick);
-        }
-        case JSOp::DebugCheckSelfHosted: {
-          END_OP(DebugCheckSelfHosted);
-        }
-        case JSOp::Lineno: {
-          END_OP(Lineno);
-        }
-        case JSOp::NopDestructuring: {
-          END_OP(NopDestructuring);
-        }
-        case JSOp::ForceInterpreter: {
-          END_OP(ForceInterpreter);
-        }
-        case JSOp::Debugger: {
-          END_OP(Debugger);
-        }
-
-        default:
-          MOZ_CRASH("Bad opcode");
+        } else if (!ret->isUndefined()) {
+          PUSH_EXIT_FRAME();
+          state.value0 = *ret;
+          ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK,
+                           state.value0, nullptr);
+          goto error;
+        } else if (thisval.isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
+          goto error;
+        } else {
+          PUSH(StackVal(thisval));
+        }
+        END_OP(CheckReturn);
       }
+
+      case JSOp::Throw: {
+        state.value0 = stack.pop().asValue();
+        {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(ThrowOperation(cx, state.value0));
+          goto error;
+        }
+        END_OP(Throw);
+      }
+
+      case JSOp::ThrowMsg: {
+        {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(ThrowMsgOperation(cx, GET_UINT8(pc)));
+          goto error;
+        }
+        END_OP(ThrowMsg);
+      }
+
+      case JSOp::ThrowSetConst: {
+        {
+          PUSH_EXIT_FRAME();
+          ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, pc);
+          goto error;
+        }
+        END_OP(ThrowSetConst);
+      }
+
+      case JSOp::Try:
+      case JSOp::TryDestructuring: {
+        static_assert(JSOpLength_Try == JSOpLength_TryDestructuring);
+        END_OP(Try);
+      }
+
+      case JSOp::Exception: {
+        {
+          PUSH_EXIT_FRAME();
+          if (!GetAndClearException(cx, &state.res)) {
+            goto error;
+          }
+        }
+        PUSH(StackVal(state.res));
+        END_OP(Exception);
+      }
+
+      case JSOp::Finally: {
+        END_OP(Finally);
+      }
+
+      case JSOp::Uninitialized: {
+        PUSH(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
+        END_OP(Uninitialized);
+      }
+      case JSOp::InitLexical: {
+        uint32_t i = GET_LOCALNO(pc);
+        frame->unaliasedLocal(i) = stack[0].asValue();
+        END_OP(InitLexical);
+      }
+
+      case JSOp::InitAliasedLexical: {
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
+        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+        obj.setAliasedBinding(ec, stack[0].asValue());
+        END_OP(InitAliasedLexical);
+      }
+      case JSOp::CheckLexical: {
+        if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          PUSH_EXIT_FRAME();
+          ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
+                                    pc);
+          goto error;
+        }
+        END_OP(CheckLexical);
+      }
+      case JSOp::CheckAliasedLexical: {
+        if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+          PUSH_EXIT_FRAME();
+          ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
+                                    pc);
+          goto error;
+        }
+        END_OP(CheckAliasedLexical);
+      }
+
+      case JSOp::BindGName: {
+        IC_SET_OBJ_ARG(
+            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        state.name0.set(script->getName(pc));
+        INVOKE_IC(BindName);
+        IC_PUSH_RESULT();
+        END_OP(BindGName);
+      }
+      case JSOp::BindName: {
+        IC_SET_OBJ_ARG(0, frame->environmentChain());
+        INVOKE_IC(BindName);
+        IC_PUSH_RESULT();
+        END_OP(BindName);
+      }
+      case JSOp::GetGName: {
+        IC_SET_OBJ_ARG(
+            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        INVOKE_IC(GetName);
+        IC_PUSH_RESULT();
+        END_OP(GetGName);
+      }
+      case JSOp::GetName: {
+        IC_SET_OBJ_ARG(0, frame->environmentChain());
+        INVOKE_IC(GetName);
+        IC_PUSH_RESULT();
+        END_OP(GetName);
+      }
+
+      case JSOp::GetArg: {
+        unsigned i = GET_ARGNO(pc);
+        if (script->argsObjAliasesFormals()) {
+          PUSH(StackVal(frame->argsObj().arg(i)));
+        } else {
+          PUSH(StackVal(frame->unaliasedFormal(i)));
+        }
+        END_OP(GetArg);
+      }
+
+      case JSOp::GetFrameArg: {
+        uint32_t i = GET_ARGNO(pc);
+        PUSH(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
+        END_OP(GetFrameArg);
+      }
+
+      case JSOp::GetLocal: {
+        uint32_t i = GET_LOCALNO(pc);
+        TRACE_PRINTF(" -> local: %d\n", int(i));
+        PUSH(StackVal(frame->unaliasedLocal(i)));
+        END_OP(GetLocal);
+      }
+
+      case JSOp::ArgumentsLength: {
+        PUSH(StackVal(Int32Value(frame->numActualArgs())));
+        END_OP(ArgumentsLength);
+      }
+
+      case JSOp::GetActualArg: {
+        MOZ_ASSERT(!script->needsArgsObj());
+        uint32_t index = stack[0].asValue().toInt32();
+        stack[0] = StackVal(frame->unaliasedActual(index));
+        END_OP(GetActualArg);
+      }
+
+      case JSOp::GetAliasedVar:
+      case JSOp::GetAliasedDebugVar: {
+        static_assert(JSOpLength_GetAliasedVar ==
+                      JSOpLength_GetAliasedDebugVar);
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
+        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+        PUSH(StackVal(obj.aliasedBinding(ec)));
+        END_OP(GetAliasedVar);
+      }
+
+      case JSOp::GetImport: {
+        state.obj0 = frame->environmentChain();
+        state.value0 = stack[0].asValue();
+        {
+          PUSH_EXIT_FRAME();
+          if (!GetImportOperation(cx, state.obj0, script, pc, &state.value0)) {
+            goto error;
+          }
+        }
+        stack[0] = StackVal(state.value0);
+        END_OP(GetImport);
+      }
+
+      case JSOp::GetIntrinsic: {
+        INVOKE_IC(GetIntrinsic);
+        IC_PUSH_RESULT();
+        END_OP(GetIntrinsic);
+      }
+
+      case JSOp::Callee: {
+        PUSH(StackVal(frame->calleev()));
+        END_OP(Callee);
+      }
+
+      case JSOp::EnvCallee: {
+        uint8_t numHops = GET_UINT8(pc);
+        JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
+        for (unsigned i = 0; i < numHops; i++) {
+          env = &env->as<EnvironmentObject>().enclosingEnvironment();
+        }
+        PUSH(StackVal(ObjectValue(env->as<CallObject>().callee())));
+        END_OP(EnvCallee);
+      }
+
+      case JSOp::SetProp:
+      case JSOp::StrictSetProp:
+      case JSOp::SetName:
+      case JSOp::StrictSetName:
+      case JSOp::SetGName:
+      case JSOp::StrictSetGName: {
+        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetProp);
+        static_assert(JSOpLength_SetProp == JSOpLength_SetName);
+        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetName);
+        static_assert(JSOpLength_SetProp == JSOpLength_SetGName);
+        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
+        IC_POP_ARG(1);
+        IC_POP_ARG(0);
+        PUSH(StackVal(state.icVals[1]));
+        INVOKE_IC(SetProp);
+        END_OP(SetProp);
+      }
+
+      case JSOp::InitProp:
+      case JSOp::InitHiddenProp:
+      case JSOp::InitLockedProp: {
+        static_assert(JSOpLength_InitProp == JSOpLength_InitHiddenProp);
+        static_assert(JSOpLength_InitProp == JSOpLength_InitLockedProp);
+        IC_POP_ARG(1);
+        IC_SET_ARG_FROM_STACK(0, 0);
+        INVOKE_IC(SetProp);
+        END_OP(InitProp);
+      }
+      case JSOp::InitGLexical: {
+        IC_SET_ARG_FROM_STACK(1, 0);
+        IC_SET_OBJ_ARG(
+            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+        INVOKE_IC(SetProp);
+        END_OP(InitGLexical);
+      }
+
+      case JSOp::SetArg: {
+        unsigned i = GET_ARGNO(pc);
+        if (script->argsObjAliasesFormals()) {
+          frame->argsObj().setArg(i, stack[0].asValue());
+        } else {
+          frame->unaliasedFormal(i) = stack[0].asValue();
+        }
+        END_OP(SetArg);
+      }
+
+      case JSOp::SetLocal: {
+        uint32_t i = GET_LOCALNO(pc);
+        TRACE_PRINTF(" -> local: %d\n", int(i));
+        frame->unaliasedLocal(i) = stack[0].asValue();
+        END_OP(SetLocal);
+      }
+
+      case JSOp::SetAliasedVar: {
+        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
+        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+        MOZ_ASSERT(!IsUninitializedLexical(obj.aliasedBinding(ec)));
+        obj.setAliasedBinding(ec, stack[0].asValue());
+        END_OP(SetAliasedVar);
+      }
+
+      case JSOp::SetIntrinsic: {
+        state.value0 = stack[0].asValue();
+        {
+          PUSH_EXIT_FRAME();
+          if (!SetIntrinsicOperation(cx, script, pc, state.value0)) {
+            goto error;
+          }
+        }
+        END_OP(SetIntrinsic);
+      }
+
+      case JSOp::PushLexicalEnv: {
+        state.scope0 = script->getScope(pc);
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->pushLexicalEnvironment(cx,
+                                             state.scope0.as<LexicalScope>())) {
+            goto error;
+          }
+        }
+        END_OP(PushLexicalEnv);
+      }
+      case JSOp::PopLexicalEnv: {
+        frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
+        END_OP(PopLexicalEnv);
+      }
+      case JSOp::DebugLeaveLexicalEnv: {
+        END_OP(DebugLeaveLexicalEnv);
+      }
+
+      case JSOp::RecreateLexicalEnv: {
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->recreateLexicalEnvironment(cx)) {
+            goto error;
+          }
+        }
+        END_OP(RecreateLexicalEnv);
+      }
+
+      case JSOp::FreshenLexicalEnv: {
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->freshenLexicalEnvironment(cx)) {
+            goto error;
+          }
+        }
+        END_OP(FreshenLexicalEnv);
+      }
+      case JSOp::PushClassBodyEnv: {
+        state.scope0 = script->getScope(pc);
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->pushClassBodyEnvironment(
+                  cx, state.scope0.as<ClassBodyScope>())) {
+            goto error;
+          }
+        }
+        END_OP(PushClassBodyEnv);
+      }
+      case JSOp::PushVarEnv: {
+        state.scope0 = script->getScope(pc);
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->pushVarEnvironment(cx, state.scope0)) {
+            goto error;
+          }
+        }
+        END_OP(PushVarEnv);
+      }
+      case JSOp::EnterWith: {
+        state.scope0 = script->getScope(pc);
+        state.value0 = stack.pop().asValue();
+        {
+          PUSH_EXIT_FRAME();
+          if (!EnterWithOperation(cx, frame, state.value0,
+                                  state.scope0.as<WithScope>())) {
+            goto error;
+          }
+        }
+        END_OP(EnterWith);
+      }
+      case JSOp::LeaveWith: {
+        frame->popOffEnvironmentChain<WithEnvironmentObject>();
+        END_OP(LeaveWith);
+      }
+      case JSOp::BindVar: {
+        state.obj0 = frame->environmentChain();
+        JSObject* varObj;
+        {
+          PUSH_EXIT_FRAME();
+          varObj = BindVarOperation(cx, state.obj0);
+        }
+        PUSH(StackVal(ObjectValue(*varObj)));
+        END_OP(BindVar);
+      }
+
+      case JSOp::GlobalOrEvalDeclInstantiation: {
+        GCThingIndex lastFun = GET_GCTHING_INDEX(pc);
+        state.script0 = script;
+        state.obj0 = frame->environmentChain();
+        {
+          PUSH_EXIT_FRAME();
+          if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
+                                             lastFun)) {
+            goto error;
+          }
+        }
+        END_OP(GlobalOrEvalDeclInstantiation);
+      }
+
+      case JSOp::DelName: {
+        state.name0 = script->getName(pc);
+        state.obj0 = frame->environmentChain();
+        {
+          PUSH_EXIT_FRAME();
+          if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
+            goto error;
+          }
+        }
+        PUSH(StackVal(state.res));
+        END_OP(DelName);
+      }
+
+      case JSOp::Arguments: {
+        {
+          PUSH_EXIT_FRAME();
+          if (!NewArgumentsObject(cx, frame, &state.res)) {
+            goto error;
+          }
+        }
+        PUSH(StackVal(state.res));
+        END_OP(Arguments);
+      }
+
+      case JSOp::Rest: {
+        INVOKE_IC(Rest);
+        IC_PUSH_RESULT();
+        END_OP(Rest);
+      }
+
+      case JSOp::FunctionThis: {
+        {
+          PUSH_EXIT_FRAME();
+          if (!js::GetFunctionThis(cx, frame, &state.res)) {
+            goto error;
+          }
+        }
+        PUSH(StackVal(state.res));
+        END_OP(FunctionThis);
+      }
+
+      case JSOp::Pop: {
+        stack.pop();
+        END_OP(Pop);
+      }
+      case JSOp::PopN: {
+        uint32_t n = GET_UINT16(pc);
+        stack.popn(n);
+        END_OP(PopN);
+      }
+      case JSOp::Dup: {
+        StackVal value = stack[0];
+        PUSH(value);
+        END_OP(Dup);
+      }
+      case JSOp::Dup2: {
+        StackVal value1 = stack[0];
+        StackVal value2 = stack[1];
+        PUSH(value2);
+        PUSH(value1);
+        END_OP(Dup2);
+      }
+      case JSOp::DupAt: {
+        unsigned i = GET_UINT24(pc);
+        StackVal value = stack[i];
+        PUSH(value);
+        END_OP(DupAt);
+      }
+      case JSOp::Swap: {
+        std::swap(stack[0], stack[1]);
+        END_OP(Swap);
+      }
+      case JSOp::Pick: {
+        unsigned i = GET_UINT8(pc);
+        StackVal tmp = stack[i];
+        memmove(&stack[1], &stack[0], sizeof(StackVal) * i);
+        stack[0] = tmp;
+        END_OP(Pick);
+      }
+      case JSOp::Unpick: {
+        unsigned i = GET_UINT8(pc);
+        StackVal tmp = stack[0];
+        memmove(&stack[0], &stack[1], sizeof(StackVal) * i);
+        stack[i] = tmp;
+        END_OP(Unpick);
+      }
+      case JSOp::DebugCheckSelfHosted: {
+        END_OP(DebugCheckSelfHosted);
+      }
+      case JSOp::Lineno: {
+        END_OP(Lineno);
+      }
+      case JSOp::NopDestructuring: {
+        END_OP(NopDestructuring);
+      }
+      case JSOp::ForceInterpreter: {
+        END_OP(ForceInterpreter);
+      }
+      case JSOp::Debugger: {
+        END_OP(Debugger);
+      }
+
+      default:
+        MOZ_CRASH("Bad opcode");
     }
-
-  error:
-    TRACE_PRINTF("HandleException\n");
-    do {
-      ResumeFromException rfe;
-      {
-        PUSH_EXIT_FRAME();
-        HandleException(&rfe);
-      }
-
-      switch (rfe.kind) {
-        case ExceptionResumeKind::EntryFrame:
-          TRACE_PRINTF(" -> Return from entry frame\n");
-          *ret = MagicValue(JS_ION_ERROR);
-          stack.popFrame(frameMgr.cxForLocalUseOnly());
-          stack.pop();  // fake return address
-          return false;
-        case ExceptionResumeKind::Catch:
-          pc = frame->interpreterPC();
-          TRACE_PRINTF(" -> catch to pc %p\n", pc);
-          goto dispatch;
-        case ExceptionResumeKind::Finally:
-          pc = frame->interpreterPC();
-          TRACE_PRINTF(" -> finally to pc %p\n", pc);
-          PUSH(StackVal(rfe.exception));
-          PUSH(StackVal(BooleanValue(true)));
-          goto dispatch;
-        case ExceptionResumeKind::ForcedReturnBaseline:
-          TRACE_PRINTF(" -> forced return\n");
-          stack.popFrame(frameMgr.cxForLocalUseOnly());
-          stack.pop();  // fake return address
-          return true;
-          break;
-        case ExceptionResumeKind::ForcedReturnIon:
-          MOZ_CRASH(
-              "Unexpected ForcedReturnIon exception-resume kind in Portable "
-              "Baseline");
-        case ExceptionResumeKind::Bailout:
-          MOZ_CRASH(
-              "Unexpected Bailout exception-resume kind in Portable Baseline");
-        case ExceptionResumeKind::Wasm:
-          MOZ_CRASH(
-              "Unexpected Wasm exception-resume kind in Portable Baseline");
-        case ExceptionResumeKind::WasmCatch:
-          MOZ_CRASH(
-              "Unexpected WasmCatch exception-resume kind in Portable "
-              "Baseline");
-      }
-    } while (false);
-
-    goto dispatch;
   }
 
-  bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
-                                      size_t numActualArgs,
-                                      CalleeToken calleeToken,
-                                      JSObject* envChain, Value* result) {
-    Stack stack(cx->portableBaselineStack());
-
-    // Expected stack frame:
-    // - argN
-    // - ...
-    // - arg1
-    // - this
-    // - calleeToken
-    // - descriptor
-    // - "return address" (nullptr for top frame)
-
-    if (CalleeTokenIsConstructing(calleeToken)) {
-      argc++;
-    }
-    for (size_t i = 0; i < argc; i++) {
-      PUSH(StackVal(argv[argc - 1 - i]));
-    }
-    PUSH(StackVal(calleeToken));
-    PUSH(StackVal(
-        MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
-    PUSH(StackVal(nullptr));  // Fake return address.
-
-    if (!PortableBaselineInterpret(cx, stack, envChain, result)) {
-      return false;
+error:
+  TRACE_PRINTF("HandleException\n");
+  do {
+    ResumeFromException rfe;
+    {
+      PUSH_EXIT_FRAME();
+      HandleException(&rfe);
     }
 
-    // Pop the descriptor, calleeToken, and args. (Return address is
-    // popped in callee.)
-    stack.popn(2 + argc);
+    switch (rfe.kind) {
+      case ExceptionResumeKind::EntryFrame:
+        TRACE_PRINTF(" -> Return from entry frame\n");
+        *ret = MagicValue(JS_ION_ERROR);
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return false;
+      case ExceptionResumeKind::Catch:
+        pc = frame->interpreterPC();
+        TRACE_PRINTF(" -> catch to pc %p\n", pc);
+        goto dispatch;
+      case ExceptionResumeKind::Finally:
+        pc = frame->interpreterPC();
+        TRACE_PRINTF(" -> finally to pc %p\n", pc);
+        PUSH(StackVal(rfe.exception));
+        PUSH(StackVal(BooleanValue(true)));
+        goto dispatch;
+      case ExceptionResumeKind::ForcedReturnBaseline:
+        TRACE_PRINTF(" -> forced return\n");
+        stack.popFrame(frameMgr.cxForLocalUseOnly());
+        stack.pop();  // fake return address
+        return true;
+        break;
+      case ExceptionResumeKind::ForcedReturnIon:
+        MOZ_CRASH(
+            "Unexpected ForcedReturnIon exception-resume kind in Portable "
+            "Baseline");
+      case ExceptionResumeKind::Bailout:
+        MOZ_CRASH(
+            "Unexpected Bailout exception-resume kind in Portable Baseline");
+      case ExceptionResumeKind::Wasm:
+        MOZ_CRASH("Unexpected Wasm exception-resume kind in Portable Baseline");
+      case ExceptionResumeKind::WasmCatch:
+        MOZ_CRASH(
+            "Unexpected WasmCatch exception-resume kind in Portable "
+            "Baseline");
+    }
+  } while (false);
 
-    return true;
+  goto dispatch;
+}
+
+bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
+                                    size_t numActualArgs,
+                                    CalleeToken calleeToken, JSObject* envChain,
+                                    Value* result) {
+  Stack stack(cx->portableBaselineStack());
+
+  // Expected stack frame:
+  // - argN
+  // - ...
+  // - arg1
+  // - this
+  // - calleeToken
+  // - descriptor
+  // - "return address" (nullptr for top frame)
+
+  if (CalleeTokenIsConstructing(calleeToken)) {
+    argc++;
+  }
+  for (size_t i = 0; i < argc; i++) {
+    PUSH(StackVal(argv[argc - 1 - i]));
+  }
+  PUSH(StackVal(calleeToken));
+  PUSH(StackVal(
+      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
+  PUSH(StackVal(nullptr));  // Fake return address.
+
+  if (!PortableBaselineInterpret(cx, stack, envChain, result)) {
+    return false;
   }
 
-  MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
-                                                       RunState& state) {
-    if (!JitOptions.portableBaselineInterpreter) {
-      return MethodStatus::Method_CantCompile;
-    }
-    if (state.script()->hasJitScript()) {
-      return MethodStatus::Method_Compiled;
-    }
-    if (state.script()->hasForceInterpreterOp()) {
-      return MethodStatus::Method_CantCompile;
-    }
-    if (state.script()->nslots() > BaselineMaxScriptSlots) {
-      return MethodStatus::Method_CantCompile;
-    }
-    if (state.isInvoke()) {
-      InvokeState& invoke = *state.asInvoke();
-      if (TooManyActualArguments(invoke.args().length())) {
-        return MethodStatus::Method_CantCompile;
-      }
-    }
-    if (state.script()->getWarmUpCount() <=
-        JitOptions.portableBaselineInterpreterWarmUpThreshold) {
-      return MethodStatus::Method_Skipped;
-    }
-    if (!cx->realm()->ensureJitRealmExists(cx)) {
-      return MethodStatus::Method_Error;
-    }
+  // Pop the descriptor, calleeToken, and args. (Return address is
+  // popped in callee.)
+  stack.popn(2 + argc);
 
-    AutoKeepJitScripts keepJitScript(cx);
-    if (!state.script()->ensureHasJitScript(cx, keepJitScript)) {
-      return MethodStatus::Method_Error;
-    }
-    state.script()->updateJitCodeRaw(cx->runtime());
+  return true;
+}
+
+MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
+                                                     RunState& state) {
+  if (!JitOptions.portableBaselineInterpreter) {
+    return MethodStatus::Method_CantCompile;
+  }
+  if (state.script()->hasJitScript()) {
     return MethodStatus::Method_Compiled;
   }
+  if (state.script()->hasForceInterpreterOp()) {
+    return MethodStatus::Method_CantCompile;
+  }
+  if (state.script()->nslots() > BaselineMaxScriptSlots) {
+    return MethodStatus::Method_CantCompile;
+  }
+  if (state.isInvoke()) {
+    InvokeState& invoke = *state.asInvoke();
+    if (TooManyActualArguments(invoke.args().length())) {
+      return MethodStatus::Method_CantCompile;
+    }
+  }
+  if (state.script()->getWarmUpCount() <=
+      JitOptions.portableBaselineInterpreterWarmUpThreshold) {
+    return MethodStatus::Method_Skipped;
+  }
+  if (!cx->realm()->ensureJitRealmExists(cx)) {
+    return MethodStatus::Method_Error;
+  }
+
+  AutoKeepJitScripts keepJitScript(cx);
+  if (!state.script()->ensureHasJitScript(cx, keepJitScript)) {
+    return MethodStatus::Method_Error;
+  }
+  state.script()->updateJitCodeRaw(cx->runtime());
+  return MethodStatus::Method_Compiled;
+}
