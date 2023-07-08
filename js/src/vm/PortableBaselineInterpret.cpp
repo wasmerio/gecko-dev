@@ -1819,9 +1819,38 @@ DEFINE_IC(CloseIter, 1, {
 
 #define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(false)
 
+#define LABEL(op) (&&label_##op)
+#define CASE(op) label_##op:
+#define DISPATCH() goto* addresses[*pc]
+
+#define ADVANCE(delta) pc += (delta);
+#define ADVANCE_AND_DISPATCH(delta) \
+  ADVANCE(delta);                   \
+  DISPATCH();
+
+#define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
+
+#define IC_SET_ARG_FROM_STACK(index, stack_index) \
+  icregs.icVals[(index)] = stack[(stack_index)].asUInt64();
+#define IC_POP_ARG(index) icregs.icVals[(index)] = stack.pop().asUInt64();
+#define IC_SET_VAL_ARG(index, expr) icregs.icVals[(index)] = (expr).asRawBits();
+#define IC_SET_OBJ_ARG(index, expr) \
+  icregs.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
+#define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
+
 static bool PortableBaselineInterpret(JSContext* cx_, State& state,
                                       Stack& stack, JSObject* envChain,
                                       Value* ret) {
+#define OPCODE_LABEL(op, ...) LABEL(op),
+#define TRAILING_LABEL(v) LABEL(default),
+
+  static const void* const addresses[EnableInterruptsPseudoOpcode + 1] = {
+      FOR_EACH_OPCODE(OPCODE_LABEL)
+          FOR_EACH_TRAILING_UNUSED_OPCODE(TRAILING_LABEL)};
+
+#undef OPCODE_LABEL
+#undef TRAILING_LABEL
+
   AutoCheckRecursionLimit recursion(cx_);
   if (!recursion.check(cx_)) {
     return false;
@@ -1854,26 +1883,10 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
   }
 
   while (true) {
-  dispatch:
-
-#define ADVANCE(delta) pc += (delta);
-#define ADVANCE_AND_DISPATCH(delta) \
-  ADVANCE(delta);                   \
-  goto dispatch;
-
-#define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
-
-#define IC_SET_ARG_FROM_STACK(index, stack_index) \
-  icregs.icVals[(index)] = stack[(stack_index)].asUInt64();
-#define IC_POP_ARG(index) icregs.icVals[(index)] = stack.pop().asUInt64();
-#define IC_SET_VAL_ARG(index, expr) icregs.icVals[(index)] = (expr).asRawBits();
-#define IC_SET_OBJ_ARG(index, expr) \
-  icregs.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
-#define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
-
-    JSOp op = JSOp(*pc);
-
+  dispatch :
 #ifdef TRACE_INTERP
+  {
+    JSOp op = JSOp(*pc);
     printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
            "\n",
            stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
@@ -1884,1822 +1897,1802 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
            frameMgr.cxForLocalUseOnly()->isExceptionPending());
     printf("TOS tag: %d\n", int(stack[0].asValue().asRawBits() >> 47));
     fflush(stdout);
+  }
 #endif
 
-    switch (op) {
-      case JSOp::Nop: {
-        END_OP(Nop);
-      }
-      case JSOp::Undefined: {
-        PUSH(StackVal(UndefinedValue()));
-        END_OP(Undefined);
-      }
-      case JSOp::Null: {
-        PUSH(StackVal(NullValue()));
-        END_OP(Null);
-      }
-      case JSOp::False: {
-        PUSH(StackVal(BooleanValue(false)));
-        END_OP(False);
-      }
-      case JSOp::True: {
-        PUSH(StackVal(BooleanValue(true)));
-        END_OP(True);
-      }
-      case JSOp::Int32: {
-        PUSH(StackVal(Int32Value(GET_INT32(pc))));
-        END_OP(Int32);
-      }
-      case JSOp::Zero: {
-        PUSH(StackVal(Int32Value(0)));
-        END_OP(Zero);
-      }
-      case JSOp::One: {
-        PUSH(StackVal(Int32Value(1)));
-        END_OP(One);
-      }
-      case JSOp::Int8: {
-        PUSH(StackVal(Int32Value(GET_INT8(pc))));
-        END_OP(Int8);
-      }
-      case JSOp::Uint16: {
-        PUSH(StackVal(Int32Value(GET_UINT16(pc))));
-        END_OP(Uint16);
-      }
-      case JSOp::Uint24: {
-        PUSH(StackVal(Int32Value(GET_UINT24(pc))));
-        END_OP(Uint24);
-      }
-      case JSOp::Double: {
-        PUSH(StackVal(GET_INLINE_VALUE(pc)));
-        END_OP(Double);
-      }
-      case JSOp::BigInt: {
-        PUSH(StackVal(JS::BigIntValue(script->getBigInt(pc))));
-        END_OP(BigInt);
-      }
-      case JSOp::String: {
-        PUSH(StackVal(StringValue(script->getString(pc))));
-        END_OP(String);
-      }
-      case JSOp::Symbol: {
-        PUSH(StackVal(
-            SymbolValue(frameMgr.cxForLocalUseOnly()->wellKnownSymbols().get(
-                GET_UINT8(pc)))));
-        END_OP(Symbol);
-      }
-      case JSOp::Void: {
-        stack[0] = StackVal(JS::UndefinedValue());
-        END_OP(Void);
-      }
+    DISPATCH();
 
-      case JSOp::Typeof:
-      case JSOp::TypeofExpr: {
-        static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
-        IC_POP_ARG(0);
-        INVOKE_IC(Typeof);
-        IC_PUSH_RESULT();
-        END_OP(Typeof);
-      }
+    CASE(Nop) { END_OP(Nop); }
+    CASE(Undefined) {
+      PUSH(StackVal(UndefinedValue()));
+      END_OP(Undefined);
+    }
+    CASE(Null) {
+      PUSH(StackVal(NullValue()));
+      END_OP(Null);
+    }
+    CASE(False) {
+      PUSH(StackVal(BooleanValue(false)));
+      END_OP(False);
+    }
+    CASE(True) {
+      PUSH(StackVal(BooleanValue(true)));
+      END_OP(True);
+    }
+    CASE(Int32) {
+      PUSH(StackVal(Int32Value(GET_INT32(pc))));
+      END_OP(Int32);
+    }
+    CASE(Zero) {
+      PUSH(StackVal(Int32Value(0)));
+      END_OP(Zero);
+    }
+    CASE(One) {
+      PUSH(StackVal(Int32Value(1)));
+      END_OP(One);
+    }
+    CASE(Int8) {
+      PUSH(StackVal(Int32Value(GET_INT8(pc))));
+      END_OP(Int8);
+    }
+    CASE(Uint16) {
+      PUSH(StackVal(Int32Value(GET_UINT16(pc))));
+      END_OP(Uint16);
+    }
+    CASE(Uint24) {
+      PUSH(StackVal(Int32Value(GET_UINT24(pc))));
+      END_OP(Uint24);
+    }
+    CASE(Double) {
+      PUSH(StackVal(GET_INLINE_VALUE(pc)));
+      END_OP(Double);
+    }
+    CASE(BigInt) {
+      PUSH(StackVal(JS::BigIntValue(script->getBigInt(pc))));
+      END_OP(BigInt);
+    }
+    CASE(String) {
+      PUSH(StackVal(StringValue(script->getString(pc))));
+      END_OP(String);
+    }
+    CASE(Symbol) {
+      PUSH(StackVal(
+          SymbolValue(frameMgr.cxForLocalUseOnly()->wellKnownSymbols().get(
+              GET_UINT8(pc)))));
+      END_OP(Symbol);
+    }
+    CASE(Void) {
+      stack[0] = StackVal(JS::UndefinedValue());
+      END_OP(Void);
+    }
 
-      case JSOp::Pos: {
-        if (stack[0].asValue().isNumber()) {
-          // Nothing!
+    CASE(Typeof)
+    CASE(TypeofExpr) {
+      static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
+      IC_POP_ARG(0);
+      INVOKE_IC(Typeof);
+      IC_PUSH_RESULT();
+      END_OP(Typeof);
+    }
+
+    CASE(Pos) {
+      if (stack[0].asValue().isNumber()) {
+        // Nothing!
+        NEXT_IC();
+        END_OP(Pos);
+      } else {
+        goto generic_unary;
+      }
+    }
+    CASE(Neg) {
+      if (stack[0].asValue().isInt32()) {
+        int32_t i = stack[0].asValue().toInt32();
+        if (i != 0 && i != INT32_MIN) {
+          stack[0] = StackVal(Int32Value(-i));
           NEXT_IC();
-          END_OP(Pos);
-        } else {
-          goto generic_unary;
+          END_OP(Neg);
         }
       }
-      case JSOp::Neg: {
-        if (stack[0].asValue().isInt32()) {
-          int32_t i = stack[0].asValue().toInt32();
-          if (i != 0 && i != INT32_MIN) {
-            stack[0] = StackVal(Int32Value(-i));
-            NEXT_IC();
-            END_OP(Neg);
-          }
-        }
-        goto generic_unary;
-      }
+      goto generic_unary;
+    }
 
-      case JSOp::Inc: {
-        if (stack[0].asValue().isInt32()) {
-          int32_t i = stack[0].asValue().toInt32();
-          if (i != INT32_MAX) {
-            stack[0] = StackVal(Int32Value(i + 1));
-            NEXT_IC();
-            END_OP(Inc);
-          }
-        }
-        goto generic_unary;
-      }
-      case JSOp::Dec: {
-        if (stack[0].asValue().isInt32()) {
-          int32_t i = stack[0].asValue().toInt32();
-          if (i != INT32_MIN) {
-            stack[0] = StackVal(Int32Value(i - 1));
-            NEXT_IC();
-            END_OP(Dec);
-          }
-        }
-        goto generic_unary;
-      }
-
-      case JSOp::BitNot: {
-        if (stack[0].asValue().isInt32()) {
-          int32_t i = stack[0].asValue().toInt32();
-          stack[0] = StackVal(Int32Value(~i));
+    CASE(Inc) {
+      if (stack[0].asValue().isInt32()) {
+        int32_t i = stack[0].asValue().toInt32();
+        if (i != INT32_MAX) {
+          stack[0] = StackVal(Int32Value(i + 1));
           NEXT_IC();
           END_OP(Inc);
         }
-        goto generic_unary;
       }
+      goto generic_unary;
+    }
+    CASE(Dec) {
+      if (stack[0].asValue().isInt32()) {
+        int32_t i = stack[0].asValue().toInt32();
+        if (i != INT32_MIN) {
+          stack[0] = StackVal(Int32Value(i - 1));
+          NEXT_IC();
+          END_OP(Dec);
+        }
+      }
+      goto generic_unary;
+    }
 
-      generic_unary:
-      case JSOp::ToNumeric: {
-        static_assert(JSOpLength_Pos == JSOpLength_Neg);
-        static_assert(JSOpLength_Pos == JSOpLength_BitNot);
-        static_assert(JSOpLength_Pos == JSOpLength_Inc);
-        static_assert(JSOpLength_Pos == JSOpLength_Dec);
-        static_assert(JSOpLength_Pos == JSOpLength_ToNumeric);
-        IC_POP_ARG(0);
-        INVOKE_IC(UnaryArith);
-        IC_PUSH_RESULT();
-        END_OP(Pos);
+    CASE(BitNot) {
+      if (stack[0].asValue().isInt32()) {
+        int32_t i = stack[0].asValue().toInt32();
+        stack[0] = StackVal(Int32Value(~i));
+        NEXT_IC();
+        END_OP(Inc);
       }
-      case JSOp::Not: {
-        IC_POP_ARG(0);
+      goto generic_unary;
+    }
+
+  generic_unary:
+    CASE(ToNumeric) {
+      static_assert(JSOpLength_Pos == JSOpLength_Neg);
+      static_assert(JSOpLength_Pos == JSOpLength_BitNot);
+      static_assert(JSOpLength_Pos == JSOpLength_Inc);
+      static_assert(JSOpLength_Pos == JSOpLength_Dec);
+      static_assert(JSOpLength_Pos == JSOpLength_ToNumeric);
+      IC_POP_ARG(0);
+      INVOKE_IC(UnaryArith);
+      IC_PUSH_RESULT();
+      END_OP(Pos);
+    }
+    CASE(Not) {
+      IC_POP_ARG(0);
+      INVOKE_IC(ToBool);
+      PUSH(StackVal(
+          BooleanValue(!Value::fromRawBits(icregs.icResult).toBoolean())));
+      END_OP(Not);
+    }
+    CASE(And) {
+      bool result;
+      if (stack[0].asValue().isBoolean()) {
+        result = stack[0].asValue().toBoolean();
+      } else {
+        IC_SET_ARG_FROM_STACK(0, 0);
         INVOKE_IC(ToBool);
-        PUSH(StackVal(
-            BooleanValue(!Value::fromRawBits(icregs.icResult).toBoolean())));
-        END_OP(Not);
-      }
-      case JSOp::And: {
-        bool result;
-        if (stack[0].asValue().isBoolean()) {
-          result = stack[0].asValue().toBoolean();
-        } else {
-          IC_SET_ARG_FROM_STACK(0, 0);
-          INVOKE_IC(ToBool);
-          result = Value::fromRawBits(icregs.icResult).toBoolean();
-        }
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (!result) {
-          ADVANCE(jumpOffset);
-          if (JSOp(*pc) == JSOp::JumpTarget) {
-            goto jsop_JumpTarget;
-          }
-          if (JSOp(*pc) == JSOp::LoopHead) {
-            goto jsop_LoopHead;
-          }
-        } else {
-          ADVANCE(JSOpLength_And);
-        }
-        goto dispatch;
-      }
-      case JSOp::Or: {
-        bool result;
-        if (stack[0].asValue().isBoolean()) {
-          result = stack[0].asValue().toBoolean();
-        } else {
-          IC_SET_ARG_FROM_STACK(0, 0);
-          INVOKE_IC(ToBool);
-          result = Value::fromRawBits(icregs.icResult).toBoolean();
-        }
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (result) {
-          ADVANCE(jumpOffset);
-          if (JSOp(*pc) == JSOp::JumpTarget) {
-            goto jsop_JumpTarget;
-          }
-          if (JSOp(*pc) == JSOp::LoopHead) {
-            goto jsop_LoopHead;
-          }
-        } else {
-          ADVANCE(JSOpLength_Or);
-        }
-        goto dispatch;
-      }
-      case JSOp::JumpIfTrue: {
-        bool result;
-        if (stack[0].asValue().isBoolean()) {
-          result = stack.pop().asValue().toBoolean();
-        } else {
-          IC_POP_ARG(0);
-          INVOKE_IC(ToBool);
-          result = Value::fromRawBits(icregs.icResult).toBoolean();
-        }
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (result) {
-          ADVANCE(jumpOffset);
-          if (JSOp(*pc) == JSOp::JumpTarget) {
-            goto jsop_JumpTarget;
-          }
-          if (JSOp(*pc) == JSOp::LoopHead) {
-            goto jsop_LoopHead;
-          }
-        } else {
-          ADVANCE(JSOpLength_JumpIfTrue);
-        }
-        goto dispatch;
-      }
-      case JSOp::JumpIfFalse: {
-        bool result;
-        if (stack[0].asValue().isBoolean()) {
-          result = stack.pop().asValue().toBoolean();
-        } else {
-          IC_POP_ARG(0);
-          INVOKE_IC(ToBool);
-          result = Value::fromRawBits(icregs.icResult).toBoolean();
-        }
-        uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (!result) {
-          ADVANCE(jumpOffset);
-          if (JSOp(*pc) == JSOp::JumpTarget) {
-            goto jsop_JumpTarget;
-          }
-          if (JSOp(*pc) == JSOp::LoopHead) {
-            goto jsop_LoopHead;
-          }
-        } else {
-          ADVANCE(JSOpLength_JumpIfFalse);
-        }
-        goto dispatch;
-      }
-
-      case JSOp::Add: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          int64_t lhs = stack[1].asValue().toInt32();
-          int64_t rhs = stack[0].asValue().toInt32();
-          if (lhs + rhs <= int64_t(INT32_MAX)) {
-            stack.pop();
-            stack[0] = StackVal(Int32Value(int32_t(lhs + rhs)));
-            NEXT_IC();
-            END_OP(Add);
-          }
-        }
-        goto generic_binary;
-      }
-
-      case JSOp::Sub: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          int64_t lhs = stack[1].asValue().toInt32();
-          int64_t rhs = stack[0].asValue().toInt32();
-          if (lhs - rhs >= int64_t(INT32_MIN)) {
-            stack.pop();
-            stack[0] = StackVal(Int32Value(int32_t(lhs - rhs)));
-            NEXT_IC();
-            END_OP(Sub);
-          }
-        }
-        goto generic_binary;
-      }
-
-      generic_binary:
-      case JSOp::BitOr:
-      case JSOp::BitXor:
-      case JSOp::BitAnd:
-      case JSOp::Lsh:
-      case JSOp::Rsh:
-      case JSOp::Ursh:
-      case JSOp::Mul:
-      case JSOp::Div:
-      case JSOp::Mod:
-      case JSOp::Pow: {
-        static_assert(JSOpLength_BitOr == JSOpLength_BitXor);
-        static_assert(JSOpLength_BitOr == JSOpLength_BitAnd);
-        static_assert(JSOpLength_BitOr == JSOpLength_Lsh);
-        static_assert(JSOpLength_BitOr == JSOpLength_Rsh);
-        static_assert(JSOpLength_BitOr == JSOpLength_Ursh);
-        static_assert(JSOpLength_BitOr == JSOpLength_Add);
-        static_assert(JSOpLength_BitOr == JSOpLength_Sub);
-        static_assert(JSOpLength_BitOr == JSOpLength_Mul);
-        static_assert(JSOpLength_BitOr == JSOpLength_Div);
-        static_assert(JSOpLength_BitOr == JSOpLength_Mod);
-        static_assert(JSOpLength_BitOr == JSOpLength_Pow);
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(BinaryArith);
-        IC_PUSH_RESULT();
-        END_OP(Div);
-      }
-
-      case JSOp::Eq: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          bool result =
-              stack[0].asValue().toInt32() == stack[1].asValue().toInt32();
-          stack.pop();
-          stack[0] = StackVal(BooleanValue(result));
-          NEXT_IC();
-          END_OP(Eq);
-        }
-        goto generic_cmp;
-      }
-
-      case JSOp::Ne: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          bool result =
-              stack[0].asValue().toInt32() != stack[1].asValue().toInt32();
-          stack.pop();
-          stack[0] = StackVal(BooleanValue(result));
-          NEXT_IC();
-          END_OP(Ne);
-        }
-        goto generic_cmp;
-      }
-
-      case JSOp::Lt: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          bool result =
-              stack[1].asValue().toInt32() < stack[0].asValue().toInt32();
-          stack.pop();
-          stack[0] = StackVal(BooleanValue(result));
-          NEXT_IC();
-          END_OP(Lt);
-        }
-        goto generic_cmp;
-      }
-      case JSOp::Le: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          bool result =
-              stack[1].asValue().toInt32() <= stack[0].asValue().toInt32();
-          stack.pop();
-          stack[0] = StackVal(BooleanValue(result));
-          NEXT_IC();
-          END_OP(Le);
-        }
-        goto generic_cmp;
-      }
-      case JSOp::Gt: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          bool result =
-              stack[1].asValue().toInt32() > stack[0].asValue().toInt32();
-          stack.pop();
-          stack[0] = StackVal(BooleanValue(result));
-          NEXT_IC();
-          END_OP(Gt);
-        }
-        goto generic_cmp;
-      }
-      case JSOp::Ge: {
-        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-          bool result =
-              stack[1].asValue().toInt32() >= stack[0].asValue().toInt32();
-          stack.pop();
-          stack[0] = StackVal(BooleanValue(result));
-          NEXT_IC();
-          END_OP(Ge);
-        }
-        goto generic_cmp;
-      }
-
-      generic_cmp:
-      case JSOp::StrictEq:
-      case JSOp::StrictNe: {
-        static_assert(JSOpLength_Eq == JSOpLength_Ne);
-        static_assert(JSOpLength_Eq == JSOpLength_StrictEq);
-        static_assert(JSOpLength_Eq == JSOpLength_StrictNe);
-        static_assert(JSOpLength_Eq == JSOpLength_Lt);
-        static_assert(JSOpLength_Eq == JSOpLength_Gt);
-        static_assert(JSOpLength_Eq == JSOpLength_Le);
-        static_assert(JSOpLength_Eq == JSOpLength_Ge);
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(Compare);
-        IC_PUSH_RESULT();
-        END_OP(Eq);
-      }
-
-      case JSOp::Instanceof: {
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(InstanceOf);
-        IC_PUSH_RESULT();
-        END_OP(Instanceof);
-      }
-
-      case JSOp::In: {
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(In);
-        IC_PUSH_RESULT();
-        END_OP(In);
-      }
-
-      case JSOp::ToPropertyKey: {
-        IC_POP_ARG(0);
-        INVOKE_IC(ToPropertyKey);
-        IC_PUSH_RESULT();
-        END_OP(ToPropertyKey);
-      }
-
-      case JSOp::ToString: {
-        state.value0 = stack.pop().asValue();
-        JSString* result;
-        {
-          PUSH_EXIT_FRAME();
-          result = ToString<CanGC>(cx, state.value0);
-          if (!result) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(StringValue(result)));
-        END_OP(ToString);
-      }
-
-      case JSOp::IsNullOrUndefined: {
-        bool result =
-            stack[0].asValue().isNull() || stack[0].asValue().isUndefined();
-        stack[0] = StackVal(BooleanValue(result));
-        END_OP(IsNullOrUndefined);
-      }
-
-      case JSOp::GlobalThis: {
-        PUSH(StackVal(ObjectValue(*frameMgr.cxForLocalUseOnly()
-                                       ->global()
-                                       ->lexicalEnvironment()
-                                       .thisObject())));
-        END_OP(GlobalThis);
-      }
-
-      case JSOp::NonSyntacticGlobalThis: {
-        {
-          PUSH_EXIT_FRAME();
-          state.obj0 = frame->environmentChain();
-          js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
-        }
-        PUSH(StackVal(state.value0));
-        END_OP(NonSyntacticGlobalThis);
-      }
-
-      case JSOp::NewTarget: {
-        PUSH(StackVal(frame->newTarget()));
-        END_OP(NewTarget);
-      }
-
-      case JSOp::DynamicImport: {
-        state.value0 = stack.pop().asValue();  // options
-        state.value1 = stack.pop().asValue();  // specifier
-        JSObject* promise;
-        {
-          PUSH_EXIT_FRAME();
-          promise =
-              StartDynamicModuleImport(cx, script, state.value1, state.value0);
-          if (!promise) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*promise)));
-        END_OP(DynamicImport);
-      }
-
-      case JSOp::ImportMeta: {
-        JSObject* metaObject;
-        {
-          PUSH_EXIT_FRAME();
-          metaObject = ImportMetaOperation(cx, script);
-          if (!metaObject) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*metaObject)));
-        END_OP(ImportMeta);
-      }
-
-      case JSOp::NewInit: {
-        INVOKE_IC(NewObject);
-        IC_PUSH_RESULT();
-        END_OP(NewInit);
-      }
-      case JSOp::NewObject: {
-        INVOKE_IC(NewObject);
-        IC_PUSH_RESULT();
-        END_OP(NewObject);
-      }
-      case JSOp::Object: {
-        PUSH(StackVal(ObjectValue(*script->getObject(pc))));
-        END_OP(Object);
-      }
-      case JSOp::ObjWithProto: {
-        state.value0 = stack[0].asValue();
-        JSObject* obj;
-        {
-          PUSH_EXIT_FRAME();
-          obj = ObjectWithProtoOperation(cx, state.value0);
-        }
-        stack[0] = StackVal(ObjectValue(*obj));
-        END_OP(ObjWithProto);
-      }
-
-      case JSOp::InitElem:
-      case JSOp::InitHiddenElem:
-      case JSOp::InitLockedElem:
-      case JSOp::InitElemInc:
-      case JSOp::SetElem:
-      case JSOp::StrictSetElem: {
-        static_assert(JSOpLength_InitElem == JSOpLength_InitHiddenElem);
-        static_assert(JSOpLength_InitElem == JSOpLength_InitLockedElem);
-        static_assert(JSOpLength_InitElem == JSOpLength_InitElemInc);
-        static_assert(JSOpLength_InitElem == JSOpLength_SetElem);
-        static_assert(JSOpLength_InitElem == JSOpLength_StrictSetElem);
-        IC_POP_ARG(2);
-        IC_POP_ARG(1);
-        IC_SET_ARG_FROM_STACK(0, 0);
-        INVOKE_IC(SetElem);
-        if (op == JSOp::InitElemInc) {
-          PUSH(StackVal(
-              Int32Value(Value::fromRawBits(icregs.icVals[1]).toInt32() + 1)));
-        }
-        END_OP(InitElem);
-      }
-
-      case JSOp::InitPropGetter:
-      case JSOp::InitHiddenPropGetter:
-      case JSOp::InitPropSetter:
-      case JSOp::InitHiddenPropSetter: {
-        static_assert(JSOpLength_InitPropGetter ==
-                      JSOpLength_InitHiddenPropGetter);
-        static_assert(JSOpLength_InitPropGetter == JSOpLength_InitPropSetter);
-        static_assert(JSOpLength_InitPropGetter ==
-                      JSOpLength_InitHiddenPropSetter);
-        state.obj1 = &stack.pop().asValue().toObject();  // val
-        state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
-        state.name0 = script->getName(pc);
-        {
-          PUSH_EXIT_FRAME();
-          if (!InitPropGetterSetterOperation(cx, pc, state.obj0, state.name0,
-                                             state.obj1)) {
-            goto error;
-          }
-        }
-        END_OP(InitPropGetter);
-      }
-
-      case JSOp::InitElemGetter:
-      case JSOp::InitHiddenElemGetter:
-      case JSOp::InitElemSetter:
-      case JSOp::InitHiddenElemSetter: {
-        static_assert(JSOpLength_InitElemGetter ==
-                      JSOpLength_InitHiddenElemGetter);
-        static_assert(JSOpLength_InitElemGetter == JSOpLength_InitElemSetter);
-        static_assert(JSOpLength_InitElemGetter ==
-                      JSOpLength_InitHiddenElemSetter);
-        state.obj1 = &stack.pop().asValue().toObject();  // val
-        state.value0 = stack.pop().asValue();            // idval
-        state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
-        {
-          PUSH_EXIT_FRAME();
-          if (!InitElemGetterSetterOperation(cx, pc, state.obj0, state.value0,
-                                             state.obj1)) {
-            goto error;
-          }
-        }
-        END_OP(InitElemGetter);
-      }
-
-      case JSOp::GetProp:
-      case JSOp::GetBoundName: {
-        static_assert(JSOpLength_GetProp == JSOpLength_GetBoundName);
-        IC_POP_ARG(0);
-        INVOKE_IC(GetProp);
-        IC_PUSH_RESULT();
-        END_OP(GetProp);
-      }
-      case JSOp::GetPropSuper: {
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(GetPropSuper);
-        IC_PUSH_RESULT();
-        END_OP(GetPropSuper);
-      }
-
-      case JSOp::GetElem: {
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(GetElem);
-        IC_PUSH_RESULT();
-        END_OP(GetElem);
-      }
-
-      case JSOp::GetElemSuper: {
-        IC_POP_ARG(2);
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(GetElemSuper);
-        IC_PUSH_RESULT();
-        END_OP(GetElemSuper);
-      }
-
-      case JSOp::DelProp: {
-        state.value0 = stack.pop().asValue();
-        state.name0 = script->getName(pc);
-        bool res = false;
-        {
-          PUSH_EXIT_FRAME();
-          if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(BooleanValue(res)));
-        END_OP(DelProp);
-      }
-      case JSOp::StrictDelProp: {
-        state.value0 = stack.pop().asValue();
-        state.name0 = script->getName(pc);
-        bool res = false;
-        {
-          PUSH_EXIT_FRAME();
-          if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(BooleanValue(res)));
-        END_OP(StrictDelProp);
-      }
-      case JSOp::DelElem: {
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        bool res = false;
-        {
-          PUSH_EXIT_FRAME();
-          if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(BooleanValue(res)));
-        END_OP(DelElem);
-      }
-      case JSOp::StrictDelElem: {
-        state.value1 = stack.pop().asValue();
-        state.value0 = stack.pop().asValue();
-        bool res = false;
-        {
-          PUSH_EXIT_FRAME();
-          if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(BooleanValue(res)));
-        END_OP(StrictDelElem);
-      }
-
-      case JSOp::HasOwn: {
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        INVOKE_IC(HasOwn);
-        IC_PUSH_RESULT();
-        END_OP(HasOwn);
-      }
-
-      case JSOp::CheckPrivateField: {
-        IC_SET_ARG_FROM_STACK(1, 1);
-        IC_SET_ARG_FROM_STACK(0, 0);
-        INVOKE_IC(CheckPrivateField);
-        IC_PUSH_RESULT();
-        END_OP(CheckPrivateField);
-      }
-
-      case JSOp::NewPrivateName: {
-        state.atom0 = script->getAtom(pc);
-        JS::Symbol* symbol;
-        {
-          PUSH_EXIT_FRAME();
-          symbol = NewPrivateName(cx, state.atom0);
-          if (!symbol) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(SymbolValue(symbol)));
-        END_OP(NewPrivateName);
-      }
-
-      case JSOp::SuperBase: {
-        JSFunction& superEnvFunc =
-            stack.pop().asValue().toObject().as<JSFunction>();
-        MOZ_ASSERT(superEnvFunc.allowSuperProperty());
-        MOZ_ASSERT(superEnvFunc.baseScript()->needsHomeObject());
-        const Value& homeObjVal = superEnvFunc.getExtendedSlot(
-            FunctionExtended::METHOD_HOMEOBJECT_SLOT);
-
-        JSObject* homeObj = &homeObjVal.toObject();
-        JSObject* superBase = HomeObjectSuperBase(homeObj);
-
-        PUSH(StackVal(ObjectOrNullValue(superBase)));
-        END_OP(SuperBase);
-      }
-
-      case JSOp::SetPropSuper:
-      case JSOp::StrictSetPropSuper: {
-        // stack signature: receiver, lval, rval => rval
-        static_assert(JSOpLength_SetPropSuper == JSOpLength_StrictSetPropSuper);
-        bool strict = op == JSOp::StrictSetPropSuper;
-        state.value2 = stack.pop().asValue();  // rval
-        state.value1 = stack.pop().asValue();  // lval
-        state.value0 = stack.pop().asValue();  // receiver
-        state.name0 = script->getName(pc);
-        {
-          PUSH_EXIT_FRAME();
-          // SetPropertySuper(cx, lval, receiver, name, rval, strict)
-          // (N.B.: lval and receiver are transposed!)
-          if (!SetPropertySuper(cx, state.value1, state.value0, state.name0,
-                                state.value2, strict)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.value2));
-        END_OP(SetPropSuper);
-      }
-
-      case JSOp::SetElemSuper:
-      case JSOp::StrictSetElemSuper: {
-        // stack signature: receiver, key, lval, rval => rval
-        static_assert(JSOpLength_SetElemSuper == JSOpLength_StrictSetElemSuper);
-        bool strict = op == JSOp::StrictSetElemSuper;
-        state.value3 = stack.pop().asValue();  // rval
-        state.value2 = stack.pop().asValue();  // lval
-        state.value1 = stack.pop().asValue();  // index
-        state.value0 = stack.pop().asValue();  // receiver
-        {
-          PUSH_EXIT_FRAME();
-          // SetElementSuper(cx, lval, receiver, index, rval, strict)
-          // (N.B.: lval, receiver and index are rotated!)
-          if (!SetElementSuper(cx, state.value2, state.value0, state.value1,
-                               state.value3, strict)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.value2));  // value
-        END_OP(SetElemSuper);
-      }
-
-      case JSOp::Iter: {
-        IC_POP_ARG(0);
-        INVOKE_IC(GetIterator);
-        IC_PUSH_RESULT();
-        END_OP(Iter);
-      }
-
-      case JSOp::MoreIter: {
-        // iter => iter, name
-        Value v = IteratorMore(&stack[0].asValue().toObject());
-        PUSH(StackVal(v));
-        END_OP(MoreIter);
-      }
-
-      case JSOp::IsNoIter: {
-        // iter => iter, bool
-        bool result = stack[0].asValue().isMagic(JS_NO_ITER_VALUE);
-        PUSH(StackVal(BooleanValue(result)));
-        END_OP(IsNoIter);
-      }
-
-      case JSOp::EndIter: {
-        // iter, interval =>
-        stack.pop();
-        CloseIterator(&stack.pop().asValue().toObject());
-        END_OP(EndIter);
-      }
-
-      case JSOp::CloseIter: {
-        IC_SET_OBJ_ARG(0, &stack.pop().asValue().toObject());
-        INVOKE_IC(CloseIter);
-        END_OP(CloseIter);
-      }
-
-      case JSOp::CheckIsObj: {
-        if (!stack[0].asValue().isObject()) {
-          PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(
-              js::ThrowCheckIsObject(cx, js::CheckIsObjectKind(GET_UINT8(pc))));
-          goto error;
-        }
-        END_OP(CheckIsObj);
-      }
-
-      case JSOp::CheckObjCoercible: {
-        state.value0 = stack[0].asValue();
-        if (state.value0.isNullOrUndefined()) {
-          PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, state.value0));
-          goto error;
-        }
-        END_OP(CheckObjCoercible);
-      }
-
-      case JSOp::ToAsyncIter: {
-        // iter, next => asynciter
-        state.value0 = stack.pop().asValue();            // next
-        state.obj0 = &stack.pop().asValue().toObject();  // iter
-
-        JSObject* result;
-        {
-          PUSH_EXIT_FRAME();
-          result = CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
-          if (!result) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*result)));
-        END_OP(ToAsyncIter);
-      }
-
-      case JSOp::MutateProto: {
-        // obj, protoVal => obj
-        state.value0 = stack.pop().asValue();
-        state.obj0 = &stack[0].asValue().toObject();
-        {
-          PUSH_EXIT_FRAME();
-          if (!MutatePrototype(cx, state.obj0.as<PlainObject>(),
-                               state.value0)) {
-            goto error;
-          }
-        }
-        END_OP(MutateProto);
-      }
-
-      case JSOp::NewArray: {
-        INVOKE_IC(NewArray);
-        IC_PUSH_RESULT();
-        END_OP(NewArray);
-      }
-
-      case JSOp::InitElemArray: {
-        // array, val => array
-        state.value0 = stack.pop().asValue();
-        state.obj0 = &stack[0].asValue().toObject();
-        {
-          PUSH_EXIT_FRAME();
-          InitElemArrayOperation(cx, pc, state.obj0.as<ArrayObject>(),
-                                 state.value0);
-        }
-        END_OP(InitElemArray);
-      }
-
-      case JSOp::Hole: {
-        PUSH(StackVal(MagicValue(JS_ELEMENTS_HOLE)));
-        END_OP(Hole);
-      }
-
-      case JSOp::RegExp: {
-        JSObject* obj;
-        {
-          PUSH_EXIT_FRAME();
-          state.obj0 = script->getRegExp(pc);
-          obj = CloneRegExpObject(cx, state.obj0.as<RegExpObject>());
-          if (!obj) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*obj)));
-        END_OP(RegExp);
-      }
-
-      case JSOp::Lambda: {
-        state.fun0 = script->getFunction(pc);
-        state.obj0 = frame->environmentChain();
-        JSObject* res;
-        {
-          PUSH_EXIT_FRAME();
-          res = js::Lambda(cx, state.fun0, state.obj0);
-          if (!res) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*res)));
-        END_OP(Lambda);
-      }
-
-      case JSOp::SetFunName: {
-        // fun, name => fun
-        state.value0 = stack.pop().asValue();  // name
-        state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
-        FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc));
-        {
-          PUSH_EXIT_FRAME();
-          if (!SetFunctionName(cx, state.fun0, state.value0, prefixKind)) {
-            goto error;
-          }
-        }
-        END_OP(SetFunName);
-      }
-
-      case JSOp::InitHomeObject: {
-        // fun, homeObject => fun
-        state.obj0 = &stack.pop().asValue().toObject();  // homeObject
-        state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
-        MOZ_ASSERT(state.fun0->allowSuperProperty());
-        MOZ_ASSERT(state.obj0->is<PlainObject>() ||
-                   state.obj0->is<JSFunction>());
-        state.fun0->setExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT,
-                                    ObjectValue(*state.obj0));
-        END_OP(InitHomeObject);
-      }
-
-      case JSOp::CheckClassHeritage: {
-        state.value0 = stack[0].asValue();
-        {
-          PUSH_EXIT_FRAME();
-          if (!CheckClassHeritageOperation(cx, state.value0)) {
-            goto error;
-          }
-        }
-        END_OP(CheckClassHeritage);
-      }
-
-      case JSOp::FunWithProto: {
-        // proto => obj
-        state.obj0 = &stack.pop().asValue().toObject();  // proto
-        state.obj1 = frame->environmentChain();
-        state.fun0 = script->getFunction(pc);
-        JSObject* obj;
-        {
-          PUSH_EXIT_FRAME();
-          obj = FunWithProtoOperation(cx, state.fun0, state.obj1, state.obj0);
-          if (!obj) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*obj)));
-        END_OP(FunWithProto);
-      }
-
-      case JSOp::BuiltinObject: {
-        auto kind = BuiltinObjectKind(GET_UINT8(pc));
-        JSObject* builtin;
-        {
-          PUSH_EXIT_FRAME();
-          builtin = BuiltinObjectOperation(cx, kind);
-          if (!builtin) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*builtin)));
-        END_OP(BuiltinObject);
-      }
-
-      case JSOp::Call:
-      case JSOp::CallIgnoresRv:
-      case JSOp::CallContent:
-      case JSOp::CallIter:
-      case JSOp::CallContentIter:
-      case JSOp::Eval:
-      case JSOp::StrictEval: {
-        static_assert(JSOpLength_Call == JSOpLength_CallIgnoresRv);
-        static_assert(JSOpLength_Call == JSOpLength_CallContent);
-        static_assert(JSOpLength_Call == JSOpLength_CallIter);
-        static_assert(JSOpLength_Call == JSOpLength_CallContentIter);
-        static_assert(JSOpLength_Call == JSOpLength_Eval);
-        static_assert(JSOpLength_Call == JSOpLength_StrictEval);
-        uint32_t argc = GET_ARGC(pc);
-        icregs.icVals[0] = argc;
-        icregs.extraArgs = 2;
-        icregs.spreadCall = false;
-        INVOKE_IC(Call);
-        stack.popn(argc + 2);
-        PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
-        END_OP(Call);
-      }
-
-      case JSOp::SuperCall:
-      case JSOp::New:
-      case JSOp::NewContent: {
-        static_assert(JSOpLength_SuperCall == JSOpLength_New);
-        static_assert(JSOpLength_SuperCall == JSOpLength_NewContent);
-        uint32_t argc = GET_ARGC(pc);
-        icregs.icVals[0] = argc;
-        icregs.extraArgs = 3;
-        icregs.spreadCall = false;
-        INVOKE_IC(Call);
-        stack.popn(argc + 3);
-        PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
-        END_OP(SuperCall);
-      }
-
-      case JSOp::SpreadCall:
-      case JSOp::SpreadEval:
-      case JSOp::StrictSpreadEval: {
-        static_assert(JSOpLength_SpreadCall == JSOpLength_SpreadEval);
-        static_assert(JSOpLength_SpreadCall == JSOpLength_StrictSpreadEval);
-        icregs.icVals[0] = 1;
-        icregs.extraArgs = 2;
-        icregs.spreadCall = true;
-        INVOKE_IC(Call);
-        stack.popn(3);
-        PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
-        END_OP(SpreadCall);
-      }
-
-      case JSOp::SpreadSuperCall:
-      case JSOp::SpreadNew: {
-        static_assert(JSOpLength_SpreadSuperCall == JSOpLength_SpreadNew);
-        icregs.icVals[0] = 1;
-        icregs.extraArgs = 3;
-        icregs.spreadCall = true;
-        INVOKE_IC(Call);
-        stack.popn(4);
-        PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
-        END_OP(SpreadSuperCall);
-      }
-
-      case JSOp::OptimizeSpreadCall: {
-        IC_POP_ARG(0);
-        INVOKE_IC(OptimizeSpreadCall);
-        IC_PUSH_RESULT();
-        END_OP(OptimizeSpreadCall);
-      }
-
-      case JSOp::ImplicitThis: {
-        state.obj0 = frame->environmentChain();
-        state.name0 = script->getName(pc);
-        {
-          PUSH_EXIT_FRAME();
-          if (!ImplicitThisOperation(cx, state.obj0, state.name0, &state.res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.res));
-        END_OP(ImplicitThis);
-      }
-
-      case JSOp::CallSiteObj: {
-        JSObject* cso = script->getObject(pc);
-        MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
-        MOZ_ASSERT(cso->as<ArrayObject>().containsPure(
-            frameMgr.cxForLocalUseOnly()->names().raw));
-        PUSH(StackVal(ObjectValue(*cso)));
-        END_OP(CallSiteObj);
-      }
-
-      case JSOp::IsConstructing: {
-        PUSH(StackVal(MagicValue(JS_IS_CONSTRUCTING)));
-        END_OP(IsConstructing);
-      }
-
-      case JSOp::SuperFun: {
-        JSObject* superEnvFunc = &stack.pop().asValue().toObject();
-        JSObject* superFun = SuperFunOperation(superEnvFunc);
-        PUSH(StackVal(ObjectOrNullValue(superFun)));
-        END_OP(SuperFun);
-      }
-
-      case JSOp::CheckThis:
-      case JSOp::CheckThisReinit: {
-        static_assert(JSOpLength_CheckThis == JSOpLength_CheckThisReinit);
-        if (!stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
-          PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
-          goto error;
-        }
-        END_OP(CheckThis);
-      }
-
-      case JSOp::Generator: {
-        JSObject* generator;
-        {
-          PUSH_EXIT_FRAME();
-          generator = CreateGeneratorFromFrame(cx, frame);
-          if (!generator) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*generator)));
-        END_OP(Generator);
-      }
-
-      case JSOp::InitialYield: {
-        // gen => rval, gen, resumeKind
-        state.obj0 = &stack[0].asValue().toObject();
-        uint32_t frameSize = stack.frameSize(frame);
-        {
-          PUSH_EXIT_FRAME();
-          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
-            goto error;
-          }
-        }
-        *ret = stack[0].asValue();
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return true;
-      }
-
-      case JSOp::Await:
-      case JSOp::Yield: {
-        // rval1, gen => rval2, gen, resumeKind
-        state.obj0 = &stack[0].asValue().toObject();
-        uint32_t frameSize = stack.frameSize(frame);
-        {
-          PUSH_EXIT_FRAME();
-          if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
-            goto error;
-          }
-        }
-        *ret = stack[0].asValue();
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return true;
-      }
-
-      case JSOp::FinalYieldRval: {
-        // gen =>
-        state.obj0 = &stack.pop().asValue().toObject();
-        {
-          PUSH_EXIT_FRAME();
-          if (!FinalSuspend(cx, state.obj0, pc)) {
-            goto error;
-          }
-        }
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return true;
-      }
-
-      case JSOp::IsGenClosing: {
-        PUSH(StackVal(MagicValue(JS_GENERATOR_CLOSING)));
-        END_OP(IsGenClosing);
-      }
-
-      case JSOp::AsyncAwait: {
-        // value, gen => promise
-        state.obj0 = &stack.pop().asValue().toObject();  // gen
-        state.value0 = stack.pop().asValue();            // value
-        JSObject* promise;
-        {
-          PUSH_EXIT_FRAME();
-          promise = AsyncFunctionAwait(
-              cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0);
-          if (!promise) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*promise)));
-        END_OP(AsyncAwait);
-      }
-
-      case JSOp::AsyncResolve: {
-        // valueOrReason, gen => promise
-        state.obj0 = &stack.pop().asValue().toObject();  // gen
-        state.value0 = stack.pop().asValue();            // valueOrReason
-        auto resolveKind = AsyncFunctionResolveKind(GET_UINT8(pc));
-        JSObject* promise;
-        {
-          PUSH_EXIT_FRAME();
-          promise = AsyncFunctionResolve(
-              cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0,
-              resolveKind);
-          if (!promise) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(ObjectValue(*promise)));
-        END_OP(AsyncResolve);
-      }
-
-      case JSOp::CanSkipAwait: {
-        // value => value, can_skip
-        state.value0 = stack[0].asValue();
-        bool result = false;
-        {
-          PUSH_EXIT_FRAME();
-          if (!CanSkipAwait(cx, state.value0, &result)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(BooleanValue(result)));
-        END_OP(CanSkipAwait);
-      }
-
-      case JSOp::MaybeExtractAwaitValue: {
-        // value, can_skip => value_or_resolved, can_skip
-        state.value1 = stack.pop().asValue();  // can_skip
-        state.value0 = stack.pop().asValue();  // value
-        if (state.value1.toBoolean()) {
-          PUSH_EXIT_FRAME();
-          if (!ExtractAwaitValue(cx, state.value0, &state.value0)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.value0));
-        PUSH(StackVal(state.value1));
-        END_OP(MaybeExtractAwaitValue);
-      }
-
-      case JSOp::ResumeKind: {
-        GeneratorResumeKind resumeKind = ResumeKindFromPC(pc);
-        PUSH(StackVal(Int32Value(int32_t(resumeKind))));
-        END_OP(ResumeKind);
-      }
-
-      case JSOp::CheckResumeKind: {
-        // rval, gen, resumeKind => rval
-        GeneratorResumeKind resumeKind =
-            IntToResumeKind(stack.pop().asValue().toInt32());
-        state.obj0 = &stack.pop().asValue().toObject();  // gen
-        state.value0 = stack[0].asValue();               // rval
-        if (resumeKind != GeneratorResumeKind::Next) {
-          PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(
-              cx, frame, state.obj0.as<AbstractGeneratorObject>(), state.value0,
-              resumeKind));
-          goto error;
-        }
-        END_OP(CheckResumeKind);
-      }
-
-      case JSOp::Resume: {
-        MOZ_CRASH("implement resume");
-        END_OP(Resume);
-      }
-
-      jsop_JumpTarget:
-      case JSOp::JumpTarget: {
-        int32_t icIndex = GET_INT32(pc);
-        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
-        END_OP(JumpTarget);
-      }
-      jsop_LoopHead:
-      case JSOp::LoopHead: {
-        int32_t icIndex = GET_INT32(pc);
-        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
-        END_OP(LoopHead);
-      }
-      case JSOp::AfterYield: {
-        int32_t icIndex = GET_INT32(pc);
-        frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
-        END_OP(AfterYield);
-      }
-
-      case JSOp::Goto: {
-        ADVANCE(GET_JUMP_OFFSET(pc));
+        result = Value::fromRawBits(icregs.icResult).toBoolean();
+      }
+      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      if (!result) {
+        ADVANCE(jumpOffset);
         if (JSOp(*pc) == JSOp::JumpTarget) {
           goto jsop_JumpTarget;
         }
         if (JSOp(*pc) == JSOp::LoopHead) {
           goto jsop_LoopHead;
         }
-        goto dispatch;
+      } else {
+        ADVANCE(JSOpLength_And);
       }
-
-      case JSOp::Coalesce: {
-        if (!stack[0].asValue().isNullOrUndefined()) {
-          ADVANCE(GET_JUMP_OFFSET(pc));
-          goto dispatch;
-        } else {
-          END_OP(Coalesce);
+      DISPATCH();
+    }
+    CASE(Or) {
+      bool result;
+      if (stack[0].asValue().isBoolean()) {
+        result = stack[0].asValue().toBoolean();
+      } else {
+        IC_SET_ARG_FROM_STACK(0, 0);
+        INVOKE_IC(ToBool);
+        result = Value::fromRawBits(icregs.icResult).toBoolean();
+      }
+      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      if (result) {
+        ADVANCE(jumpOffset);
+        if (JSOp(*pc) == JSOp::JumpTarget) {
+          goto jsop_JumpTarget;
         }
+        if (JSOp(*pc) == JSOp::LoopHead) {
+          goto jsop_LoopHead;
+        }
+      } else {
+        ADVANCE(JSOpLength_Or);
       }
+      DISPATCH();
+    }
+    CASE(JumpIfTrue) {
+      bool result;
+      if (stack[0].asValue().isBoolean()) {
+        result = stack.pop().asValue().toBoolean();
+      } else {
+        IC_POP_ARG(0);
+        INVOKE_IC(ToBool);
+        result = Value::fromRawBits(icregs.icResult).toBoolean();
+      }
+      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      if (result) {
+        ADVANCE(jumpOffset);
+        if (JSOp(*pc) == JSOp::JumpTarget) {
+          goto jsop_JumpTarget;
+        }
+        if (JSOp(*pc) == JSOp::LoopHead) {
+          goto jsop_LoopHead;
+        }
+      } else {
+        ADVANCE(JSOpLength_JumpIfTrue);
+      }
+      DISPATCH();
+    }
+    CASE(JumpIfFalse) {
+      bool result;
+      if (stack[0].asValue().isBoolean()) {
+        result = stack.pop().asValue().toBoolean();
+      } else {
+        IC_POP_ARG(0);
+        INVOKE_IC(ToBool);
+        result = Value::fromRawBits(icregs.icResult).toBoolean();
+      }
+      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      if (!result) {
+        ADVANCE(jumpOffset);
+        if (JSOp(*pc) == JSOp::JumpTarget) {
+          goto jsop_JumpTarget;
+        }
+        if (JSOp(*pc) == JSOp::LoopHead) {
+          goto jsop_LoopHead;
+        }
+      } else {
+        ADVANCE(JSOpLength_JumpIfFalse);
+      }
+      DISPATCH();
+    }
 
-      case JSOp::Case: {
-        bool cond = stack.pop().asValue().toBoolean();
-        if (cond) {
+    CASE(Add) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        int64_t lhs = stack[1].asValue().toInt32();
+        int64_t rhs = stack[0].asValue().toInt32();
+        if (lhs + rhs <= int64_t(INT32_MAX)) {
           stack.pop();
-          ADVANCE(GET_JUMP_OFFSET(pc));
-          goto dispatch;
-        } else {
-          END_OP(Case);
+          stack[0] = StackVal(Int32Value(int32_t(lhs + rhs)));
+          NEXT_IC();
+          END_OP(Add);
         }
       }
+      goto generic_binary;
+    }
 
-      case JSOp::Default: {
+    CASE(Sub) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        int64_t lhs = stack[1].asValue().toInt32();
+        int64_t rhs = stack[0].asValue().toInt32();
+        if (lhs - rhs >= int64_t(INT32_MIN)) {
+          stack.pop();
+          stack[0] = StackVal(Int32Value(int32_t(lhs - rhs)));
+          NEXT_IC();
+          END_OP(Sub);
+        }
+      }
+      goto generic_binary;
+    }
+
+  generic_binary:
+    CASE(BitOr)
+    CASE(BitXor)
+    CASE(BitAnd)
+    CASE(Lsh)
+    CASE(Rsh)
+    CASE(Ursh)
+    CASE(Mul)
+    CASE(Div)
+    CASE(Mod)
+    CASE(Pow) {
+      static_assert(JSOpLength_BitOr == JSOpLength_BitXor);
+      static_assert(JSOpLength_BitOr == JSOpLength_BitAnd);
+      static_assert(JSOpLength_BitOr == JSOpLength_Lsh);
+      static_assert(JSOpLength_BitOr == JSOpLength_Rsh);
+      static_assert(JSOpLength_BitOr == JSOpLength_Ursh);
+      static_assert(JSOpLength_BitOr == JSOpLength_Add);
+      static_assert(JSOpLength_BitOr == JSOpLength_Sub);
+      static_assert(JSOpLength_BitOr == JSOpLength_Mul);
+      static_assert(JSOpLength_BitOr == JSOpLength_Div);
+      static_assert(JSOpLength_BitOr == JSOpLength_Mod);
+      static_assert(JSOpLength_BitOr == JSOpLength_Pow);
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(BinaryArith);
+      IC_PUSH_RESULT();
+      END_OP(Div);
+    }
+
+    CASE(Eq) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        bool result =
+            stack[0].asValue().toInt32() == stack[1].asValue().toInt32();
+        stack.pop();
+        stack[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Eq);
+      }
+      goto generic_cmp;
+    }
+
+    CASE(Ne) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        bool result =
+            stack[0].asValue().toInt32() != stack[1].asValue().toInt32();
+        stack.pop();
+        stack[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Ne);
+      }
+      goto generic_cmp;
+    }
+
+    CASE(Lt) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        bool result =
+            stack[1].asValue().toInt32() < stack[0].asValue().toInt32();
+        stack.pop();
+        stack[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Lt);
+      }
+      goto generic_cmp;
+    }
+    CASE(Le) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        bool result =
+            stack[1].asValue().toInt32() <= stack[0].asValue().toInt32();
+        stack.pop();
+        stack[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Le);
+      }
+      goto generic_cmp;
+    }
+    CASE(Gt) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        bool result =
+            stack[1].asValue().toInt32() > stack[0].asValue().toInt32();
+        stack.pop();
+        stack[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Gt);
+      }
+      goto generic_cmp;
+    }
+    CASE(Ge) {
+      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+        bool result =
+            stack[1].asValue().toInt32() >= stack[0].asValue().toInt32();
+        stack.pop();
+        stack[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Ge);
+      }
+      goto generic_cmp;
+    }
+
+  generic_cmp:
+    CASE(StrictEq)
+    CASE(StrictNe) {
+      static_assert(JSOpLength_Eq == JSOpLength_Ne);
+      static_assert(JSOpLength_Eq == JSOpLength_StrictEq);
+      static_assert(JSOpLength_Eq == JSOpLength_StrictNe);
+      static_assert(JSOpLength_Eq == JSOpLength_Lt);
+      static_assert(JSOpLength_Eq == JSOpLength_Gt);
+      static_assert(JSOpLength_Eq == JSOpLength_Le);
+      static_assert(JSOpLength_Eq == JSOpLength_Ge);
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(Compare);
+      IC_PUSH_RESULT();
+      END_OP(Eq);
+    }
+
+    CASE(Instanceof) {
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(InstanceOf);
+      IC_PUSH_RESULT();
+      END_OP(Instanceof);
+    }
+
+    CASE(In) {
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(In);
+      IC_PUSH_RESULT();
+      END_OP(In);
+    }
+
+    CASE(ToPropertyKey) {
+      IC_POP_ARG(0);
+      INVOKE_IC(ToPropertyKey);
+      IC_PUSH_RESULT();
+      END_OP(ToPropertyKey);
+    }
+
+    CASE(ToString) {
+      state.value0 = stack.pop().asValue();
+      JSString* result;
+      {
+        PUSH_EXIT_FRAME();
+        result = ToString<CanGC>(cx, state.value0);
+        if (!result) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(StringValue(result)));
+      END_OP(ToString);
+    }
+
+    CASE(IsNullOrUndefined) {
+      bool result =
+          stack[0].asValue().isNull() || stack[0].asValue().isUndefined();
+      stack[0] = StackVal(BooleanValue(result));
+      END_OP(IsNullOrUndefined);
+    }
+
+    CASE(GlobalThis) {
+      PUSH(StackVal(ObjectValue(*frameMgr.cxForLocalUseOnly()
+                                     ->global()
+                                     ->lexicalEnvironment()
+                                     .thisObject())));
+      END_OP(GlobalThis);
+    }
+
+    CASE(NonSyntacticGlobalThis) {
+      {
+        PUSH_EXIT_FRAME();
+        state.obj0 = frame->environmentChain();
+        js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
+      }
+      PUSH(StackVal(state.value0));
+      END_OP(NonSyntacticGlobalThis);
+    }
+
+    CASE(NewTarget) {
+      PUSH(StackVal(frame->newTarget()));
+      END_OP(NewTarget);
+    }
+
+    CASE(DynamicImport) {
+      state.value0 = stack.pop().asValue();  // options
+      state.value1 = stack.pop().asValue();  // specifier
+      JSObject* promise;
+      {
+        PUSH_EXIT_FRAME();
+        promise =
+            StartDynamicModuleImport(cx, script, state.value1, state.value0);
+        if (!promise) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*promise)));
+      END_OP(DynamicImport);
+    }
+
+    CASE(ImportMeta) {
+      JSObject* metaObject;
+      {
+        PUSH_EXIT_FRAME();
+        metaObject = ImportMetaOperation(cx, script);
+        if (!metaObject) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*metaObject)));
+      END_OP(ImportMeta);
+    }
+
+    CASE(NewInit) {
+      INVOKE_IC(NewObject);
+      IC_PUSH_RESULT();
+      END_OP(NewInit);
+    }
+    CASE(NewObject) {
+      INVOKE_IC(NewObject);
+      IC_PUSH_RESULT();
+      END_OP(NewObject);
+    }
+    CASE(Object) {
+      PUSH(StackVal(ObjectValue(*script->getObject(pc))));
+      END_OP(Object);
+    }
+    CASE(ObjWithProto) {
+      state.value0 = stack[0].asValue();
+      JSObject* obj;
+      {
+        PUSH_EXIT_FRAME();
+        obj = ObjectWithProtoOperation(cx, state.value0);
+      }
+      stack[0] = StackVal(ObjectValue(*obj));
+      END_OP(ObjWithProto);
+    }
+
+    CASE(InitElem)
+    CASE(InitHiddenElem)
+    CASE(InitLockedElem)
+    CASE(InitElemInc)
+    CASE(SetElem)
+    CASE(StrictSetElem) {
+      static_assert(JSOpLength_InitElem == JSOpLength_InitHiddenElem);
+      static_assert(JSOpLength_InitElem == JSOpLength_InitLockedElem);
+      static_assert(JSOpLength_InitElem == JSOpLength_InitElemInc);
+      static_assert(JSOpLength_InitElem == JSOpLength_SetElem);
+      static_assert(JSOpLength_InitElem == JSOpLength_StrictSetElem);
+      IC_POP_ARG(2);
+      IC_POP_ARG(1);
+      IC_SET_ARG_FROM_STACK(0, 0);
+      INVOKE_IC(SetElem);
+      if (JSOp(*pc) == JSOp::InitElemInc) {
+        PUSH(StackVal(
+            Int32Value(Value::fromRawBits(icregs.icVals[1]).toInt32() + 1)));
+      }
+      END_OP(InitElem);
+    }
+
+    CASE(InitPropGetter)
+    CASE(InitHiddenPropGetter)
+    CASE(InitPropSetter)
+    CASE(InitHiddenPropSetter) {
+      static_assert(JSOpLength_InitPropGetter ==
+                    JSOpLength_InitHiddenPropGetter);
+      static_assert(JSOpLength_InitPropGetter == JSOpLength_InitPropSetter);
+      static_assert(JSOpLength_InitPropGetter ==
+                    JSOpLength_InitHiddenPropSetter);
+      state.obj1 = &stack.pop().asValue().toObject();  // val
+      state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
+      state.name0 = script->getName(pc);
+      {
+        PUSH_EXIT_FRAME();
+        if (!InitPropGetterSetterOperation(cx, pc, state.obj0, state.name0,
+                                           state.obj1)) {
+          goto error;
+        }
+      }
+      END_OP(InitPropGetter);
+    }
+
+    CASE(InitElemGetter)
+    CASE(InitHiddenElemGetter)
+    CASE(InitElemSetter)
+    CASE(InitHiddenElemSetter) {
+      static_assert(JSOpLength_InitElemGetter ==
+                    JSOpLength_InitHiddenElemGetter);
+      static_assert(JSOpLength_InitElemGetter == JSOpLength_InitElemSetter);
+      static_assert(JSOpLength_InitElemGetter ==
+                    JSOpLength_InitHiddenElemSetter);
+      state.obj1 = &stack.pop().asValue().toObject();  // val
+      state.value0 = stack.pop().asValue();            // idval
+      state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
+      {
+        PUSH_EXIT_FRAME();
+        if (!InitElemGetterSetterOperation(cx, pc, state.obj0, state.value0,
+                                           state.obj1)) {
+          goto error;
+        }
+      }
+      END_OP(InitElemGetter);
+    }
+
+    CASE(GetProp)
+    CASE(GetBoundName) {
+      static_assert(JSOpLength_GetProp == JSOpLength_GetBoundName);
+      IC_POP_ARG(0);
+      INVOKE_IC(GetProp);
+      IC_PUSH_RESULT();
+      END_OP(GetProp);
+    }
+    CASE(GetPropSuper) {
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(GetPropSuper);
+      IC_PUSH_RESULT();
+      END_OP(GetPropSuper);
+    }
+
+    CASE(GetElem) {
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(GetElem);
+      IC_PUSH_RESULT();
+      END_OP(GetElem);
+    }
+
+    CASE(GetElemSuper) {
+      IC_POP_ARG(2);
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(GetElemSuper);
+      IC_PUSH_RESULT();
+      END_OP(GetElemSuper);
+    }
+
+    CASE(DelProp) {
+      state.value0 = stack.pop().asValue();
+      state.name0 = script->getName(pc);
+      bool res = false;
+      {
+        PUSH_EXIT_FRAME();
+        if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(BooleanValue(res)));
+      END_OP(DelProp);
+    }
+    CASE(StrictDelProp) {
+      state.value0 = stack.pop().asValue();
+      state.name0 = script->getName(pc);
+      bool res = false;
+      {
+        PUSH_EXIT_FRAME();
+        if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(BooleanValue(res)));
+      END_OP(StrictDelProp);
+    }
+    CASE(DelElem) {
+      state.value1 = stack.pop().asValue();
+      state.value0 = stack.pop().asValue();
+      bool res = false;
+      {
+        PUSH_EXIT_FRAME();
+        if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(BooleanValue(res)));
+      END_OP(DelElem);
+    }
+    CASE(StrictDelElem) {
+      state.value1 = stack.pop().asValue();
+      state.value0 = stack.pop().asValue();
+      bool res = false;
+      {
+        PUSH_EXIT_FRAME();
+        if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(BooleanValue(res)));
+      END_OP(StrictDelElem);
+    }
+
+    CASE(HasOwn) {
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      INVOKE_IC(HasOwn);
+      IC_PUSH_RESULT();
+      END_OP(HasOwn);
+    }
+
+    CASE(CheckPrivateField) {
+      IC_SET_ARG_FROM_STACK(1, 1);
+      IC_SET_ARG_FROM_STACK(0, 0);
+      INVOKE_IC(CheckPrivateField);
+      IC_PUSH_RESULT();
+      END_OP(CheckPrivateField);
+    }
+
+    CASE(NewPrivateName) {
+      state.atom0 = script->getAtom(pc);
+      JS::Symbol* symbol;
+      {
+        PUSH_EXIT_FRAME();
+        symbol = NewPrivateName(cx, state.atom0);
+        if (!symbol) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(SymbolValue(symbol)));
+      END_OP(NewPrivateName);
+    }
+
+    CASE(SuperBase) {
+      JSFunction& superEnvFunc =
+          stack.pop().asValue().toObject().as<JSFunction>();
+      MOZ_ASSERT(superEnvFunc.allowSuperProperty());
+      MOZ_ASSERT(superEnvFunc.baseScript()->needsHomeObject());
+      const Value& homeObjVal = superEnvFunc.getExtendedSlot(
+          FunctionExtended::METHOD_HOMEOBJECT_SLOT);
+
+      JSObject* homeObj = &homeObjVal.toObject();
+      JSObject* superBase = HomeObjectSuperBase(homeObj);
+
+      PUSH(StackVal(ObjectOrNullValue(superBase)));
+      END_OP(SuperBase);
+    }
+
+    CASE(SetPropSuper)
+    CASE(StrictSetPropSuper) {
+      // stack signature: receiver, lval, rval => rval
+      static_assert(JSOpLength_SetPropSuper == JSOpLength_StrictSetPropSuper);
+      bool strict = JSOp(*pc) == JSOp::StrictSetPropSuper;
+      state.value2 = stack.pop().asValue();  // rval
+      state.value1 = stack.pop().asValue();  // lval
+      state.value0 = stack.pop().asValue();  // receiver
+      state.name0 = script->getName(pc);
+      {
+        PUSH_EXIT_FRAME();
+        // SetPropertySuper(cx, lval, receiver, name, rval, strict)
+        // (N.B.: lval and receiver are transposed!)
+        if (!SetPropertySuper(cx, state.value1, state.value0, state.name0,
+                              state.value2, strict)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.value2));
+      END_OP(SetPropSuper);
+    }
+
+    CASE(SetElemSuper)
+    CASE(StrictSetElemSuper) {
+      // stack signature: receiver, key, lval, rval => rval
+      static_assert(JSOpLength_SetElemSuper == JSOpLength_StrictSetElemSuper);
+      bool strict = JSOp(*pc) == JSOp::StrictSetElemSuper;
+      state.value3 = stack.pop().asValue();  // rval
+      state.value2 = stack.pop().asValue();  // lval
+      state.value1 = stack.pop().asValue();  // index
+      state.value0 = stack.pop().asValue();  // receiver
+      {
+        PUSH_EXIT_FRAME();
+        // SetElementSuper(cx, lval, receiver, index, rval, strict)
+        // (N.B.: lval, receiver and index are rotated!)
+        if (!SetElementSuper(cx, state.value2, state.value0, state.value1,
+                             state.value3, strict)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.value2));  // value
+      END_OP(SetElemSuper);
+    }
+
+    CASE(Iter) {
+      IC_POP_ARG(0);
+      INVOKE_IC(GetIterator);
+      IC_PUSH_RESULT();
+      END_OP(Iter);
+    }
+
+    CASE(MoreIter) {
+      // iter => iter, name
+      Value v = IteratorMore(&stack[0].asValue().toObject());
+      PUSH(StackVal(v));
+      END_OP(MoreIter);
+    }
+
+    CASE(IsNoIter) {
+      // iter => iter, bool
+      bool result = stack[0].asValue().isMagic(JS_NO_ITER_VALUE);
+      PUSH(StackVal(BooleanValue(result)));
+      END_OP(IsNoIter);
+    }
+
+    CASE(EndIter) {
+      // iter, interval =>
+      stack.pop();
+      CloseIterator(&stack.pop().asValue().toObject());
+      END_OP(EndIter);
+    }
+
+    CASE(CloseIter) {
+      IC_SET_OBJ_ARG(0, &stack.pop().asValue().toObject());
+      INVOKE_IC(CloseIter);
+      END_OP(CloseIter);
+    }
+
+    CASE(CheckIsObj) {
+      if (!stack[0].asValue().isObject()) {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(
+            js::ThrowCheckIsObject(cx, js::CheckIsObjectKind(GET_UINT8(pc))));
+        goto error;
+      }
+      END_OP(CheckIsObj);
+    }
+
+    CASE(CheckObjCoercible) {
+      state.value0 = stack[0].asValue();
+      if (state.value0.isNullOrUndefined()) {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, state.value0));
+        goto error;
+      }
+      END_OP(CheckObjCoercible);
+    }
+
+    CASE(ToAsyncIter) {
+      // iter, next => asynciter
+      state.value0 = stack.pop().asValue();            // next
+      state.obj0 = &stack.pop().asValue().toObject();  // iter
+
+      JSObject* result;
+      {
+        PUSH_EXIT_FRAME();
+        result = CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
+        if (!result) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*result)));
+      END_OP(ToAsyncIter);
+    }
+
+    CASE(MutateProto) {
+      // obj, protoVal => obj
+      state.value0 = stack.pop().asValue();
+      state.obj0 = &stack[0].asValue().toObject();
+      {
+        PUSH_EXIT_FRAME();
+        if (!MutatePrototype(cx, state.obj0.as<PlainObject>(), state.value0)) {
+          goto error;
+        }
+      }
+      END_OP(MutateProto);
+    }
+
+    CASE(NewArray) {
+      INVOKE_IC(NewArray);
+      IC_PUSH_RESULT();
+      END_OP(NewArray);
+    }
+
+    CASE(InitElemArray) {
+      // array, val => array
+      state.value0 = stack.pop().asValue();
+      state.obj0 = &stack[0].asValue().toObject();
+      {
+        PUSH_EXIT_FRAME();
+        InitElemArrayOperation(cx, pc, state.obj0.as<ArrayObject>(),
+                               state.value0);
+      }
+      END_OP(InitElemArray);
+    }
+
+    CASE(Hole) {
+      PUSH(StackVal(MagicValue(JS_ELEMENTS_HOLE)));
+      END_OP(Hole);
+    }
+
+    CASE(RegExp) {
+      JSObject* obj;
+      {
+        PUSH_EXIT_FRAME();
+        state.obj0 = script->getRegExp(pc);
+        obj = CloneRegExpObject(cx, state.obj0.as<RegExpObject>());
+        if (!obj) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*obj)));
+      END_OP(RegExp);
+    }
+
+    CASE(Lambda) {
+      state.fun0 = script->getFunction(pc);
+      state.obj0 = frame->environmentChain();
+      JSObject* res;
+      {
+        PUSH_EXIT_FRAME();
+        res = js::Lambda(cx, state.fun0, state.obj0);
+        if (!res) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*res)));
+      END_OP(Lambda);
+    }
+
+    CASE(SetFunName) {
+      // fun, name => fun
+      state.value0 = stack.pop().asValue();  // name
+      state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
+      FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc));
+      {
+        PUSH_EXIT_FRAME();
+        if (!SetFunctionName(cx, state.fun0, state.value0, prefixKind)) {
+          goto error;
+        }
+      }
+      END_OP(SetFunName);
+    }
+
+    CASE(InitHomeObject) {
+      // fun, homeObject => fun
+      state.obj0 = &stack.pop().asValue().toObject();  // homeObject
+      state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
+      MOZ_ASSERT(state.fun0->allowSuperProperty());
+      MOZ_ASSERT(state.obj0->is<PlainObject>() || state.obj0->is<JSFunction>());
+      state.fun0->setExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT,
+                                  ObjectValue(*state.obj0));
+      END_OP(InitHomeObject);
+    }
+
+    CASE(CheckClassHeritage) {
+      state.value0 = stack[0].asValue();
+      {
+        PUSH_EXIT_FRAME();
+        if (!CheckClassHeritageOperation(cx, state.value0)) {
+          goto error;
+        }
+      }
+      END_OP(CheckClassHeritage);
+    }
+
+    CASE(FunWithProto) {
+      // proto => obj
+      state.obj0 = &stack.pop().asValue().toObject();  // proto
+      state.obj1 = frame->environmentChain();
+      state.fun0 = script->getFunction(pc);
+      JSObject* obj;
+      {
+        PUSH_EXIT_FRAME();
+        obj = FunWithProtoOperation(cx, state.fun0, state.obj1, state.obj0);
+        if (!obj) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*obj)));
+      END_OP(FunWithProto);
+    }
+
+    CASE(BuiltinObject) {
+      auto kind = BuiltinObjectKind(GET_UINT8(pc));
+      JSObject* builtin;
+      {
+        PUSH_EXIT_FRAME();
+        builtin = BuiltinObjectOperation(cx, kind);
+        if (!builtin) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*builtin)));
+      END_OP(BuiltinObject);
+    }
+
+    CASE(Call)
+    CASE(CallIgnoresRv)
+    CASE(CallContent)
+    CASE(CallIter)
+    CASE(CallContentIter)
+    CASE(Eval)
+    CASE(StrictEval) {
+      static_assert(JSOpLength_Call == JSOpLength_CallIgnoresRv);
+      static_assert(JSOpLength_Call == JSOpLength_CallContent);
+      static_assert(JSOpLength_Call == JSOpLength_CallIter);
+      static_assert(JSOpLength_Call == JSOpLength_CallContentIter);
+      static_assert(JSOpLength_Call == JSOpLength_Eval);
+      static_assert(JSOpLength_Call == JSOpLength_StrictEval);
+      uint32_t argc = GET_ARGC(pc);
+      icregs.icVals[0] = argc;
+      icregs.extraArgs = 2;
+      icregs.spreadCall = false;
+      INVOKE_IC(Call);
+      stack.popn(argc + 2);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
+      END_OP(Call);
+    }
+
+    CASE(SuperCall)
+    CASE(New)
+    CASE(NewContent) {
+      static_assert(JSOpLength_SuperCall == JSOpLength_New);
+      static_assert(JSOpLength_SuperCall == JSOpLength_NewContent);
+      uint32_t argc = GET_ARGC(pc);
+      icregs.icVals[0] = argc;
+      icregs.extraArgs = 3;
+      icregs.spreadCall = false;
+      INVOKE_IC(Call);
+      stack.popn(argc + 3);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
+      END_OP(SuperCall);
+    }
+
+    CASE(SpreadCall)
+    CASE(SpreadEval)
+    CASE(StrictSpreadEval) {
+      static_assert(JSOpLength_SpreadCall == JSOpLength_SpreadEval);
+      static_assert(JSOpLength_SpreadCall == JSOpLength_StrictSpreadEval);
+      icregs.icVals[0] = 1;
+      icregs.extraArgs = 2;
+      icregs.spreadCall = true;
+      INVOKE_IC(Call);
+      stack.popn(3);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
+      END_OP(SpreadCall);
+    }
+
+    CASE(SpreadSuperCall)
+    CASE(SpreadNew) {
+      static_assert(JSOpLength_SpreadSuperCall == JSOpLength_SpreadNew);
+      icregs.icVals[0] = 1;
+      icregs.extraArgs = 3;
+      icregs.spreadCall = true;
+      INVOKE_IC(Call);
+      stack.popn(4);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
+      END_OP(SpreadSuperCall);
+    }
+
+    CASE(OptimizeSpreadCall) {
+      IC_POP_ARG(0);
+      INVOKE_IC(OptimizeSpreadCall);
+      IC_PUSH_RESULT();
+      END_OP(OptimizeSpreadCall);
+    }
+
+    CASE(ImplicitThis) {
+      state.obj0 = frame->environmentChain();
+      state.name0 = script->getName(pc);
+      {
+        PUSH_EXIT_FRAME();
+        if (!ImplicitThisOperation(cx, state.obj0, state.name0, &state.res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.res));
+      END_OP(ImplicitThis);
+    }
+
+    CASE(CallSiteObj) {
+      JSObject* cso = script->getObject(pc);
+      MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
+      MOZ_ASSERT(cso->as<ArrayObject>().containsPure(
+          frameMgr.cxForLocalUseOnly()->names().raw));
+      PUSH(StackVal(ObjectValue(*cso)));
+      END_OP(CallSiteObj);
+    }
+
+    CASE(IsConstructing) {
+      PUSH(StackVal(MagicValue(JS_IS_CONSTRUCTING)));
+      END_OP(IsConstructing);
+    }
+
+    CASE(SuperFun) {
+      JSObject* superEnvFunc = &stack.pop().asValue().toObject();
+      JSObject* superFun = SuperFunOperation(superEnvFunc);
+      PUSH(StackVal(ObjectOrNullValue(superFun)));
+      END_OP(SuperFun);
+    }
+
+    CASE(CheckThis)
+    CASE(CheckThisReinit) {
+      static_assert(JSOpLength_CheckThis == JSOpLength_CheckThisReinit);
+      if (!stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
+        goto error;
+      }
+      END_OP(CheckThis);
+    }
+
+    CASE(Generator) {
+      JSObject* generator;
+      {
+        PUSH_EXIT_FRAME();
+        generator = CreateGeneratorFromFrame(cx, frame);
+        if (!generator) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*generator)));
+      END_OP(Generator);
+    }
+
+    CASE(InitialYield) {
+      // gen => rval, gen, resumeKind
+      state.obj0 = &stack[0].asValue().toObject();
+      uint32_t frameSize = stack.frameSize(frame);
+      {
+        PUSH_EXIT_FRAME();
+        if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
+          goto error;
+        }
+      }
+      *ret = stack[0].asValue();
+      stack.popFrame(frameMgr.cxForLocalUseOnly());
+      stack.pop();  // fake return address
+      return true;
+    }
+
+    CASE(Await)
+    CASE(Yield) {
+      // rval1, gen => rval2, gen, resumeKind
+      state.obj0 = &stack[0].asValue().toObject();
+      uint32_t frameSize = stack.frameSize(frame);
+      {
+        PUSH_EXIT_FRAME();
+        if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
+          goto error;
+        }
+      }
+      *ret = stack[0].asValue();
+      stack.popFrame(frameMgr.cxForLocalUseOnly());
+      stack.pop();  // fake return address
+      return true;
+    }
+
+    CASE(FinalYieldRval) {
+      // gen =>
+      state.obj0 = &stack.pop().asValue().toObject();
+      {
+        PUSH_EXIT_FRAME();
+        if (!FinalSuspend(cx, state.obj0, pc)) {
+          goto error;
+        }
+      }
+      stack.popFrame(frameMgr.cxForLocalUseOnly());
+      stack.pop();  // fake return address
+      return true;
+    }
+
+    CASE(IsGenClosing) {
+      PUSH(StackVal(MagicValue(JS_GENERATOR_CLOSING)));
+      END_OP(IsGenClosing);
+    }
+
+    CASE(AsyncAwait) {
+      // value, gen => promise
+      state.obj0 = &stack.pop().asValue().toObject();  // gen
+      state.value0 = stack.pop().asValue();            // value
+      JSObject* promise;
+      {
+        PUSH_EXIT_FRAME();
+        promise = AsyncFunctionAwait(
+            cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0);
+        if (!promise) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*promise)));
+      END_OP(AsyncAwait);
+    }
+
+    CASE(AsyncResolve) {
+      // valueOrReason, gen => promise
+      state.obj0 = &stack.pop().asValue().toObject();  // gen
+      state.value0 = stack.pop().asValue();            // valueOrReason
+      auto resolveKind = AsyncFunctionResolveKind(GET_UINT8(pc));
+      JSObject* promise;
+      {
+        PUSH_EXIT_FRAME();
+        promise = AsyncFunctionResolve(
+            cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0,
+            resolveKind);
+        if (!promise) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(ObjectValue(*promise)));
+      END_OP(AsyncResolve);
+    }
+
+    CASE(CanSkipAwait) {
+      // value => value, can_skip
+      state.value0 = stack[0].asValue();
+      bool result = false;
+      {
+        PUSH_EXIT_FRAME();
+        if (!CanSkipAwait(cx, state.value0, &result)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(BooleanValue(result)));
+      END_OP(CanSkipAwait);
+    }
+
+    CASE(MaybeExtractAwaitValue) {
+      // value, can_skip => value_or_resolved, can_skip
+      state.value1 = stack.pop().asValue();  // can_skip
+      state.value0 = stack.pop().asValue();  // value
+      if (state.value1.toBoolean()) {
+        PUSH_EXIT_FRAME();
+        if (!ExtractAwaitValue(cx, state.value0, &state.value0)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.value0));
+      PUSH(StackVal(state.value1));
+      END_OP(MaybeExtractAwaitValue);
+    }
+
+    CASE(ResumeKind) {
+      GeneratorResumeKind resumeKind = ResumeKindFromPC(pc);
+      PUSH(StackVal(Int32Value(int32_t(resumeKind))));
+      END_OP(ResumeKind);
+    }
+
+    CASE(CheckResumeKind) {
+      // rval, gen, resumeKind => rval
+      GeneratorResumeKind resumeKind =
+          IntToResumeKind(stack.pop().asValue().toInt32());
+      state.obj0 = &stack.pop().asValue().toObject();  // gen
+      state.value0 = stack[0].asValue();               // rval
+      if (resumeKind != GeneratorResumeKind::Next) {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(
+            cx, frame, state.obj0.as<AbstractGeneratorObject>(), state.value0,
+            resumeKind));
+        goto error;
+      }
+      END_OP(CheckResumeKind);
+    }
+
+    CASE(Resume) {
+      MOZ_CRASH("implement resume");
+      END_OP(Resume);
+    }
+
+  jsop_JumpTarget:
+    CASE(JumpTarget) {
+      int32_t icIndex = GET_INT32(pc);
+      frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+      END_OP(JumpTarget);
+    }
+  jsop_LoopHead:
+    CASE(LoopHead) {
+      int32_t icIndex = GET_INT32(pc);
+      frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+      END_OP(LoopHead);
+    }
+    CASE(AfterYield) {
+      int32_t icIndex = GET_INT32(pc);
+      frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+      END_OP(AfterYield);
+    }
+
+    CASE(Goto) {
+      ADVANCE(GET_JUMP_OFFSET(pc));
+      if (JSOp(*pc) == JSOp::JumpTarget) {
+        goto jsop_JumpTarget;
+      }
+      if (JSOp(*pc) == JSOp::LoopHead) {
+        goto jsop_LoopHead;
+      }
+      DISPATCH();
+    }
+
+    CASE(Coalesce) {
+      if (!stack[0].asValue().isNullOrUndefined()) {
+        ADVANCE(GET_JUMP_OFFSET(pc));
+        DISPATCH();
+      } else {
+        END_OP(Coalesce);
+      }
+    }
+
+    CASE(Case) {
+      bool cond = stack.pop().asValue().toBoolean();
+      if (cond) {
         stack.pop();
         ADVANCE(GET_JUMP_OFFSET(pc));
-        goto dispatch;
+        DISPATCH();
+      } else {
+        END_OP(Case);
       }
-
-      case JSOp::TableSwitch: {
-        int32_t len = GET_JUMP_OFFSET(pc);
-        int32_t low = GET_JUMP_OFFSET(pc + 1 * JUMP_OFFSET_LEN);
-        int32_t high = GET_JUMP_OFFSET(pc + 2 * JUMP_OFFSET_LEN);
-        Value v = stack.pop().asValue();
-        int32_t i = 0;
-        if (v.isInt32()) {
-          i = v.toInt32();
-        } else if (!v.isDouble() ||
-                   !mozilla::NumberEqualsInt32(v.toDouble(), &i)) {
-          ADVANCE(len);
-          goto dispatch;
-        }
-
-        i = uint32_t(i) - uint32_t(low);
-        if ((uint32_t(i) < uint32_t(high - low + 1))) {
-          len = script->tableSwitchCaseOffset(pc, uint32_t(i)) -
-                script->pcToOffset(pc);
-        }
-        ADVANCE(len);
-        goto dispatch;
-      }
-
-      case JSOp::Return: {
-        *ret = stack.pop().asValue();
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return true;
-      }
-
-      case JSOp::GetRval: {
-        PUSH(StackVal(*ret));
-        END_OP(GetRval);
-      }
-
-      case JSOp::SetRval: {
-        *ret = stack.pop().asValue();
-        END_OP(SetRval);
-      }
-
-      case JSOp::RetRval: {
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return true;
-      }
-
-      case JSOp::CheckReturn: {
-        Value thisval = stack.pop().asValue();
-        if (ret->isObject()) {
-          PUSH(StackVal(*ret));
-        } else if (!ret->isUndefined()) {
-          PUSH_EXIT_FRAME();
-          state.value0 = *ret;
-          ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK,
-                           state.value0, nullptr);
-          goto error;
-        } else if (thisval.isMagic(JS_UNINITIALIZED_LEXICAL)) {
-          PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
-          goto error;
-        } else {
-          PUSH(StackVal(thisval));
-        }
-        END_OP(CheckReturn);
-      }
-
-      case JSOp::Throw: {
-        state.value0 = stack.pop().asValue();
-        {
-          PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(ThrowOperation(cx, state.value0));
-          goto error;
-        }
-        END_OP(Throw);
-      }
-
-      case JSOp::ThrowMsg: {
-        {
-          PUSH_EXIT_FRAME();
-          MOZ_ALWAYS_FALSE(ThrowMsgOperation(cx, GET_UINT8(pc)));
-          goto error;
-        }
-        END_OP(ThrowMsg);
-      }
-
-      case JSOp::ThrowSetConst: {
-        {
-          PUSH_EXIT_FRAME();
-          ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, pc);
-          goto error;
-        }
-        END_OP(ThrowSetConst);
-      }
-
-      case JSOp::Try:
-      case JSOp::TryDestructuring: {
-        static_assert(JSOpLength_Try == JSOpLength_TryDestructuring);
-        END_OP(Try);
-      }
-
-      case JSOp::Exception: {
-        {
-          PUSH_EXIT_FRAME();
-          if (!GetAndClearException(cx, &state.res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.res));
-        END_OP(Exception);
-      }
-
-      case JSOp::Finally: {
-        END_OP(Finally);
-      }
-
-      case JSOp::Uninitialized: {
-        PUSH(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
-        END_OP(Uninitialized);
-      }
-      case JSOp::InitLexical: {
-        uint32_t i = GET_LOCALNO(pc);
-        frame->unaliasedLocal(i) = stack[0].asValue();
-        END_OP(InitLexical);
-      }
-
-      case JSOp::InitAliasedLexical: {
-        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
-        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-        obj.setAliasedBinding(ec, stack[0].asValue());
-        END_OP(InitAliasedLexical);
-      }
-      case JSOp::CheckLexical: {
-        if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
-          PUSH_EXIT_FRAME();
-          ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
-                                    pc);
-          goto error;
-        }
-        END_OP(CheckLexical);
-      }
-      case JSOp::CheckAliasedLexical: {
-        if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
-          PUSH_EXIT_FRAME();
-          ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script,
-                                    pc);
-          goto error;
-        }
-        END_OP(CheckAliasedLexical);
-      }
-
-      case JSOp::BindGName: {
-        IC_SET_OBJ_ARG(
-            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-        state.name0.set(script->getName(pc));
-        INVOKE_IC(BindName);
-        IC_PUSH_RESULT();
-        END_OP(BindGName);
-      }
-      case JSOp::BindName: {
-        IC_SET_OBJ_ARG(0, frame->environmentChain());
-        INVOKE_IC(BindName);
-        IC_PUSH_RESULT();
-        END_OP(BindName);
-      }
-      case JSOp::GetGName: {
-        IC_SET_OBJ_ARG(
-            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-        INVOKE_IC(GetName);
-        IC_PUSH_RESULT();
-        END_OP(GetGName);
-      }
-      case JSOp::GetName: {
-        IC_SET_OBJ_ARG(0, frame->environmentChain());
-        INVOKE_IC(GetName);
-        IC_PUSH_RESULT();
-        END_OP(GetName);
-      }
-
-      case JSOp::GetArg: {
-        unsigned i = GET_ARGNO(pc);
-        if (script->argsObjAliasesFormals()) {
-          PUSH(StackVal(frame->argsObj().arg(i)));
-        } else {
-          PUSH(StackVal(frame->unaliasedFormal(i)));
-        }
-        END_OP(GetArg);
-      }
-
-      case JSOp::GetFrameArg: {
-        uint32_t i = GET_ARGNO(pc);
-        PUSH(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
-        END_OP(GetFrameArg);
-      }
-
-      case JSOp::GetLocal: {
-        uint32_t i = GET_LOCALNO(pc);
-        TRACE_PRINTF(" -> local: %d\n", int(i));
-        PUSH(StackVal(frame->unaliasedLocal(i)));
-        END_OP(GetLocal);
-      }
-
-      case JSOp::ArgumentsLength: {
-        PUSH(StackVal(Int32Value(frame->numActualArgs())));
-        END_OP(ArgumentsLength);
-      }
-
-      case JSOp::GetActualArg: {
-        MOZ_ASSERT(!script->needsArgsObj());
-        uint32_t index = stack[0].asValue().toInt32();
-        stack[0] = StackVal(frame->unaliasedActual(index));
-        END_OP(GetActualArg);
-      }
-
-      case JSOp::GetAliasedVar:
-      case JSOp::GetAliasedDebugVar: {
-        static_assert(JSOpLength_GetAliasedVar ==
-                      JSOpLength_GetAliasedDebugVar);
-        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
-        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-        PUSH(StackVal(obj.aliasedBinding(ec)));
-        END_OP(GetAliasedVar);
-      }
-
-      case JSOp::GetImport: {
-        state.obj0 = frame->environmentChain();
-        state.value0 = stack[0].asValue();
-        {
-          PUSH_EXIT_FRAME();
-          if (!GetImportOperation(cx, state.obj0, script, pc, &state.value0)) {
-            goto error;
-          }
-        }
-        stack[0] = StackVal(state.value0);
-        END_OP(GetImport);
-      }
-
-      case JSOp::GetIntrinsic: {
-        INVOKE_IC(GetIntrinsic);
-        IC_PUSH_RESULT();
-        END_OP(GetIntrinsic);
-      }
-
-      case JSOp::Callee: {
-        PUSH(StackVal(frame->calleev()));
-        END_OP(Callee);
-      }
-
-      case JSOp::EnvCallee: {
-        uint8_t numHops = GET_UINT8(pc);
-        JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
-        for (unsigned i = 0; i < numHops; i++) {
-          env = &env->as<EnvironmentObject>().enclosingEnvironment();
-        }
-        PUSH(StackVal(ObjectValue(env->as<CallObject>().callee())));
-        END_OP(EnvCallee);
-      }
-
-      case JSOp::SetProp:
-      case JSOp::StrictSetProp:
-      case JSOp::SetName:
-      case JSOp::StrictSetName:
-      case JSOp::SetGName:
-      case JSOp::StrictSetGName: {
-        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetProp);
-        static_assert(JSOpLength_SetProp == JSOpLength_SetName);
-        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetName);
-        static_assert(JSOpLength_SetProp == JSOpLength_SetGName);
-        static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
-        IC_POP_ARG(1);
-        IC_POP_ARG(0);
-        PUSH(StackVal(icregs.icVals[1]));
-        INVOKE_IC(SetProp);
-        END_OP(SetProp);
-      }
-
-      case JSOp::InitProp:
-      case JSOp::InitHiddenProp:
-      case JSOp::InitLockedProp: {
-        static_assert(JSOpLength_InitProp == JSOpLength_InitHiddenProp);
-        static_assert(JSOpLength_InitProp == JSOpLength_InitLockedProp);
-        IC_POP_ARG(1);
-        IC_SET_ARG_FROM_STACK(0, 0);
-        INVOKE_IC(SetProp);
-        END_OP(InitProp);
-      }
-      case JSOp::InitGLexical: {
-        IC_SET_ARG_FROM_STACK(1, 0);
-        IC_SET_OBJ_ARG(
-            0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-        INVOKE_IC(SetProp);
-        END_OP(InitGLexical);
-      }
-
-      case JSOp::SetArg: {
-        unsigned i = GET_ARGNO(pc);
-        if (script->argsObjAliasesFormals()) {
-          frame->argsObj().setArg(i, stack[0].asValue());
-        } else {
-          frame->unaliasedFormal(i) = stack[0].asValue();
-        }
-        END_OP(SetArg);
-      }
-
-      case JSOp::SetLocal: {
-        uint32_t i = GET_LOCALNO(pc);
-        TRACE_PRINTF(" -> local: %d\n", int(i));
-        frame->unaliasedLocal(i) = stack[0].asValue();
-        END_OP(SetLocal);
-      }
-
-      case JSOp::SetAliasedVar: {
-        EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
-        EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-        MOZ_ASSERT(!IsUninitializedLexical(obj.aliasedBinding(ec)));
-        obj.setAliasedBinding(ec, stack[0].asValue());
-        END_OP(SetAliasedVar);
-      }
-
-      case JSOp::SetIntrinsic: {
-        state.value0 = stack[0].asValue();
-        {
-          PUSH_EXIT_FRAME();
-          if (!SetIntrinsicOperation(cx, script, pc, state.value0)) {
-            goto error;
-          }
-        }
-        END_OP(SetIntrinsic);
-      }
-
-      case JSOp::PushLexicalEnv: {
-        state.scope0 = script->getScope(pc);
-        {
-          PUSH_EXIT_FRAME();
-          if (!frame->pushLexicalEnvironment(cx,
-                                             state.scope0.as<LexicalScope>())) {
-            goto error;
-          }
-        }
-        END_OP(PushLexicalEnv);
-      }
-      case JSOp::PopLexicalEnv: {
-        frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
-        END_OP(PopLexicalEnv);
-      }
-      case JSOp::DebugLeaveLexicalEnv: {
-        END_OP(DebugLeaveLexicalEnv);
-      }
-
-      case JSOp::RecreateLexicalEnv: {
-        {
-          PUSH_EXIT_FRAME();
-          if (!frame->recreateLexicalEnvironment(cx)) {
-            goto error;
-          }
-        }
-        END_OP(RecreateLexicalEnv);
-      }
-
-      case JSOp::FreshenLexicalEnv: {
-        {
-          PUSH_EXIT_FRAME();
-          if (!frame->freshenLexicalEnvironment(cx)) {
-            goto error;
-          }
-        }
-        END_OP(FreshenLexicalEnv);
-      }
-      case JSOp::PushClassBodyEnv: {
-        state.scope0 = script->getScope(pc);
-        {
-          PUSH_EXIT_FRAME();
-          if (!frame->pushClassBodyEnvironment(
-                  cx, state.scope0.as<ClassBodyScope>())) {
-            goto error;
-          }
-        }
-        END_OP(PushClassBodyEnv);
-      }
-      case JSOp::PushVarEnv: {
-        state.scope0 = script->getScope(pc);
-        {
-          PUSH_EXIT_FRAME();
-          if (!frame->pushVarEnvironment(cx, state.scope0)) {
-            goto error;
-          }
-        }
-        END_OP(PushVarEnv);
-      }
-      case JSOp::EnterWith: {
-        state.scope0 = script->getScope(pc);
-        state.value0 = stack.pop().asValue();
-        {
-          PUSH_EXIT_FRAME();
-          if (!EnterWithOperation(cx, frame, state.value0,
-                                  state.scope0.as<WithScope>())) {
-            goto error;
-          }
-        }
-        END_OP(EnterWith);
-      }
-      case JSOp::LeaveWith: {
-        frame->popOffEnvironmentChain<WithEnvironmentObject>();
-        END_OP(LeaveWith);
-      }
-      case JSOp::BindVar: {
-        state.obj0 = frame->environmentChain();
-        JSObject* varObj;
-        {
-          PUSH_EXIT_FRAME();
-          varObj = BindVarOperation(cx, state.obj0);
-        }
-        PUSH(StackVal(ObjectValue(*varObj)));
-        END_OP(BindVar);
-      }
-
-      case JSOp::GlobalOrEvalDeclInstantiation: {
-        GCThingIndex lastFun = GET_GCTHING_INDEX(pc);
-        state.script0 = script;
-        state.obj0 = frame->environmentChain();
-        {
-          PUSH_EXIT_FRAME();
-          if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
-                                             lastFun)) {
-            goto error;
-          }
-        }
-        END_OP(GlobalOrEvalDeclInstantiation);
-      }
-
-      case JSOp::DelName: {
-        state.name0 = script->getName(pc);
-        state.obj0 = frame->environmentChain();
-        {
-          PUSH_EXIT_FRAME();
-          if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.res));
-        END_OP(DelName);
-      }
-
-      case JSOp::Arguments: {
-        {
-          PUSH_EXIT_FRAME();
-          if (!NewArgumentsObject(cx, frame, &state.res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.res));
-        END_OP(Arguments);
-      }
-
-      case JSOp::Rest: {
-        INVOKE_IC(Rest);
-        IC_PUSH_RESULT();
-        END_OP(Rest);
-      }
-
-      case JSOp::FunctionThis: {
-        {
-          PUSH_EXIT_FRAME();
-          if (!js::GetFunctionThis(cx, frame, &state.res)) {
-            goto error;
-          }
-        }
-        PUSH(StackVal(state.res));
-        END_OP(FunctionThis);
-      }
-
-      case JSOp::Pop: {
-        stack.pop();
-        END_OP(Pop);
-      }
-      case JSOp::PopN: {
-        uint32_t n = GET_UINT16(pc);
-        stack.popn(n);
-        END_OP(PopN);
-      }
-      case JSOp::Dup: {
-        StackVal value = stack[0];
-        PUSH(value);
-        END_OP(Dup);
-      }
-      case JSOp::Dup2: {
-        StackVal value1 = stack[0];
-        StackVal value2 = stack[1];
-        PUSH(value2);
-        PUSH(value1);
-        END_OP(Dup2);
-      }
-      case JSOp::DupAt: {
-        unsigned i = GET_UINT24(pc);
-        StackVal value = stack[i];
-        PUSH(value);
-        END_OP(DupAt);
-      }
-      case JSOp::Swap: {
-        std::swap(stack[0], stack[1]);
-        END_OP(Swap);
-      }
-      case JSOp::Pick: {
-        unsigned i = GET_UINT8(pc);
-        StackVal tmp = stack[i];
-        memmove(&stack[1], &stack[0], sizeof(StackVal) * i);
-        stack[0] = tmp;
-        END_OP(Pick);
-      }
-      case JSOp::Unpick: {
-        unsigned i = GET_UINT8(pc);
-        StackVal tmp = stack[0];
-        memmove(&stack[0], &stack[1], sizeof(StackVal) * i);
-        stack[i] = tmp;
-        END_OP(Unpick);
-      }
-      case JSOp::DebugCheckSelfHosted: {
-        END_OP(DebugCheckSelfHosted);
-      }
-      case JSOp::Lineno: {
-        END_OP(Lineno);
-      }
-      case JSOp::NopDestructuring: {
-        END_OP(NopDestructuring);
-      }
-      case JSOp::ForceInterpreter: {
-        END_OP(ForceInterpreter);
-      }
-      case JSOp::Debugger: {
-        END_OP(Debugger);
-      }
-
-      default:
-        MOZ_CRASH("Bad opcode");
     }
+
+    CASE(Default) {
+      stack.pop();
+      ADVANCE(GET_JUMP_OFFSET(pc));
+      DISPATCH();
+    }
+
+    CASE(TableSwitch) {
+      int32_t len = GET_JUMP_OFFSET(pc);
+      int32_t low = GET_JUMP_OFFSET(pc + 1 * JUMP_OFFSET_LEN);
+      int32_t high = GET_JUMP_OFFSET(pc + 2 * JUMP_OFFSET_LEN);
+      Value v = stack.pop().asValue();
+      int32_t i = 0;
+      if (v.isInt32()) {
+        i = v.toInt32();
+      } else if (!v.isDouble() ||
+                 !mozilla::NumberEqualsInt32(v.toDouble(), &i)) {
+        ADVANCE(len);
+        DISPATCH();
+      }
+
+      i = uint32_t(i) - uint32_t(low);
+      if ((uint32_t(i) < uint32_t(high - low + 1))) {
+        len = script->tableSwitchCaseOffset(pc, uint32_t(i)) -
+              script->pcToOffset(pc);
+      }
+      ADVANCE(len);
+      DISPATCH();
+    }
+
+    CASE(Return) {
+      *ret = stack.pop().asValue();
+      stack.popFrame(frameMgr.cxForLocalUseOnly());
+      stack.pop();  // fake return address
+      return true;
+    }
+
+    CASE(GetRval) {
+      PUSH(StackVal(*ret));
+      END_OP(GetRval);
+    }
+
+    CASE(SetRval) {
+      *ret = stack.pop().asValue();
+      END_OP(SetRval);
+    }
+
+    CASE(RetRval) {
+      stack.popFrame(frameMgr.cxForLocalUseOnly());
+      stack.pop();  // fake return address
+      return true;
+    }
+
+    CASE(CheckReturn) {
+      Value thisval = stack.pop().asValue();
+      if (ret->isObject()) {
+        PUSH(StackVal(*ret));
+      } else if (!ret->isUndefined()) {
+        PUSH_EXIT_FRAME();
+        state.value0 = *ret;
+        ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK,
+                         state.value0, nullptr);
+        goto error;
+      } else if (thisval.isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
+        goto error;
+      } else {
+        PUSH(StackVal(thisval));
+      }
+      END_OP(CheckReturn);
+    }
+
+    CASE(Throw) {
+      state.value0 = stack.pop().asValue();
+      {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(ThrowOperation(cx, state.value0));
+        goto error;
+      }
+      END_OP(Throw);
+    }
+
+    CASE(ThrowMsg) {
+      {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(ThrowMsgOperation(cx, GET_UINT8(pc)));
+        goto error;
+      }
+      END_OP(ThrowMsg);
+    }
+
+    CASE(ThrowSetConst) {
+      {
+        PUSH_EXIT_FRAME();
+        ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, script, pc);
+        goto error;
+      }
+      END_OP(ThrowSetConst);
+    }
+
+    CASE(Try)
+    CASE(TryDestructuring) {
+      static_assert(JSOpLength_Try == JSOpLength_TryDestructuring);
+      END_OP(Try);
+    }
+
+    CASE(Exception) {
+      {
+        PUSH_EXIT_FRAME();
+        if (!GetAndClearException(cx, &state.res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.res));
+      END_OP(Exception);
+    }
+
+    CASE(Finally) { END_OP(Finally); }
+
+    CASE(Uninitialized) {
+      PUSH(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
+      END_OP(Uninitialized);
+    }
+    CASE(InitLexical) {
+      uint32_t i = GET_LOCALNO(pc);
+      frame->unaliasedLocal(i) = stack[0].asValue();
+      END_OP(InitLexical);
+    }
+
+    CASE(InitAliasedLexical) {
+      EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
+      EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+      obj.setAliasedBinding(ec, stack[0].asValue());
+      END_OP(InitAliasedLexical);
+    }
+    CASE(CheckLexical) {
+      if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        PUSH_EXIT_FRAME();
+        ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script, pc);
+        goto error;
+      }
+      END_OP(CheckLexical);
+    }
+    CASE(CheckAliasedLexical) {
+      if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        PUSH_EXIT_FRAME();
+        ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script, pc);
+        goto error;
+      }
+      END_OP(CheckAliasedLexical);
+    }
+
+    CASE(BindGName) {
+      IC_SET_OBJ_ARG(
+          0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+      state.name0.set(script->getName(pc));
+      INVOKE_IC(BindName);
+      IC_PUSH_RESULT();
+      END_OP(BindGName);
+    }
+    CASE(BindName) {
+      IC_SET_OBJ_ARG(0, frame->environmentChain());
+      INVOKE_IC(BindName);
+      IC_PUSH_RESULT();
+      END_OP(BindName);
+    }
+    CASE(GetGName) {
+      IC_SET_OBJ_ARG(
+          0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+      INVOKE_IC(GetName);
+      IC_PUSH_RESULT();
+      END_OP(GetGName);
+    }
+    CASE(GetName) {
+      IC_SET_OBJ_ARG(0, frame->environmentChain());
+      INVOKE_IC(GetName);
+      IC_PUSH_RESULT();
+      END_OP(GetName);
+    }
+
+    CASE(GetArg) {
+      unsigned i = GET_ARGNO(pc);
+      if (script->argsObjAliasesFormals()) {
+        PUSH(StackVal(frame->argsObj().arg(i)));
+      } else {
+        PUSH(StackVal(frame->unaliasedFormal(i)));
+      }
+      END_OP(GetArg);
+    }
+
+    CASE(GetFrameArg) {
+      uint32_t i = GET_ARGNO(pc);
+      PUSH(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
+      END_OP(GetFrameArg);
+    }
+
+    CASE(GetLocal) {
+      uint32_t i = GET_LOCALNO(pc);
+      TRACE_PRINTF(" -> local: %d\n", int(i));
+      PUSH(StackVal(frame->unaliasedLocal(i)));
+      END_OP(GetLocal);
+    }
+
+    CASE(ArgumentsLength) {
+      PUSH(StackVal(Int32Value(frame->numActualArgs())));
+      END_OP(ArgumentsLength);
+    }
+
+    CASE(GetActualArg) {
+      MOZ_ASSERT(!script->needsArgsObj());
+      uint32_t index = stack[0].asValue().toInt32();
+      stack[0] = StackVal(frame->unaliasedActual(index));
+      END_OP(GetActualArg);
+    }
+
+    CASE(GetAliasedVar)
+    CASE(GetAliasedDebugVar) {
+      static_assert(JSOpLength_GetAliasedVar == JSOpLength_GetAliasedDebugVar);
+      EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
+      EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+      PUSH(StackVal(obj.aliasedBinding(ec)));
+      END_OP(GetAliasedVar);
+    }
+
+    CASE(GetImport) {
+      state.obj0 = frame->environmentChain();
+      state.value0 = stack[0].asValue();
+      {
+        PUSH_EXIT_FRAME();
+        if (!GetImportOperation(cx, state.obj0, script, pc, &state.value0)) {
+          goto error;
+        }
+      }
+      stack[0] = StackVal(state.value0);
+      END_OP(GetImport);
+    }
+
+    CASE(GetIntrinsic) {
+      INVOKE_IC(GetIntrinsic);
+      IC_PUSH_RESULT();
+      END_OP(GetIntrinsic);
+    }
+
+    CASE(Callee) {
+      PUSH(StackVal(frame->calleev()));
+      END_OP(Callee);
+    }
+
+    CASE(EnvCallee) {
+      uint8_t numHops = GET_UINT8(pc);
+      JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
+      for (unsigned i = 0; i < numHops; i++) {
+        env = &env->as<EnvironmentObject>().enclosingEnvironment();
+      }
+      PUSH(StackVal(ObjectValue(env->as<CallObject>().callee())));
+      END_OP(EnvCallee);
+    }
+
+    CASE(SetProp)
+    CASE(StrictSetProp)
+    CASE(SetName)
+    CASE(StrictSetName)
+    CASE(SetGName)
+    CASE(StrictSetGName) {
+      static_assert(JSOpLength_SetProp == JSOpLength_StrictSetProp);
+      static_assert(JSOpLength_SetProp == JSOpLength_SetName);
+      static_assert(JSOpLength_SetProp == JSOpLength_StrictSetName);
+      static_assert(JSOpLength_SetProp == JSOpLength_SetGName);
+      static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
+      IC_POP_ARG(1);
+      IC_POP_ARG(0);
+      PUSH(StackVal(icregs.icVals[1]));
+      INVOKE_IC(SetProp);
+      END_OP(SetProp);
+    }
+
+    CASE(InitProp)
+    CASE(InitHiddenProp)
+    CASE(InitLockedProp) {
+      static_assert(JSOpLength_InitProp == JSOpLength_InitHiddenProp);
+      static_assert(JSOpLength_InitProp == JSOpLength_InitLockedProp);
+      IC_POP_ARG(1);
+      IC_SET_ARG_FROM_STACK(0, 0);
+      INVOKE_IC(SetProp);
+      END_OP(InitProp);
+    }
+    CASE(InitGLexical) {
+      IC_SET_ARG_FROM_STACK(1, 0);
+      IC_SET_OBJ_ARG(
+          0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
+      INVOKE_IC(SetProp);
+      END_OP(InitGLexical);
+    }
+
+    CASE(SetArg) {
+      unsigned i = GET_ARGNO(pc);
+      if (script->argsObjAliasesFormals()) {
+        frame->argsObj().setArg(i, stack[0].asValue());
+      } else {
+        frame->unaliasedFormal(i) = stack[0].asValue();
+      }
+      END_OP(SetArg);
+    }
+
+    CASE(SetLocal) {
+      uint32_t i = GET_LOCALNO(pc);
+      TRACE_PRINTF(" -> local: %d\n", int(i));
+      frame->unaliasedLocal(i) = stack[0].asValue();
+      END_OP(SetLocal);
+    }
+
+    CASE(SetAliasedVar) {
+      EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
+      EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
+      MOZ_ASSERT(!IsUninitializedLexical(obj.aliasedBinding(ec)));
+      obj.setAliasedBinding(ec, stack[0].asValue());
+      END_OP(SetAliasedVar);
+    }
+
+    CASE(SetIntrinsic) {
+      state.value0 = stack[0].asValue();
+      {
+        PUSH_EXIT_FRAME();
+        if (!SetIntrinsicOperation(cx, script, pc, state.value0)) {
+          goto error;
+        }
+      }
+      END_OP(SetIntrinsic);
+    }
+
+    CASE(PushLexicalEnv) {
+      state.scope0 = script->getScope(pc);
+      {
+        PUSH_EXIT_FRAME();
+        if (!frame->pushLexicalEnvironment(cx,
+                                           state.scope0.as<LexicalScope>())) {
+          goto error;
+        }
+      }
+      END_OP(PushLexicalEnv);
+    }
+    CASE(PopLexicalEnv) {
+      frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
+      END_OP(PopLexicalEnv);
+    }
+    CASE(DebugLeaveLexicalEnv) { END_OP(DebugLeaveLexicalEnv); }
+
+    CASE(RecreateLexicalEnv) {
+      {
+        PUSH_EXIT_FRAME();
+        if (!frame->recreateLexicalEnvironment(cx)) {
+          goto error;
+        }
+      }
+      END_OP(RecreateLexicalEnv);
+    }
+
+    CASE(FreshenLexicalEnv) {
+      {
+        PUSH_EXIT_FRAME();
+        if (!frame->freshenLexicalEnvironment(cx)) {
+          goto error;
+        }
+      }
+      END_OP(FreshenLexicalEnv);
+    }
+    CASE(PushClassBodyEnv) {
+      state.scope0 = script->getScope(pc);
+      {
+        PUSH_EXIT_FRAME();
+        if (!frame->pushClassBodyEnvironment(
+                cx, state.scope0.as<ClassBodyScope>())) {
+          goto error;
+        }
+      }
+      END_OP(PushClassBodyEnv);
+    }
+    CASE(PushVarEnv) {
+      state.scope0 = script->getScope(pc);
+      {
+        PUSH_EXIT_FRAME();
+        if (!frame->pushVarEnvironment(cx, state.scope0)) {
+          goto error;
+        }
+      }
+      END_OP(PushVarEnv);
+    }
+    CASE(EnterWith) {
+      state.scope0 = script->getScope(pc);
+      state.value0 = stack.pop().asValue();
+      {
+        PUSH_EXIT_FRAME();
+        if (!EnterWithOperation(cx, frame, state.value0,
+                                state.scope0.as<WithScope>())) {
+          goto error;
+        }
+      }
+      END_OP(EnterWith);
+    }
+    CASE(LeaveWith) {
+      frame->popOffEnvironmentChain<WithEnvironmentObject>();
+      END_OP(LeaveWith);
+    }
+    CASE(BindVar) {
+      state.obj0 = frame->environmentChain();
+      JSObject* varObj;
+      {
+        PUSH_EXIT_FRAME();
+        varObj = BindVarOperation(cx, state.obj0);
+      }
+      PUSH(StackVal(ObjectValue(*varObj)));
+      END_OP(BindVar);
+    }
+
+    CASE(GlobalOrEvalDeclInstantiation) {
+      GCThingIndex lastFun = GET_GCTHING_INDEX(pc);
+      state.script0 = script;
+      state.obj0 = frame->environmentChain();
+      {
+        PUSH_EXIT_FRAME();
+        if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
+                                           lastFun)) {
+          goto error;
+        }
+      }
+      END_OP(GlobalOrEvalDeclInstantiation);
+    }
+
+    CASE(DelName) {
+      state.name0 = script->getName(pc);
+      state.obj0 = frame->environmentChain();
+      {
+        PUSH_EXIT_FRAME();
+        if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.res));
+      END_OP(DelName);
+    }
+
+    CASE(Arguments) {
+      {
+        PUSH_EXIT_FRAME();
+        if (!NewArgumentsObject(cx, frame, &state.res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.res));
+      END_OP(Arguments);
+    }
+
+    CASE(Rest) {
+      INVOKE_IC(Rest);
+      IC_PUSH_RESULT();
+      END_OP(Rest);
+    }
+
+    CASE(FunctionThis) {
+      {
+        PUSH_EXIT_FRAME();
+        if (!js::GetFunctionThis(cx, frame, &state.res)) {
+          goto error;
+        }
+      }
+      PUSH(StackVal(state.res));
+      END_OP(FunctionThis);
+    }
+
+    CASE(Pop) {
+      stack.pop();
+      END_OP(Pop);
+    }
+    CASE(PopN) {
+      uint32_t n = GET_UINT16(pc);
+      stack.popn(n);
+      END_OP(PopN);
+    }
+    CASE(Dup) {
+      StackVal value = stack[0];
+      PUSH(value);
+      END_OP(Dup);
+    }
+    CASE(Dup2) {
+      StackVal value1 = stack[0];
+      StackVal value2 = stack[1];
+      PUSH(value2);
+      PUSH(value1);
+      END_OP(Dup2);
+    }
+    CASE(DupAt) {
+      unsigned i = GET_UINT24(pc);
+      StackVal value = stack[i];
+      PUSH(value);
+      END_OP(DupAt);
+    }
+    CASE(Swap) {
+      std::swap(stack[0], stack[1]);
+      END_OP(Swap);
+    }
+    CASE(Pick) {
+      unsigned i = GET_UINT8(pc);
+      StackVal tmp = stack[i];
+      memmove(&stack[1], &stack[0], sizeof(StackVal) * i);
+      stack[0] = tmp;
+      END_OP(Pick);
+    }
+    CASE(Unpick) {
+      unsigned i = GET_UINT8(pc);
+      StackVal tmp = stack[0];
+      memmove(&stack[0], &stack[1], sizeof(StackVal) * i);
+      stack[i] = tmp;
+      END_OP(Unpick);
+    }
+    CASE(DebugCheckSelfHosted) { END_OP(DebugCheckSelfHosted); }
+    CASE(Lineno) { END_OP(Lineno); }
+    CASE(NopDestructuring) { END_OP(NopDestructuring); }
+    CASE(ForceInterpreter) { END_OP(ForceInterpreter); }
+    CASE(Debugger) { END_OP(Debugger); }
+
+  label_default:
+    MOZ_CRASH("Bad opcode");
   }
 
 error:
@@ -3721,13 +3714,13 @@ error:
       case ExceptionResumeKind::Catch:
         pc = frame->interpreterPC();
         TRACE_PRINTF(" -> catch to pc %p\n", pc);
-        goto dispatch;
+        DISPATCH();
       case ExceptionResumeKind::Finally:
         pc = frame->interpreterPC();
         TRACE_PRINTF(" -> finally to pc %p\n", pc);
         PUSH(StackVal(rfe.exception));
         PUSH(StackVal(BooleanValue(true)));
-        goto dispatch;
+        DISPATCH();
       case ExceptionResumeKind::ForcedReturnBaseline:
         TRACE_PRINTF(" -> forced return\n");
         stack.popFrame(frameMgr.cxForLocalUseOnly());
