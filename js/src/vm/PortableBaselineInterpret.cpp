@@ -318,8 +318,9 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
   return env->as<EnvironmentObject>();
 }
 
-static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
-                                      JSObject* envChain, Value* ret);
+static bool PortableBaselineInterpret(JSContext* cx_, State& state,
+                                      Stack& stack, JSObject* envChain,
+                                      Value* ret);
 
 #define TRY(x)    \
   if (!(x)) {     \
@@ -344,8 +345,8 @@ enum class ICInterpretOpResult {
 #define PUSH_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
 
 static ICInterpretOpResult MOZ_ALWAYS_INLINE
-ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
-              State& state, ICCacheIRStub* cstub, jsbytecode* pc) {
+ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
+              Stack& stack, ICCacheIRStub* cstub, jsbytecode* pc) {
 #define CACHEOP_CASE(name) \
   case CacheOp::name:      \
     cacheop_##name : TRACE_PRINTF("cacheop: " #name "\n");
@@ -1192,7 +1193,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
           state.icResult = args[0].asRawBits();
         } else {
           if (!PortableBaselineInterpret(
-                  cx, stack, /* envChain = */ nullptr,
+                  cx, state, stack, /* envChain = */ nullptr,
                   reinterpret_cast<Value*>(&state.icResult))) {
             return ICInterpretOpResult::Error;
           }
@@ -1443,7 +1444,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
 #define NEXT_IC() frame->interpreterICEntry()++;
 
 #define INVOKE_IC(kind)                               \
-  if (!IC##kind(frame, frameMgr, stack, state, pc)) { \
+  if (!IC##kind(frame, frameMgr, state, stack, pc)) { \
     goto error;                                       \
   }                                                   \
   NEXT_IC();
@@ -1490,8 +1491,8 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
 
 #define DEFINE_IC(kind, arity, fallback_body)                                \
   static bool MOZ_ALWAYS_INLINE IC##kind(                                    \
-      BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,          \
-      State& state, jsbytecode* pc) {                                        \
+      BaselineFrame* frame, VMFrameManager& frameMgr, State& state,          \
+      Stack& stack, jsbytecode* pc) {                                        \
     ICStub* stub = frame->interpreterICEntry()->firstStub();                 \
     uint64_t inputs[3];                                                      \
     SAVE_INPUTS(arity);                                                      \
@@ -1509,7 +1510,7 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, Stack& stack,
         cstub->incrementEnteredCount();                                      \
         new (&state.cacheIRReader) CacheIRReader(cstub->stubInfo()->code()); \
         while (true) {                                                       \
-          switch (ICInterpretOp(frame, frameMgr, stack, state, cstub, pc)) { \
+          switch (ICInterpretOp(frame, frameMgr, state, stack, cstub, pc)) { \
             case ICInterpretOpResult::NextIC:                                \
               stub = stub->maybeNext();                                      \
               RESTORE_INPUTS(arity);                                         \
@@ -1781,9 +1782,13 @@ DEFINE_IC(CloseIter, 1, {
 
 #define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(false)
 
-static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
-                                      JSObject* envChain, Value* ret) {
-  State state(cx_);
+static bool PortableBaselineInterpret(JSContext* cx_, State& state,
+                                      Stack& stack, JSObject* envChain,
+                                      Value* ret) {
+  AutoCheckRecursionLimit recursion(cx_);
+  if (!recursion.check(cx_)) {
+    return false;
+  }
 
   TRY(stack.pushFrame(cx_, envChain));
 
@@ -2508,15 +2513,15 @@ static bool PortableBaselineInterpret(JSContext* cx_, Stack& stack,
         state.value0 = stack.pop().asValue();            // next
         state.obj0 = &stack.pop().asValue().toObject();  // iter
 
-        JSObject* ret;
+        JSObject* result;
         {
           PUSH_EXIT_FRAME();
-          ret = CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
-          if (!ret) {
+          result = CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
+          if (!result) {
             goto error;
           }
         }
-        PUSH(StackVal(ObjectValue(*ret)));
+        PUSH(StackVal(ObjectValue(*result)));
         END_OP(ToAsyncIter);
       }
 
@@ -3573,6 +3578,7 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                     size_t numActualArgs,
                                     CalleeToken calleeToken, JSObject* envChain,
                                     Value* result) {
+  State state(cx);
   Stack stack(cx->portableBaselineStack());
 
   // Expected stack frame:
@@ -3595,7 +3601,7 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
       MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
   PUSH(StackVal(nullptr));  // Fake return address.
 
-  if (!PortableBaselineInterpret(cx, stack, envChain, result)) {
+  if (!PortableBaselineInterpret(cx, state, stack, envChain, result)) {
     return false;
   }
 
