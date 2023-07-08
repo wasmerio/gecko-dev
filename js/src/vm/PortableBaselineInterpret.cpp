@@ -45,7 +45,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -1596,10 +1596,16 @@ DEFINE_IC(Call, 1, {
     PUSH_FALLBACK_IC_FRAME();
     if (icregs.spreadCall) {
       if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
+        for (uint32_t i = 0; i < totalArgs / 2; i++) {
+          std::swap(args[i], args[totalArgs - 1 - i]);
+        }
         goto error;
       }
     } else {
       if (!DoCallFallback(cx, frame, fallback, argc, args, &state.res)) {
+        for (uint32_t i = 0; i < totalArgs / 2; i++) {
+          std::swap(args[i], args[totalArgs - 1 - i]);
+        }
         goto error;
       }
     }
@@ -2984,14 +2990,12 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
 
       case JSOp::Goto: {
         ADVANCE(GET_JUMP_OFFSET(pc));
-#if 0
         if (JSOp(*pc) == JSOp::JumpTarget) {
           goto jsop_JumpTarget;
         }
         if (JSOp(*pc) == JSOp::LoopHead) {
           goto jsop_LoopHead;
         }
-#endif
         break;
       }
 
