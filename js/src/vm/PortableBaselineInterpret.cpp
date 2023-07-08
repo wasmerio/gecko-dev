@@ -2056,7 +2056,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         } else {
           ADVANCE(JSOpLength_And);
         }
-        break;
+        goto dispatch;
       }
       case JSOp::Or: {
         bool result;
@@ -2079,7 +2079,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         } else {
           ADVANCE(JSOpLength_Or);
         }
-        break;
+        goto dispatch;
       }
       case JSOp::JumpIfTrue: {
         bool result;
@@ -2102,7 +2102,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         } else {
           ADVANCE(JSOpLength_JumpIfTrue);
         }
-        break;
+        goto dispatch;
       }
       case JSOp::JumpIfFalse: {
         bool result;
@@ -2125,7 +2125,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         } else {
           ADVANCE(JSOpLength_JumpIfFalse);
         }
-        break;
+        goto dispatch;
       }
 
       case JSOp::Add: {
@@ -3137,13 +3137,13 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         if (JSOp(*pc) == JSOp::LoopHead) {
           goto jsop_LoopHead;
         }
-        break;
+        goto dispatch;
       }
 
       case JSOp::Coalesce: {
         if (!stack[0].asValue().isNullOrUndefined()) {
           ADVANCE(GET_JUMP_OFFSET(pc));
-          break;
+          goto dispatch;
         } else {
           END_OP(Coalesce);
         }
@@ -3154,7 +3154,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         if (cond) {
           stack.pop();
           ADVANCE(GET_JUMP_OFFSET(pc));
-          break;
+          goto dispatch;
         } else {
           END_OP(Case);
         }
@@ -3163,7 +3163,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
       case JSOp::Default: {
         stack.pop();
         ADVANCE(GET_JUMP_OFFSET(pc));
-        break;
+        goto dispatch;
       }
 
       case JSOp::TableSwitch: {
@@ -3177,7 +3177,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         } else if (!v.isDouble() ||
                    !mozilla::NumberEqualsInt32(v.toDouble(), &i)) {
           ADVANCE(len);
-          break;
+          goto dispatch;
         }
 
         i = uint32_t(i) - uint32_t(low);
@@ -3186,7 +3186,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
                 script->pcToOffset(pc);
         }
         ADVANCE(len);
-        break;
+        goto dispatch;
       }
 
       case JSOp::Return: {
@@ -3733,7 +3733,6 @@ error:
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
         return true;
-        break;
       case ExceptionResumeKind::ForcedReturnIon:
         MOZ_CRASH(
             "Unexpected ForcedReturnIon exception-resume kind in Portable "
