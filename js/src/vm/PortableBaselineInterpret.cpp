@@ -1962,11 +1962,61 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         END_OP(Typeof);
       }
 
-      case JSOp::Pos:
-      case JSOp::Neg:
-      case JSOp::BitNot:
-      case JSOp::Inc:
-      case JSOp::Dec:
+      case JSOp::Pos: {
+        if (stack[0].asValue().isNumber()) {
+          // Nothing!
+          NEXT_IC();
+          END_OP(Pos);
+        } else {
+          goto generic_unary;
+        }
+      }
+      case JSOp::Neg: {
+        if (stack[0].asValue().isInt32()) {
+          int32_t i = stack[0].asValue().toInt32();
+          if (i != 0 && i != INT32_MIN) {
+            stack[0] = StackVal(Int32Value(-i));
+            NEXT_IC();
+            END_OP(Neg);
+          }
+        }
+        goto generic_unary;
+      }
+
+      case JSOp::Inc: {
+        if (stack[0].asValue().isInt32()) {
+          int32_t i = stack[0].asValue().toInt32();
+          if (i != INT32_MAX) {
+            stack[0] = StackVal(Int32Value(i + 1));
+            NEXT_IC();
+            END_OP(Inc);
+          }
+        }
+        goto generic_unary;
+      }
+      case JSOp::Dec: {
+        if (stack[0].asValue().isInt32()) {
+          int32_t i = stack[0].asValue().toInt32();
+          if (i != INT32_MIN) {
+            stack[0] = StackVal(Int32Value(i - 1));
+            NEXT_IC();
+            END_OP(Dec);
+          }
+        }
+        goto generic_unary;
+      }
+
+      case JSOp::BitNot: {
+        if (stack[0].asValue().isInt32()) {
+          int32_t i = stack[0].asValue().toInt32();
+          stack[0] = StackVal(Int32Value(~i));
+          NEXT_IC();
+          END_OP(Inc);
+        }
+        goto generic_unary;
+      }
+
+      generic_unary:
       case JSOp::ToNumeric: {
         static_assert(JSOpLength_Pos == JSOpLength_Neg);
         static_assert(JSOpLength_Pos == JSOpLength_BitNot);
@@ -2078,14 +2128,41 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         break;
       }
 
+      case JSOp::Add: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          int64_t lhs = stack[1].asValue().toInt32();
+          int64_t rhs = stack[0].asValue().toInt32();
+          if (lhs + rhs <= int64_t(INT32_MAX)) {
+            stack.pop();
+            stack[0] = StackVal(Int32Value(int32_t(lhs + rhs)));
+            NEXT_IC();
+            END_OP(Add);
+          }
+        }
+        goto generic_binary;
+      }
+
+      case JSOp::Sub: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          int64_t lhs = stack[1].asValue().toInt32();
+          int64_t rhs = stack[0].asValue().toInt32();
+          if (lhs - rhs >= int64_t(INT32_MIN)) {
+            stack.pop();
+            stack[0] = StackVal(Int32Value(int32_t(lhs - rhs)));
+            NEXT_IC();
+            END_OP(Sub);
+          }
+        }
+        goto generic_binary;
+      }
+
+      generic_binary:
       case JSOp::BitOr:
       case JSOp::BitXor:
       case JSOp::BitAnd:
       case JSOp::Lsh:
       case JSOp::Rsh:
       case JSOp::Ursh:
-      case JSOp::Add:
-      case JSOp::Sub:
       case JSOp::Mul:
       case JSOp::Div:
       case JSOp::Mod:
@@ -2108,14 +2185,78 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
         END_OP(Div);
       }
 
-      case JSOp::Eq:
-      case JSOp::Ne:
-      case JSOp::StrictEq:
-      case JSOp::StrictNe:
-      case JSOp::Lt:
-      case JSOp::Gt:
-      case JSOp::Le:
+      case JSOp::Eq: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          bool result =
+              stack[0].asValue().toInt32() == stack[1].asValue().toInt32();
+          stack.pop();
+          stack[0] = StackVal(BooleanValue(result));
+          NEXT_IC();
+          END_OP(Eq);
+        }
+        goto generic_cmp;
+      }
+
+      case JSOp::Ne: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          bool result =
+              stack[0].asValue().toInt32() != stack[1].asValue().toInt32();
+          stack.pop();
+          stack[0] = StackVal(BooleanValue(result));
+          NEXT_IC();
+          END_OP(Ne);
+        }
+        goto generic_cmp;
+      }
+
+      case JSOp::Lt: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          bool result =
+              stack[1].asValue().toInt32() < stack[0].asValue().toInt32();
+          stack.pop();
+          stack[0] = StackVal(BooleanValue(result));
+          NEXT_IC();
+          END_OP(Lt);
+        }
+        goto generic_cmp;
+      }
+      case JSOp::Le: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          bool result =
+              stack[1].asValue().toInt32() <= stack[0].asValue().toInt32();
+          stack.pop();
+          stack[0] = StackVal(BooleanValue(result));
+          NEXT_IC();
+          END_OP(Le);
+        }
+        goto generic_cmp;
+      }
+      case JSOp::Gt: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          bool result =
+              stack[1].asValue().toInt32() > stack[0].asValue().toInt32();
+          stack.pop();
+          stack[0] = StackVal(BooleanValue(result));
+          NEXT_IC();
+          END_OP(Gt);
+        }
+        goto generic_cmp;
+      }
       case JSOp::Ge: {
+        if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
+          bool result =
+              stack[1].asValue().toInt32() >= stack[0].asValue().toInt32();
+          stack.pop();
+          stack[0] = StackVal(BooleanValue(result));
+          NEXT_IC();
+          END_OP(Ge);
+        }
+        goto generic_cmp;
+      }
+
+      generic_cmp:
+      case JSOp::StrictEq:
+      case JSOp::StrictNe: {
         static_assert(JSOpLength_Eq == JSOpLength_Ne);
         static_assert(JSOpLength_Eq == JSOpLength_StrictEq);
         static_assert(JSOpLength_Eq == JSOpLength_StrictNe);
