@@ -45,7 +45,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -1347,7 +1347,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
           }
         }
       }
-      icregs.icResult = reinterpret_cast<uintptr_t>(result);
+      icregs.icResult = StringValue(result).asRawBits();
       break;
     }
 
