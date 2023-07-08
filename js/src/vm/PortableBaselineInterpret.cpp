@@ -280,7 +280,6 @@ class VMFrameManager {
 class VMFrame {
   JSContext* cx;
   Stack& stack;
-  uint8_t* prevExitFP;
   StackVal* exitFP;
   void* prevSavedStack;
 
@@ -288,7 +287,6 @@ class VMFrame {
   VMFrame(VMFrameManager& mgr, Stack& stack_, jsbytecode* pc)
       : cx(mgr.cx), stack(stack_) {
     mgr.frame->interpreterPC() = pc;
-    prevExitFP = cx->activation()->asJit()->packedExitFP();
     exitFP = stack.pushExitFrame(mgr.frame);
     if (!exitFP) {
       return;
@@ -299,11 +297,11 @@ class VMFrame {
   }
 
   ~VMFrame() {
-    cx->activation()->asJit()->setPackedExitFP(prevExitFP);
     stack.popExitFrame(exitFP);
     cx->portableBaselineStack().top = prevSavedStack;
   }
 
+  JSContext* getCx() const { return cx; }
   operator JSContext*() const { return cx; }
 
   bool success() const { return exitFP != nullptr; }
@@ -1184,10 +1182,31 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
         }
 
         if (isNative) {
+          // We *also* need an exit frame (the native baseline
+          // execution would invoke a trampoline here).
+          StackVal* trampolinePrevFP = stack.fp;
+          if (!stack.push(StackVal(stack.fp))) {
+            return ICInterpretOpResult::Error;
+          }
+          stack.fp = stack.cur();
+          if (!stack.push(StackVal(uint64_t(ExitFrameType::Bare)))) {
+            return ICInterpretOpResult::Error;
+          }
+          if (!stack.push(StackVal(nullptr))) { // fake return address.
+            return ICInterpretOpResult::Error;
+          }
+          cx.getCx()->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(stack.fp));
+          cx.getCx()->portableBaselineStack().top = reinterpret_cast<void*>(stack.sp);
+
           JSNative native = ignoresRv
                                 ? callee->jitInfo()->ignoresReturnValueMethod
                                 : callee->native();
-          if (!native(cx, argc, args)) {
+          bool success = native(cx, argc, args);
+
+          stack.fp = trampolinePrevFP;
+          stack.popn(3);
+
+          if (!success) {
             return ICInterpretOpResult::Error;
           }
           state.icResult = args[0].asRawBits();
