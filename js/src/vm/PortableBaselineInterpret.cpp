@@ -45,7 +45,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -1192,11 +1192,13 @@ ICInterpretOp(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
           if (!stack.push(StackVal(uint64_t(ExitFrameType::Bare)))) {
             return ICInterpretOpResult::Error;
           }
-          if (!stack.push(StackVal(nullptr))) { // fake return address.
+          if (!stack.push(StackVal(nullptr))) {  // fake return address.
             return ICInterpretOpResult::Error;
           }
-          cx.getCx()->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(stack.fp));
-          cx.getCx()->portableBaselineStack().top = reinterpret_cast<void*>(stack.sp);
+          cx.getCx()->activation()->asJit()->setJSExitFP(
+              reinterpret_cast<uint8_t*>(stack.fp));
+          cx.getCx()->portableBaselineStack().top =
+              reinterpret_cast<void*>(stack.sp);
 
           JSNative native = ignoresRv
                                 ? callee->jitInfo()->ignoresReturnValueMethod
@@ -1576,12 +1578,15 @@ DEFINE_IC(Call, 1, {
   Value* args = reinterpret_cast<Value*>(&stack[0]);
   TRACE_PRINTF("Call fallback: argc %d totalArgs %d args %p\n", argc, totalArgs,
                args);
-  // Reverse values on the stack.
-  for (uint32_t i = 0; i < totalArgs / 2; i++) {
-    std::swap(args[i], args[totalArgs - 1 - i]);
-  }
   {
     PUSH_FALLBACK_IC_FRAME();
+
+    // Push values onto the stack in correct order.
+    for (uint32_t i = 0; i < totalArgs; i++) {
+      PUSH(StackVal(args[i]));
+    }
+    args = reinterpret_cast<Value*>(&stack[0]);
+
     if (state.spreadCall) {
       if (!DoSpreadCallFallback(cx, frame, fallback, args, &state.res)) {
         goto error;
