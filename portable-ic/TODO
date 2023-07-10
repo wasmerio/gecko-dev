@@ -1,4 +1,15 @@
+- fix exception unwinding across multiple frames in an activation
+  - see
+    https://searchfox.org/mozilla-central/source/js/src/jit/x64/MacroAssembler-x64.cpp#551
+    and following
+  - we need an enum return from PortableBaselineInterpret with an
+    option that means "unwind"; propagate upward through ICs.
+
 - implement await/resume
+
+- implement direct-dispatch interp for CacheOps (and goto-based control flow
+  for NextIC / error / next-op / done)
+  - may require #define of entire body
 
 - pass all jit-tests
   - work out issue with EnvironmentIter::settle and assertions on GC (try a

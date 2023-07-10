@@ -3696,8 +3696,8 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
   }
 
 error:
-  TRACE_PRINTF("HandleException\n");
-  do {
+  TRACE_PRINTF("HandleException: frame %p\n", frame);
+  {
     ResumeFromException rfe;
     {
       PUSH_EXIT_FRAME();
@@ -3740,9 +3740,9 @@ error:
             "Unexpected WasmCatch exception-resume kind in Portable "
             "Baseline");
     }
-  } while (false);
+  }
 
-  goto dispatch;
+  DISPATCH();
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
