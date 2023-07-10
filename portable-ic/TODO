@@ -8,6 +8,8 @@
   - work out issue with EnvironmentIter::settle and assertions on GC (try a
     debug build running markdown.js)
 
+- implement CallScriptedFunction for ctors
+
 - implement as many CacheIR ops as needed to completely cover markdown renderer
 - opts:
   - "next-op fusion": cover a few likely next ops with if-goto
@@ -18,3 +20,5 @@
 
 - weval the IC interp and PBL interp loops
   - memory-rename the stack and icVals too
+
+- OSR (on-stack replacement)
