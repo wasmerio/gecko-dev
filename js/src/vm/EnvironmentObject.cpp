@@ -1388,20 +1388,6 @@ void EnvironmentIter::settle() {
       if (scope->is<LexicalScope>()) {
         MOZ_ASSERT(scope == &env_->as<BlockLexicalEnvironmentObject>().scope());
       } else if (scope->is<FunctionScope>()) {
-#if 0
-        printf(
-            "scope %p: script %p; env %p callee %p canonical %p "
-            "script %p\n",
-            scope, scope->as<FunctionScope>().script(), env_.get(),
-            &env_->as<CallObject>().callee(),
-            env_->as<CallObject>().callee().maybeCanonicalFunction(),
-            env_->as<CallObject>()
-                .callee()
-                .maybeCanonicalFunction()
-                ->baseScript());
-        fflush(stdout);
-#endif
-
         MOZ_ASSERT(scope->as<FunctionScope>().script() ==
                    env_->as<CallObject>()
                        .callee()
