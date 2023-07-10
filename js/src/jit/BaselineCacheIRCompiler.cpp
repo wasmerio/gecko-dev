@@ -2384,8 +2384,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
   JitCode* code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
 
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-  if (!code) {
+  if (!code && IsBaselineInterpreterEnabled()) {
     // We have to generate stub code.
     TempAllocator temp(&cx->tempLifoAlloc());
     JitContext jctx(cx);
@@ -2417,11 +2416,10 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
       return ICAttachResult::OOM;
     }
-  }
-
-  MOZ_ASSERT(code);
-#else   // !ENABLE_PORTABLE_BASELINE_INTERP
-  if (!stubInfo) {
+  } else if (!stubInfo) {
+    // Portable baseline interpreter case. We want to generate the
+    // CacheIR bytecode but not compile it to native code.
+    //
     // We lie that all stubs make GC calls; this is simpler than
     // iterating over ops to determine if it is actually the base, and
     // we don't invoke the BaselineCacheIRCompiler so we otherwise
@@ -2439,7 +2437,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
       return ICAttachResult::OOM;
     }
   }
-#endif  // ENABLE_PORTABLE_BASELINE_INTERP
+  MOZ_ASSERT_IF(IsBaselineInterpreterEnabled(), code);
   MOZ_ASSERT(stubInfo);
   MOZ_ASSERT(stubInfo->stubDataSize() == writer.stubDataSize());
 
