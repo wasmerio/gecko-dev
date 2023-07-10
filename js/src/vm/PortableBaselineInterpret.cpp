@@ -322,6 +322,8 @@ enum class PBIResult {
   Ok,
   Error,
   Unwind,
+  UnwindError,
+  UnwindRet,
 };
 
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
@@ -347,6 +349,8 @@ enum class ICInterpretOpResult {
   Return,
   Error,
   Unwind,
+  UnwindError,
+  UnwindRet,
 };
 
 #define PUSH_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
@@ -1238,6 +1242,10 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
               return ICInterpretOpResult::Error;
             case PBIResult::Unwind:
               return ICInterpretOpResult::Unwind;
+            case PBIResult::UnwindError:
+              return ICInterpretOpResult::UnwindError;
+            case PBIResult::UnwindRet:
+              return ICInterpretOpResult::UnwindRet;
           }
         }
       }
@@ -1492,7 +1500,11 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
     case PBIResult::Error:                                       \
       goto error;                                                \
     case PBIResult::Unwind:                                      \
-      return PBIResult::Unwind;                                  \
+      goto unwind;                                               \
+    case PBIResult::UnwindError:                                 \
+      goto unwind_error;                                         \
+    case PBIResult::UnwindRet:                                   \
+      goto unwind_ret;                                           \
   }                                                              \
   NEXT_IC();
 
@@ -1571,6 +1583,10 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
               return PBIResult::Error;                                        \
             case ICInterpretOpResult::Unwind:                                 \
               return PBIResult::Unwind;                                       \
+            case ICInterpretOpResult::UnwindError:                            \
+              return PBIResult::UnwindError;                                  \
+            case ICInterpretOpResult::UnwindRet:                              \
+              return PBIResult::UnwindRet;                                    \
           }                                                                   \
         }                                                                     \
       }                                                                       \
@@ -1903,19 +1919,19 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
   while (true) {
 #ifdef TRACE_INTERP
-  {
-    JSOp op = JSOp(*pc);
-    printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
-           "\n",
-           stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
-    printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(), pc,
-           CodeName(op),
-           (int)(frame->interpreterICEntry() -
-                 script->jitScript()->icScript()->icEntries()),
-           frameMgr.cxForLocalUseOnly()->isExceptionPending());
-    printf("TOS tag: %d\n", int(stack[0].asValue().asRawBits() >> 47));
-    fflush(stdout);
-  }
+    {
+      JSOp op = JSOp(*pc);
+      printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
+             "\n",
+             stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
+      printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(), pc,
+             CodeName(op),
+             (int)(frame->interpreterICEntry() -
+                   script->jitScript()->icScript()->icEntries()),
+             frameMgr.cxForLocalUseOnly()->isExceptionPending());
+      printf("TOS tag: %d\n", int(stack[0].asValue().asRawBits() >> 47));
+      fflush(stdout);
+    }
 #endif
 
     DISPATCH();
@@ -3726,24 +3742,26 @@ error:
       case ExceptionResumeKind::EntryFrame:
         TRACE_PRINTF(" -> Return from entry frame\n");
         *ret = MagicValue(JS_ION_ERROR);
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return PBIResult::Error;
+        stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
+        stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
+        goto unwind_error;
       case ExceptionResumeKind::Catch:
         pc = frame->interpreterPC();
+        stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
+        stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
         TRACE_PRINTF(" -> catch to pc %p\n", pc);
-        DISPATCH();
+        goto unwind;
       case ExceptionResumeKind::Finally:
         pc = frame->interpreterPC();
+        stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
+        stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
         TRACE_PRINTF(" -> finally to pc %p\n", pc);
         PUSH(StackVal(rfe.exception));
         PUSH(StackVal(BooleanValue(true)));
-        DISPATCH();
+        goto unwind;
       case ExceptionResumeKind::ForcedReturnBaseline:
         TRACE_PRINTF(" -> forced return\n");
-        stack.popFrame(frameMgr.cxForLocalUseOnly());
-        stack.pop();  // fake return address
-        return PBIResult::Ok;
+        goto unwind_ret;
       case ExceptionResumeKind::ForcedReturnIon:
         MOZ_CRASH(
             "Unexpected ForcedReturnIon exception-resume kind in Portable "
@@ -3761,6 +3779,28 @@ error:
   }
 
   DISPATCH();
+
+unwind:
+  if (reinterpret_cast<uintptr_t>(stack.fp) >
+      reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
+    return PBIResult::Unwind;
+  }
+  DISPATCH();
+unwind_error:
+  if (reinterpret_cast<uintptr_t>(stack.fp) >
+      reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
+    return PBIResult::UnwindError;
+  }
+  return PBIResult::Error;
+unwind_ret:
+  printf("unwind_ret: fp is %p, frame + size is %p\n", stack.fp, frame + 1);
+  fflush(stdout);
+
+  if (reinterpret_cast<uintptr_t>(stack.fp) >
+      reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
+    return PBIResult::UnwindError;
+  }
+  return PBIResult::Ok;
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
@@ -3800,8 +3840,10 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
 
   switch (PortableBaselineInterpret(cx, state, stack, envChain, result)) {
     case PBIResult::Ok:
+    case PBIResult::UnwindRet:
       break;
     case PBIResult::Error:
+    case PBIResult::UnwindError:
       return false;
     case PBIResult::Unwind:
       MOZ_CRASH("Should not unwind out of top / entry frame");
