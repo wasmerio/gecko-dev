@@ -213,7 +213,7 @@ struct Stack {
 
 struct ICRegs {
   CacheIRReader cacheIRReader;
-  static const int kMaxICVals = 64;
+  static const int kMaxICVals = 16;
   uint64_t icVals[kMaxICVals];
   uint64_t icResult;
   int extraArgs;
@@ -1570,10 +1570,11 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
       error:                                                                  \
         return PBIResult::Error;                                              \
       } else {                                                                \
+        static const int kMaxICOps = 16;                                      \
         ICCacheIRStub* cstub = stub->toCacheIRStub();                         \
         cstub->incrementEnteredCount();                                       \
         new (&icregs.cacheIRReader) CacheIRReader(cstub->stubInfo()->code()); \
-        while (true) {                                                        \
+        for (int i = 0; i < kMaxICOps; i++) {                                 \
           switch (ICInterpretOp(frame, frameMgr, state, icregs, stack, cstub, \
                                 pc)) {                                        \
             case ICInterpretOpResult::NextIC:                                 \
@@ -3749,7 +3750,7 @@ error:
         *ret = MagicValue(JS_ION_ERROR);
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
         stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
-        goto unwind_ret;
+        goto unwind_error;
       case ExceptionResumeKind::Catch:
         pc = frame->interpreterPC();
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
@@ -3798,11 +3799,9 @@ unwind_error:
   }
   return PBIResult::Error;
 unwind_ret:
-  fflush(stdout);
-
   if (reinterpret_cast<uintptr_t>(stack.fp) >
       reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
-    return PBIResult::UnwindError;
+    return PBIResult::UnwindRet;
   }
   return PBIResult::Ok;
 }
