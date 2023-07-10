@@ -3798,7 +3798,6 @@ unwind_error:
   }
   return PBIResult::Error;
 unwind_ret:
-  printf("unwind_ret: fp is %p, frame + size is %p\n", stack.fp, frame + 1);
   fflush(stdout);
 
   if (reinterpret_cast<uintptr_t>(stack.fp) >
