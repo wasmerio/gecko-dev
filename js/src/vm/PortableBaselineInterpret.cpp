@@ -318,13 +318,19 @@ static EnvironmentObject& getEnvironmentFromCoordinate(
   return env->as<EnvironmentObject>();
 }
 
-static bool PortableBaselineInterpret(JSContext* cx_, State& state,
-                                      Stack& stack, JSObject* envChain,
-                                      Value* ret);
+enum class PBIResult {
+  Ok,
+  Error,
+  Unwind,
+};
 
-#define TRY(x)    \
-  if (!(x)) {     \
-    return false; \
+static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
+                                           Stack& stack, JSObject* envChain,
+                                           Value* ret);
+
+#define TRY(x)               \
+  if (!(x)) {                \
+    return PBIResult::Error; \
   }
 
 #define PUSH(val) TRY(stack.push(val));
@@ -340,6 +346,7 @@ enum class ICInterpretOpResult {
   Ok,
   Return,
   Error,
+  Unwind,
 };
 
 #define PUSH_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
@@ -1222,10 +1229,15 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
           }
           icregs.icResult = args[0].asRawBits();
         } else {
-          if (!PortableBaselineInterpret(
-                  cx, state, stack, /* envChain = */ nullptr,
-                  reinterpret_cast<Value*>(&icregs.icResult))) {
-            return ICInterpretOpResult::Error;
+          switch (PortableBaselineInterpret(
+              cx, state, stack, /* envChain = */ nullptr,
+              reinterpret_cast<Value*>(&icregs.icResult))) {
+            case PBIResult::Ok:
+              break;
+            case PBIResult::Error:
+              return ICInterpretOpResult::Error;
+            case PBIResult::Unwind:
+              return ICInterpretOpResult::Unwind;
           }
         }
       }
@@ -1473,10 +1485,15 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
 
 #define NEXT_IC() frame->interpreterICEntry()++;
 
-#define INVOKE_IC(kind)                                       \
-  if (!IC##kind(frame, frameMgr, state, icregs, stack, pc)) { \
-    goto error;                                               \
-  }                                                           \
+#define INVOKE_IC(kind)                                          \
+  switch (IC##kind(frame, frameMgr, state, icregs, stack, pc)) { \
+    case PBIResult::Ok:                                          \
+      break;                                                     \
+    case PBIResult::Error:                                       \
+      goto error;                                                \
+    case PBIResult::Unwind:                                      \
+      return PBIResult::Unwind;                                  \
+  }                                                              \
   NEXT_IC();
 
 #define SAVE_INPUTS(arity)            \
@@ -1520,7 +1537,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
   } while (0)
 
 #define DEFINE_IC(kind, arity, fallback_body)                                 \
-  static bool MOZ_ALWAYS_INLINE IC##kind(                                     \
+  static PBIResult MOZ_ALWAYS_INLINE IC##kind(                                \
       BaselineFrame* frame, VMFrameManager& frameMgr, State& state,           \
       ICRegs& icregs, Stack& stack, jsbytecode* pc) {                         \
     ICStub* stub = frame->interpreterICEntry()->firstStub();                  \
@@ -1532,9 +1549,9 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
         ICFallbackStub* fallback = stub->toFallbackStub();                    \
         fallback_body;                                                        \
         icregs.icResult = state.res.asRawBits();                              \
-        return true;                                                          \
+        return PBIResult::Ok;                                                 \
       error:                                                                  \
-        return false;                                                         \
+        return PBIResult::Error;                                              \
       } else {                                                                \
         ICCacheIRStub* cstub = stub->toCacheIRStub();                         \
         cstub->incrementEnteredCount();                                       \
@@ -1549,9 +1566,11 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
             case ICInterpretOpResult::Ok:                                     \
               continue;                                                       \
             case ICInterpretOpResult::Return:                                 \
-              return true;                                                    \
+              return PBIResult::Ok;                                           \
             case ICInterpretOpResult::Error:                                  \
-              return false;                                                   \
+              return PBIResult::Error;                                        \
+            case ICInterpretOpResult::Unwind:                                 \
+              return PBIResult::Unwind;                                       \
           }                                                                   \
         }                                                                     \
       }                                                                       \
@@ -1563,7 +1582,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
 #define IC_LOAD_OBJ(state_elem, index) \
   state.state_elem = reinterpret_cast<JSObject*>(icregs.icVals[(index)]);
 
-#define PUSH_FALLBACK_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(false);
+#define PUSH_FALLBACK_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(PBIResult::Error);
 
 DEFINE_IC(Typeof, 1, {
   IC_LOAD_VAL(value0, 0);
@@ -1817,7 +1836,7 @@ DEFINE_IC(CloseIter, 1, {
   }
 });
 
-#define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(false)
+#define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(PBIResult::Error)
 
 #define LABEL(op) (&&label_##op)
 #define CASE(op) label_##op:
@@ -1838,9 +1857,9 @@ DEFINE_IC(CloseIter, 1, {
   icregs.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
 #define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
 
-static bool PortableBaselineInterpret(JSContext* cx_, State& state,
-                                      Stack& stack, JSObject* envChain,
-                                      Value* ret) {
+static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
+                                           Stack& stack, JSObject* envChain,
+                                           Value* ret) {
 #define OPCODE_LABEL(op, ...) LABEL(op),
 #define TRAILING_LABEL(v) LABEL(default),
 
@@ -1853,7 +1872,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
 
   AutoCheckRecursionLimit recursion(cx_);
   if (!recursion.check(cx_)) {
-    return false;
+    return PBIResult::Error;
   }
 
   TRY(stack.pushFrame(cx_, envChain));
@@ -1883,7 +1902,6 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
   }
 
   while (true) {
-  dispatch :
 #ifdef TRACE_INTERP
   {
     JSOp op = JSOp(*pc);
@@ -2991,7 +3009,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
       *ret = stack[0].asValue();
       stack.popFrame(frameMgr.cxForLocalUseOnly());
       stack.pop();  // fake return address
-      return true;
+      return PBIResult::Ok;
     }
 
     CASE(Await)
@@ -3008,7 +3026,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
       *ret = stack[0].asValue();
       stack.popFrame(frameMgr.cxForLocalUseOnly());
       stack.pop();  // fake return address
-      return true;
+      return PBIResult::Ok;
     }
 
     CASE(FinalYieldRval) {
@@ -3022,7 +3040,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
       }
       stack.popFrame(frameMgr.cxForLocalUseOnly());
       stack.pop();  // fake return address
-      return true;
+      return PBIResult::Ok;
     }
 
     CASE(IsGenClosing) {
@@ -3204,7 +3222,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
       *ret = stack.pop().asValue();
       stack.popFrame(frameMgr.cxForLocalUseOnly());
       stack.pop();  // fake return address
-      return true;
+      return PBIResult::Ok;
     }
 
     CASE(GetRval) {
@@ -3220,7 +3238,7 @@ static bool PortableBaselineInterpret(JSContext* cx_, State& state,
     CASE(RetRval) {
       stack.popFrame(frameMgr.cxForLocalUseOnly());
       stack.pop();  // fake return address
-      return true;
+      return PBIResult::Ok;
     }
 
     CASE(CheckReturn) {
@@ -3710,7 +3728,7 @@ error:
         *ret = MagicValue(JS_ION_ERROR);
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
-        return false;
+        return PBIResult::Error;
       case ExceptionResumeKind::Catch:
         pc = frame->interpreterPC();
         TRACE_PRINTF(" -> catch to pc %p\n", pc);
@@ -3725,7 +3743,7 @@ error:
         TRACE_PRINTF(" -> forced return\n");
         stack.popFrame(frameMgr.cxForLocalUseOnly());
         stack.pop();  // fake return address
-        return true;
+        return PBIResult::Ok;
       case ExceptionResumeKind::ForcedReturnIon:
         MOZ_CRASH(
             "Unexpected ForcedReturnIon exception-resume kind in Portable "
@@ -3765,15 +3783,28 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
     argc++;
   }
   for (size_t i = 0; i < argc; i++) {
-    PUSH(StackVal(argv[argc - 1 - i]));
+    if (!stack.push(StackVal(argv[argc - 1 - i]))) {
+      return false;
+    }
   }
-  PUSH(StackVal(calleeToken));
-  PUSH(StackVal(
-      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
-  PUSH(StackVal(nullptr));  // Fake return address.
-
-  if (!PortableBaselineInterpret(cx, state, stack, envChain, result)) {
+  if (!stack.push(StackVal(calleeToken))) {
     return false;
+  }
+  if (!stack.push(StackVal(MakeFrameDescriptorForJitCall(FrameType::CppToJSJit,
+                                                         numActualArgs)))) {
+    return false;
+  }
+  if (!stack.push(StackVal(nullptr))) {  // Fake return address.
+    return false;
+  }
+
+  switch (PortableBaselineInterpret(cx, state, stack, envChain, result)) {
+    case PBIResult::Ok:
+      break;
+    case PBIResult::Error:
+      return false;
+    case PBIResult::Unwind:
+      MOZ_CRASH("Should not unwind out of top / entry frame");
   }
 
   // Pop the descriptor, calleeToken, and args. (Return address is
