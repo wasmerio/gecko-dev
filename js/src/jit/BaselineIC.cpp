@@ -449,9 +449,11 @@ static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
 }
 
 void ICCacheIRStub::trace(JSTracer* trc) {
-  JitCode* stubJitCode = jitCode();
-  if (stubJitCode) {
-    TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
+  if (hasJitCode()) {
+    JitCode* stubJitCode = jitCode();
+    if (stubJitCode) {
+      TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
+    }
   }
 
   TraceCacheIRStub(trc, this, stubInfo());
@@ -899,7 +901,8 @@ bool DoSetElemFallback(JSContext* cx, BaselineFrame* frame,
   }
 
   if (stack) {
-    // Overwrite the object on the stack (pushed for the decompiler) with the rhs.
+    // Overwrite the object on the stack (pushed for the decompiler) with the
+    // rhs.
     MOZ_ASSERT(stack[2] == objv);
     stack[2] = rhs;
   }
@@ -1651,11 +1654,11 @@ bool DoCallFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
     if ((op == JSOp::CallIter || op == JSOp::CallContentIter) &&
         callee.isPrimitive()) {
       MOZ_ASSERT(argc == 0, "thisv must be on top of the stack");
-//#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+      //#ifndef ENABLE_PORTABLE_BASELINE_INTERP
       int spindex = -1;
-//#else
-//      int spindex = JSDVG_IGNORE_STACK;
-//#endif
+      //#else
+      //      int spindex = JSDVG_IGNORE_STACK;
+      //#endif
       ReportValueError(cx, JSMSG_NOT_ITERABLE, spindex, callArgs.thisv(),
                        nullptr);
       return false;
@@ -1988,11 +1991,11 @@ bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
   FallbackICSpew(cx, stub, "InstanceOf");
 
   if (!rhs.isObject()) {
-//#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+    //#ifndef ENABLE_PORTABLE_BASELINE_INTERP
     int spindex = -1;
-//#else
-//    int spindex = JSDVG_IGNORE_STACK;
-//#endif
+    //#else
+    //    int spindex = JSDVG_IGNORE_STACK;
+    //#endif
     ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, spindex, rhs, nullptr);
     return false;
   }
