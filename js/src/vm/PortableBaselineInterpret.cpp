@@ -3744,7 +3744,7 @@ error:
         *ret = MagicValue(JS_ION_ERROR);
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
         stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
-        goto unwind_error;
+        goto unwind_ret;
       case ExceptionResumeKind::Catch:
         pc = frame->interpreterPC();
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
