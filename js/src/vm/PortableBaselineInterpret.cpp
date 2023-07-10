@@ -1153,6 +1153,11 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
         ignoresRv = icregs.cacheIRReader.readBool();
       }
 
+      // Fail if there is no JitScript.
+      if (!callee->hasBaseScript() || !callee->baseScript()->hasJitScript()) {
+        return ICInterpretOpResult::NextIC;
+      }
+
       // For now, fail any constructing or different-realm cases.
       if (flags.isConstructing() || !flags.isSameRealm()) {
         TRACE_PRINTF("failing: constructing or not same realm\n");

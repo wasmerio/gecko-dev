@@ -449,10 +449,10 @@ static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
 }
 
 void ICCacheIRStub::trace(JSTracer* trc) {
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
   JitCode* stubJitCode = jitCode();
-  TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
-#endif
+  if (stubJitCode) {
+    TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
+  }
 
   TraceCacheIRStub(trc, this, stubInfo());
 }
@@ -898,11 +898,11 @@ bool DoSetElemFallback(JSContext* cx, BaselineFrame* frame,
     }
   }
 
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-  // Overwrite the object on the stack (pushed for the decompiler) with the rhs.
-  MOZ_ASSERT(stack[2] == objv);
-  stack[2] = rhs;
-#endif
+  if (stack) {
+    // Overwrite the object on the stack (pushed for the decompiler) with the rhs.
+    MOZ_ASSERT(stack[2] == objv);
+    stack[2] = rhs;
+  }
 
   if (attached) {
     return true;
@@ -1475,11 +1475,11 @@ bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
     }
   }
 
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-  // Overwrite the LHS on the stack (pushed for the decompiler) with the RHS.
-  MOZ_ASSERT(stack[1] == lhs);
-  stack[1] = rhs;
-#endif
+  if (stack) {
+    // Overwrite the LHS on the stack (pushed for the decompiler) with the RHS.
+    MOZ_ASSERT(stack[1] == lhs);
+    stack[1] = rhs;
+  }
 
   if (attached) {
     return true;
@@ -1651,11 +1651,11 @@ bool DoCallFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
     if ((op == JSOp::CallIter || op == JSOp::CallContentIter) &&
         callee.isPrimitive()) {
       MOZ_ASSERT(argc == 0, "thisv must be on top of the stack");
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+//#ifndef ENABLE_PORTABLE_BASELINE_INTERP
       int spindex = -1;
-#else
-      int spindex = JSDVG_IGNORE_STACK;
-#endif
+//#else
+//      int spindex = JSDVG_IGNORE_STACK;
+//#endif
       ReportValueError(cx, JSMSG_NOT_ITERABLE, spindex, callArgs.thisv(),
                        nullptr);
       return false;
@@ -1988,11 +1988,11 @@ bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
   FallbackICSpew(cx, stub, "InstanceOf");
 
   if (!rhs.isObject()) {
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+//#ifndef ENABLE_PORTABLE_BASELINE_INTERP
     int spindex = -1;
-#else
-    int spindex = JSDVG_IGNORE_STACK;
-#endif
+//#else
+//    int spindex = JSDVG_IGNORE_STACK;
+//#endif
     ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, spindex, rhs, nullptr);
     return false;
   }
