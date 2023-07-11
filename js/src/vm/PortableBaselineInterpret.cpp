@@ -2378,7 +2378,7 @@ dispatch:
     CASE(IsNullOrUndefined) {
       bool result =
           stack[0].asValue().isNull() || stack[0].asValue().isUndefined();
-      stack[0] = StackVal(BooleanValue(result));
+      PUSH(StackVal(BooleanValue(result)));
       END_OP(IsNullOrUndefined);
     }
 
