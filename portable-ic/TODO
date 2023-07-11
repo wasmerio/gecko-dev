@@ -22,3 +22,7 @@
   - memory-rename the stack and icVals too
 
 - OSR (on-stack replacement)
+
+- on wasm and other 32-bit platforms: make StackVal properly push
+  32-bit values? stick to 64-bit layout for BaselineFrame,
+  JitFrameLayout, etc?
