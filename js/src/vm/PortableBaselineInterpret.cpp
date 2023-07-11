@@ -1199,7 +1199,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
           return ICInterpretOpResult::Error;
         }
         if (!stack.push(StackVal(MakeFrameDescriptorForJitCall(
-                FrameType::BaselineStub, totalArgs)))) {
+                FrameType::BaselineStub, argc)))) {
           return ICInterpretOpResult::Error;
         }
         if (!stack.push(StackVal(nullptr))) {  // fake return address.
