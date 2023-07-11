@@ -901,14 +901,27 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOp(
 
     INT32_OP(Add, +, {});
     INT32_OP(Sub, -, {});
-    INT32_OP(Mul, *, {});
+    INT32_OP(Mul, *, {
+      if (rhs * lhs == 0 && ((rhs < 0) ^ (lhs < 0))) {
+        return ICInterpretOpResult::NextIC;
+      }
+    });
     INT32_OP(Div, /, {
-      if (rhs == 0) {
+      if (rhs == 0 || (lhs == INT32_MIN && rhs == -1)) {
+        return ICInterpretOpResult::NextIC;
+      }
+      if (lhs == 0 && rhs < 0) {
+        return ICInterpretOpResult::NextIC;
+      }
+      if (lhs % rhs != 0) {
         return ICInterpretOpResult::NextIC;
       }
     });
     INT32_OP(Mod, %, {
-      if (rhs == 0) {
+      if (rhs == 0 || (lhs == INT32_MIN && rhs == -1)) {
+        return ICInterpretOpResult::NextIC;
+      }
+      if (lhs % rhs == 0 && lhs < 0) {
         return ICInterpretOpResult::NextIC;
       }
     });
