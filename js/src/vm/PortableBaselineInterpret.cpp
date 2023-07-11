@@ -2470,9 +2470,13 @@ dispatch:
       static_assert(JSOpLength_InitElem == JSOpLength_InitElemInc);
       static_assert(JSOpLength_InitElem == JSOpLength_SetElem);
       static_assert(JSOpLength_InitElem == JSOpLength_StrictSetElem);
+      StackVal val = stack[0];
       IC_POP_ARG(2);
       IC_POP_ARG(1);
       IC_SET_ARG_FROM_STACK(0, 0);
+      if (JSOp(*pc) == JSOp::SetElem || JSOp(*pc) == JSOp::StrictSetElem) {
+        stack[0] = val;
+      }
       INVOKE_IC(SetElem);
       if (JSOp(*pc) == JSOp::InitElemInc) {
         PUSH(StackVal(
