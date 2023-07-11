@@ -1862,7 +1862,11 @@ DEFINE_IC(CloseIter, 1, {
 
 #define LABEL(op) (&&label_##op)
 #define CASE(op) label_##op:
-#define DISPATCH() goto* addresses[*pc]
+#ifndef TRACE_INTERP
+#  define DISPATCH() goto* addresses[*pc]
+#else
+#  define DISPATCH() goto dispatch
+#endif
 
 #define ADVANCE(delta) pc += (delta);
 #define ADVANCE_AND_DISPATCH(delta) \
@@ -1904,8 +1908,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   RootedScript script(cx_, frame->script());
   jsbytecode* pc = frame->interpreterPC();
 
-  uint32_t nslots = script->nslots();
-  for (uint32_t i = 0; i < nslots; i++) {
+  uint32_t nfixed = script->nfixed();
+  for (uint32_t i = 0; i < nfixed; i++) {
     TRY(stack.push(StackVal(UndefinedValue())));
   }
   ret->setUndefined();
@@ -1923,6 +1927,15 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
   }
 
+  TRACE_PRINTF("Entering: sp = %p fp = %p frame = %p, script = %p, pc = %p\n",
+               stack.sp, stack.fp, frame, script.get(), pc);
+  TRACE_PRINTF("nslots = %d nfixed = %d\n", int(script->nslots()),
+               int(script->nfixed()));
+
+#ifdef TRACE_INTERP
+dispatch:
+#endif
+
   while (true) {
 #ifdef TRACE_INTERP
     {
@@ -1935,12 +1948,13 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
              (int)(frame->interpreterICEntry() -
                    script->jitScript()->icScript()->icEntries()),
              frameMgr.cxForLocalUseOnly()->isExceptionPending());
+      printf("sp = %p fp = %p\n", stack.sp, stack.fp);
       printf("TOS tag: %d\n", int(stack[0].asValue().asRawBits() >> 47));
       fflush(stdout);
     }
 #endif
 
-    DISPATCH();
+    goto* addresses[*pc];
 
     CASE(Nop) { END_OP(Nop); }
     CASE(Undefined) {

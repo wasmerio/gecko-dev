@@ -474,11 +474,11 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
         // Resume at the start of the catch block.
         frame.baselineFrame()->setInterpreterFields(*pc);
         rfe->kind = ExceptionResumeKind::Catch;
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-        const BaselineInterpreter& interp =
-          cx->runtime()->jitRuntime()->baselineInterpreter();
-        rfe->target = interp.interpretOpAddr().value;
-#endif
+        if (IsBaselineInterpreterEnabled()) {
+          const BaselineInterpreter& interp =
+              cx->runtime()->jitRuntime()->baselineInterpreter();
+          rfe->target = interp.interpretOpAddr().value;
+        }
         return true;
       }
 
@@ -487,11 +487,11 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
 
         frame.baselineFrame()->setInterpreterFields(*pc);
         rfe->kind = ExceptionResumeKind::Finally;
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-        const BaselineInterpreter& interp =
-          cx->runtime()->jitRuntime()->baselineInterpreter();
-        rfe->target = interp.interpretOpAddr().value;
-#endif
+        if (IsBaselineInterpreterEnabled()) {
+          const BaselineInterpreter& interp =
+              cx->runtime()->jitRuntime()->baselineInterpreter();
+          rfe->target = interp.interpretOpAddr().value;
+        }
 
         // Drop the exception instead of leaking cross compartment data.
         if (!cx->getPendingException(
@@ -671,9 +671,9 @@ void HandleException(ResumeFromException* rfe) {
   JSContext* cx = TlsContext.get();
 
 #ifdef DEBUG
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-  cx->runtime()->jitRuntime()->clearDisallowArbitraryCode();
-#endif
+  if (IsBaselineInterpreterEnabled()) {
+    cx->runtime()->jitRuntime()->clearDisallowArbitraryCode();
+  }
 
   // Reset the counter when we bailed after MDebugEnterGCUnsafeRegion, but
   // before the matching MDebugLeaveGCUnsafeRegion.
@@ -683,12 +683,12 @@ void HandleException(ResumeFromException* rfe) {
 #endif
 
   auto resetProfilerFrame = mozilla::MakeScopeExit([=] {
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-    if (!cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
-            cx->runtime())) {
-      return;
+    if (IsBaselineInterpreterEnabled()) {
+      if (!cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+              cx->runtime())) {
+        return;
+      }
     }
-#endif
 
     MOZ_ASSERT(cx->jitActivation == cx->profilingActivation());
 
