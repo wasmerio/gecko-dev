@@ -549,7 +549,6 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
       return ICInterpretOpResult::NextIC;
     }
-    PREDICT_NEXT(LoadObject);
     DISPATCH_CACHEOP();
   }
 
