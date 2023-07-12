@@ -416,6 +416,8 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icVals[inputId.id()] = reinterpret_cast<uint64_t>(&v.toObject());
+    PREDICT_NEXT(GuardShape);
+    PREDICT_NEXT(GuardSpecificFunction);
     DISPATCH_CACHEOP();
   }
 
@@ -426,6 +428,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toString());
+    PREDICT_NEXT(GuardToString);
     DISPATCH_CACHEOP();
   }
 
@@ -436,6 +439,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icVals[inputId.id()] = reinterpret_cast<uint64_t>(v.toSymbol());
+    PREDICT_NEXT(GuardSpecificSymbol);
     DISPATCH_CACHEOP();
   }
 
@@ -542,6 +546,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
       return ICInterpretOpResult::NextIC;
     }
+    PREDICT_NEXT(LoadObject);
     DISPATCH_CACHEOP();
   }
 
@@ -580,6 +585,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     if (expected != icregs.icVals[funId.id()]) {
       return ICInterpretOpResult::NextIC;
     }
+    PREDICT_NEXT(LoadArgumentFixedSlot);
     DISPATCH_CACHEOP();
   }
 
@@ -708,6 +714,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         reinterpret_cast<uintptr_t>(nobj) + offset);
     Value val = Value::fromRawBits(icregs.icVals[valId.id()]);
     slot->set(val);
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -723,6 +730,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     size_t dynSlot = offset / sizeof(Value);
     size_t slot = dynSlot + nobj->numFixedSlots();
     slots[dynSlot].set(nobj, HeapSlot::Slot, slot, val);
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -732,6 +740,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     intptr_t obj = cstub->stubInfo()->getStubRawWord(cstub, objOffset);
     BOUNDSCHECK(objId);
     icregs.icVals[objId.id()] = obj;
+    PREDICT_NEXT(GuardShape);
     DISPATCH_CACHEOP();
   }
 
@@ -743,18 +752,21 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     (void)receiverObjId;
     BOUNDSCHECK(objId);
     icregs.icVals[objId.id()] = obj;
+    PREDICT_NEXT(GuardShape);
     DISPATCH_CACHEOP();
   }
 
   CACHEOP_CASE(LoadOperandResult) {
     ValOperandId valId = icregs.cacheIRReader.valOperandId();
     icregs.icResult = icregs.icVals[valId.id()];
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
   CACHEOP_CASE(LoadValueResult) {
     uint32_t valOffset = icregs.cacheIRReader.stubOffset();
     icregs.icResult = cstub->stubInfo()->getStubRawInt64(cstub, valOffset);
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -763,6 +775,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     icregs.icResult =
         ObjectValue(*reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]))
             .asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -779,6 +792,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     JSString* str = reinterpret_cast<JSString*>(
         cstub->stubInfo()->getStubRawWord(cstub, offset));
     icregs.icResult = StringValue(str).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -796,12 +810,14 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     icregs.icResult =
         SymbolValue(reinterpret_cast<JS::Symbol*>(icregs.icVals[symbolId.id()]))
             .asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
   CACHEOP_CASE(LoadInt32Result) {
     Int32OperandId intId = icregs.cacheIRReader.int32OperandId();
     icregs.icResult = Int32Value(icregs.icVals[intId.id()]).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -810,6 +826,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     icregs.icResult =
         BigIntValue(reinterpret_cast<JS::BigInt*>(icregs.icVals[bigintId.id()]))
             .asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -820,11 +837,13 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       val = DoubleValue(val.toInt32());
     }
     icregs.icResult = val.asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
   CACHEOP_CASE(LoadBooleanResult) {
     icregs.icResult = BooleanValue(icregs.cacheIRReader.readBool()).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -841,6 +860,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         "slot %" PRIx64 "\n",
         nobj, int(offsetOffset), int(offset), slot, slot->asRawBits());
     icregs.icResult = slot->asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -852,6 +872,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         reinterpret_cast<NativeObject*>(icregs.icVals[objId.id()]);
     HeapSlot* slots = nobj->getSlotsUnchecked();
     icregs.icResult = slots[offset / sizeof(Value)].get().asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -890,6 +911,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     TRACE_PRINTF(" -> slot %d: val %" PRIx64 "\n", int(slotIndex),
                  val.asRawBits());
     icregs.icVals[resultId.id()] = val.asRawBits();
+    PREDICT_NEXT(LoadArgumentFixedSlot);
     DISPATCH_CACHEOP();
   }
 
@@ -905,6 +927,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;                         \
     }                                                             \
     icregs.icResult = Int32Value(int32_t(result)).asRawBits();    \
+    PREDICT_NEXT(ReturnFromIC);                                   \
     DISPATCH_CACHEOP();                                           \
   }
 
@@ -950,6 +973,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icResult = Int32Value(int32_t(value)).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -987,6 +1011,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         MOZ_CRASH("Unexpected opcode");
     }
     icregs.icResult = BooleanValue(result).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1007,6 +1032,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     ValOperandId valId = icregs.cacheIRReader.valOperandId();
     Value val = Value::fromRawBits(icregs.icVals[valId.id()]);
     icregs.icResult = BooleanValue(val.isObject()).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1063,6 +1089,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       }
       icregs.icResult = BooleanValue(result).asRawBits();
     }
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1097,6 +1124,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         MOZ_CRASH("bad opcode");
     }
     icregs.icResult = BooleanValue(result).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1108,6 +1136,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icResult = BooleanValue(!cls->emulatesUndefined()).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1155,6 +1184,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
 
+    PREDICT_NEXT(CallScriptedFunction);
     DISPATCH_CACHEOP();
   }
 
@@ -1323,6 +1353,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     } else {
       return ICInterpretOpResult::NextIC;
     }
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1351,6 +1382,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icResult = Int32Value(length).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1362,6 +1394,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icResult = Int32Value(length).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1398,6 +1431,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       }
     }
     icregs.icResult = StringValue(result).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1425,6 +1459,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       result = Int32Value(c);
     }
     icregs.icResult = result.asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1447,6 +1482,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       }
       icregs.icVals[resultId.id()] = reinterpret_cast<uintptr_t>(result);
     }
+    PREDICT_NEXT(LoadStringCharResult);
     DISPATCH_CACHEOP();
   }
 
@@ -1455,6 +1491,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     JSString* str =
         reinterpret_cast<JSLinearString*>(icregs.icVals[strId.id()]);
     icregs.icResult = BooleanValue(str->length() > 0).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1462,6 +1499,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     ValOperandId valId = icregs.cacheIRReader.valOperandId();
     int32_t val = int32_t(icregs.icVals[valId.id()]);
     icregs.icResult = BooleanValue(val != 0).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1481,6 +1519,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       return ICInterpretOpResult::NextIC;
     }
     icregs.icResult = val.asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
@@ -1501,6 +1540,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     }
     Value val = Value::fromRawBits(icregs.icVals[valId.id()]);
     slot->set(nobj, HeapSlot::Element, index, val);
+    PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
 
