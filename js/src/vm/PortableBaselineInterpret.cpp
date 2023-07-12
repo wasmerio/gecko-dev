@@ -932,7 +932,6 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     TRACE_PRINTF(" -> slot %d: val %" PRIx64 "\n", int(slotIndex),
                  val.asRawBits());
     icregs.icVals[resultId.id()] = val.asRawBits();
-    PREDICT_NEXT(LoadArgumentFixedSlot);
     DISPATCH_CACHEOP();
   }
 
