@@ -1206,9 +1206,11 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       ignoresRv = icregs.cacheIRReader.readBool();
     }
 
-    // Fail if there is no JitScript.
-    if (!callee->hasBaseScript() || !callee->baseScript()->hasJitScript()) {
-      return ICInterpretOpResult::NextIC;
+    if (!isNative) {
+      if (!callee->hasBaseScript() || !callee->baseScript()->hasBytecode() ||
+          !callee->baseScript()->hasJitScript()) {
+        return ICInterpretOpResult::NextIC;
+      }
     }
 
     // For now, fail any constructing or different-realm cases.
