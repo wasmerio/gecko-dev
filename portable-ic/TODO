@@ -1,9 +1,5 @@
 - implement await/resume
 
-- implement direct-dispatch interp for CacheOps (and goto-based control flow
-  for NextIC / error / next-op / done)
-  - may require #define of entire body
-
 - pass all jit-tests
   - work out issue with EnvironmentIter::settle and assertions on GC (try a
     debug build running markdown.js)
