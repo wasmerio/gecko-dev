@@ -2244,7 +2244,7 @@ DEFINE_IC(CloseIter, 1, {
 #define IC_SET_VAL_ARG(index, expr) icregs.icVals[(index)] = (expr).asRawBits();
 #define IC_SET_OBJ_ARG(index, expr) \
   icregs.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
-#define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
+#define IC_PUSH_RESULT() PUSH_UNCHECKED(StackVal(icregs.icResult));
 
 #define PREDICT_NEXT(op) \
   if (JSOp(*pc) == JSOp::op) goto label_##op;
