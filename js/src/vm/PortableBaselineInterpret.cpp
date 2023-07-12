@@ -82,12 +82,33 @@ struct Stack {
   StackVal* fp;
   StackVal* base;
   StackVal* top;
+  Stack* parentStack;
 
   Stack(PortableBaselineStack& pbs)
       : sp(reinterpret_cast<StackVal*>(pbs.top)),
         fp(sp),
         base(reinterpret_cast<StackVal*>(pbs.base)),
-        top(reinterpret_cast<StackVal*>(pbs.top)) {}
+        top(reinterpret_cast<StackVal*>(pbs.top)),
+        parentStack(nullptr) {}
+
+  Stack(Stack& other) {
+    *this = other;
+    parentStack = &other;
+  }
+
+  ~Stack() {
+    if (parentStack) {
+      *parentStack = *this;
+    }
+  }
+
+  Stack& operator=(const Stack& other) {
+    sp = other.sp;
+    fp = other.fp;
+    base = other.base;
+    top = other.top;
+    return *this;
+  }
 
   inline bool check(size_t size) {
     return reinterpret_cast<uintptr_t>(base) + size <=
@@ -328,7 +349,7 @@ enum class PBIResult {
 };
 
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
-                                           Stack& stack, JSObject* envChain,
+                                           Stack& parentStack, JSObject* envChain,
                                            Value* ret);
 
 #define TRY(x)               \
@@ -2231,7 +2252,7 @@ DEFINE_IC(CloseIter, 1, {
   if (JSOp(*pc) == JSOp::op) goto label_##op;
 
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
-                                           Stack& stack, JSObject* envChain,
+                                           Stack& parentStack, JSObject* envChain,
                                            Value* ret) {
 #define OPCODE_LABEL(op, ...) LABEL(op),
 #define TRAILING_LABEL(v) LABEL(default),
@@ -2247,6 +2268,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   if (!recursion.check(cx_)) {
     return PBIResult::Error;
   }
+
+  Stack stack(parentStack);
 
   TRY(stack.pushFrame(cx_, envChain));
 
