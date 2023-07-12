@@ -2452,13 +2452,20 @@ dispatch:
       IC_PUSH_RESULT();
       END_OP(Pos);
     }
+
     CASE(Not) {
-      IC_POP_ARG(0);
-      INVOKE_IC(ToBool);
-      PUSH(StackVal(
-          BooleanValue(!Value::fromRawBits(icregs.icResult).toBoolean())));
+      if (stack[0].asValue().isBoolean()) {
+        stack[0] = StackVal(BooleanValue(!stack[0].asValue().toBoolean()));
+        NEXT_IC();
+      } else {
+        IC_POP_ARG(0);
+        INVOKE_IC(ToBool);
+        PUSH(StackVal(
+            BooleanValue(!Value::fromRawBits(icregs.icResult).toBoolean())));
+      }
       END_OP(Not);
     }
+
     CASE(And) {
       bool result;
       if (stack[0].asValue().isBoolean()) {
