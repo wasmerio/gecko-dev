@@ -89,9 +89,9 @@ struct Stack {
         base(reinterpret_cast<StackVal*>(pbs.base)),
         top(reinterpret_cast<StackVal*>(pbs.top)) {}
 
-  bool check(size_t size) {
+  inline bool check(size_t size) {
     return reinterpret_cast<uintptr_t>(base) + size <=
-      reinterpret_cast<uintptr_t>(sp);
+           reinterpret_cast<uintptr_t>(sp);
   }
 
   [[nodiscard]] StackVal* allocate(size_t size) {
@@ -109,9 +109,7 @@ struct Stack {
     *--sp = v;
     return true;
   }
-  void pushUnchecked(StackVal v) {
-    *--sp = v;
-  }
+  void pushUnchecked(StackVal v) { *--sp = v; }
   StackVal pop() {
     MOZ_ASSERT(sp + 1 <= top);
     MOZ_ASSERT(sp < fp);
@@ -183,22 +181,18 @@ struct Stack {
     MOZ_ASSERT(reinterpret_cast<StackVal*>(prevFP) == fp);
     setFrameSize(prevFrame);
 
-    if (!push(StackVal(
-            MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)))) {
+    if (!check(sizeof(StackVal) * 4)) {
       return nullptr;
     }
-    if (!push(StackVal(nullptr))) {  // fake return address.
-      return nullptr;
-    }
-    if (!push(StackVal(prevFP))) {
-      return nullptr;
-    }
+
+    pushUnchecked(
+        StackVal(MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)));
+    pushUnchecked(StackVal(nullptr));  // fake return address.
+    pushUnchecked(StackVal(prevFP));
     StackVal* exitFP = cur();
     fp = exitFP;
     TRACE_PRINTF(" -> fp = %p\n", fp);
-    if (!push(StackVal(uint64_t(ExitFrameType::Bare)))) {
-      return nullptr;
-    }
+    pushUnchecked(StackVal(uint64_t(ExitFrameType::Bare)));
     return exitFP;
   }
 
@@ -1249,41 +1243,33 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
       // replace the ExitFrameType with the ICStub pointer.
       stack[0] = StackVal(cstub);
 
+      if (!stack.check(sizeof(StackVal) * (totalArgs + 6))) {
+        return ICInterpretOpResult::Error;
+      }
+
       // Push args.
       for (uint32_t i = 0; i < totalArgs; i++) {
-        if (!stack.push(origArgs[i])) {
-          return ICInterpretOpResult::Error;
-        }
+        stack.pushUnchecked(origArgs[i]);
       }
       Value* args = reinterpret_cast<Value*>(stack.cur());
 
       TRACE_PRINTF("pushing callee: %p\n", callee);
-      if (!stack.push(
-              StackVal(CalleeToToken(callee, /* isConstructing = */ false)))) {
-        return ICInterpretOpResult::Error;
-      }
-      if (!stack.push(StackVal(
-              MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)))) {
-        return ICInterpretOpResult::Error;
-      }
-      if (!stack.push(StackVal(nullptr))) {  // fake return address.
-        return ICInterpretOpResult::Error;
-      }
+      stack.pushUnchecked(
+          StackVal(CalleeToToken(callee, /* isConstructing = */ false)));
+      stack.pushUnchecked(StackVal(
+          MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
+      stack.pushUnchecked(StackVal(nullptr));  // fake return address.
 
       if (isNative) {
         // We *also* need an exit frame (the native baseline
         // execution would invoke a trampoline here).
         StackVal* trampolinePrevFP = stack.fp;
-        if (!stack.push(StackVal(stack.fp))) {
-          return ICInterpretOpResult::Error;
-        }
+        stack.pushUnchecked(StackVal(stack.fp));
         stack.fp = stack.cur();
         if (!stack.push(StackVal(uint64_t(ExitFrameType::Bare)))) {
           return ICInterpretOpResult::Error;
         }
-        if (!stack.push(StackVal(nullptr))) {  // fake return address.
-          return ICInterpretOpResult::Error;
-        }
+        stack.pushUnchecked(StackVal(nullptr));  // fake return address.
         cx.getCx()->activation()->asJit()->setJSExitFP(
             reinterpret_cast<uint8_t*>(stack.fp));
         cx.getCx()->portableBaselineStack().top =
@@ -2281,7 +2267,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
   uint32_t nfixed = script->nfixed();
   for (uint32_t i = 0; i < nfixed; i++) {
-    TRY(stack.push(StackVal(UndefinedValue())));
+    stack.pushUnchecked(StackVal(UndefinedValue()));
   }
   ret->setUndefined();
 
@@ -2746,9 +2732,9 @@ dispatch:
 
     CASE(GlobalThis) {
       PUSH_UNCHECKED(StackVal(ObjectValue(*frameMgr.cxForLocalUseOnly()
-                                     ->global()
-                                     ->lexicalEnvironment()
-                                     .thisObject())));
+                                               ->global()
+                                               ->lexicalEnvironment()
+                                               .thisObject())));
       END_OP(GlobalThis);
     }
 
@@ -4199,21 +4185,18 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   if (CalleeTokenIsConstructing(calleeToken)) {
     argc++;
   }
+
+  if (!stack.check(sizeof(StackVal) * (argc + 3))) {
+    return false;
+  }
+
   for (size_t i = 0; i < argc; i++) {
-    if (!stack.push(StackVal(argv[argc - 1 - i]))) {
-      return false;
-    }
+    stack.pushUnchecked(StackVal(argv[argc - 1 - i]));
   }
-  if (!stack.push(StackVal(calleeToken))) {
-    return false;
-  }
-  if (!stack.push(StackVal(MakeFrameDescriptorForJitCall(FrameType::CppToJSJit,
-                                                         numActualArgs)))) {
-    return false;
-  }
-  if (!stack.push(StackVal(nullptr))) {  // Fake return address.
-    return false;
-  }
+  stack.pushUnchecked(StackVal(calleeToken));
+  stack.pushUnchecked(StackVal(
+      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
+  stack.pushUnchecked(StackVal(nullptr));  // Fake return address.
 
   switch (PortableBaselineInterpret(cx, state, stack, envChain, result)) {
     case PBIResult::Ok:
