@@ -336,8 +336,6 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     return PBIResult::Error; \
   }
 
-#define PUSH(val) TRY(stack.push(val))
-
 #define PUSH_UNCHECKED(val) stack.pushUnchecked(val)
 
 #define PUSH_EXIT_FRAME_OR_RET(value) \
@@ -1265,9 +1263,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         StackVal* trampolinePrevFP = stack.fp;
         stack.pushUnchecked(StackVal(stack.fp));
         stack.fp = stack.cur();
-        if (!stack.push(StackVal(uint64_t(ExitFrameType::Bare)))) {
-          return ICInterpretOpResult::Error;
-        }
+        stack.pushUnchecked(StackVal(uint64_t(ExitFrameType::Bare)));
         stack.pushUnchecked(StackVal(nullptr));  // fake return address.
         cx.getCx()->activation()->asJit()->setJSExitFP(
             reinterpret_cast<uint8_t*>(stack.fp));
