@@ -109,6 +109,9 @@ struct Stack {
     *--sp = v;
     return true;
   }
+  void pushUnchecked(StackVal v) {
+    *--sp = v;
+  }
   StackVal pop() {
     MOZ_ASSERT(sp + 1 <= top);
     MOZ_ASSERT(sp < fp);
@@ -341,7 +344,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
 #define PUSH(val) TRY(stack.push(val))
 
-#define PUSH_UNCHECKED(val) (void)stack.push(val)
+#define PUSH_UNCHECKED(val) stack.pushUnchecked(val)
 
 #define PUSH_EXIT_FRAME_OR_RET(value) \
   VMFrame cx(frameMgr, stack, pc);    \
