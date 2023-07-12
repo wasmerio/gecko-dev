@@ -349,8 +349,8 @@ enum class PBIResult {
 };
 
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
-                                           Stack& parentStack, JSObject* envChain,
-                                           Value* ret);
+                                           Stack& parentStack,
+                                           JSObject* envChain, Value* ret);
 
 #define TRY(x)               \
   if (!(x)) {                \
@@ -2251,8 +2251,8 @@ DEFINE_IC(CloseIter, 1, {
   if (JSOp(*pc) == JSOp::op) goto label_##op;
 
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
-                                           Stack& parentStack, JSObject* envChain,
-                                           Value* ret) {
+                                           Stack& parentStack,
+                                           JSObject* envChain, Value* ret) {
 #define OPCODE_LABEL(op, ...) LABEL(op),
 #define TRAILING_LABEL(v) LABEL(default),
 
