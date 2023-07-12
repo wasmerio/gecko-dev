@@ -2710,16 +2710,23 @@ dispatch:
     }
 
     CASE(ToString) {
-      state.value0 = stack.pop().asValue();
-      JSString* result;
-      {
-        PUSH_EXIT_FRAME();
-        result = ToString<CanGC>(cx, state.value0);
-        if (!result) {
-          goto error;
-        }
+      if (stack[0].asValue().isString()) {
+        END_OP(ToString);
       }
-      PUSH_UNCHECKED(StackVal(StringValue(result)));
+      FakeRooted s(nullptr, stack[0].asValue());
+      if (JSString* result = ToStringSlow<NoGC>(nullptr, s)) {
+        stack[0] = StackVal(StringValue(result));
+      } else {
+        state.value0 = stack.pop().asValue();
+        {
+          PUSH_EXIT_FRAME();
+          result = ToString<CanGC>(cx, state.value0);
+          if (!result) {
+            goto error;
+          }
+        }
+        PUSH_UNCHECKED(StackVal(StringValue(result)));
+      }
       END_OP(ToString);
     }
 
