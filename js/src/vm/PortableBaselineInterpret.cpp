@@ -369,20 +369,18 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
 #undef OP
   };
 
-#define DISPATCH_CACHEOP()                                                \
-  if (++numOps == ICRegs::kMaxICVals) return ICInterpretOpResult::NextIC; \
-  cacheop = icregs.cacheIRReader.readOp();                                \
+#define DISPATCH_CACHEOP()                 \
+  cacheop = icregs.cacheIRReader.readOp(); \
   goto* addresses[long(cacheop)];
+
+#define BOUNDSCHECK(resultId) \
+  if (resultId.id() >= ICRegs::kMaxICVals) return ICInterpretOpResult::NextIC;
 
 #define PREDICT_NEXT(name)                              \
   if (icregs.cacheIRReader.peekOp() == CacheOp::name) { \
     icregs.cacheIRReader.readOp();                      \
     goto cacheop_##name;                                \
   }
-
-  // Run at most as many ops as we have storage slots for results;
-  // that ensures we don't overrun the array.
-  uint32_t numOps = 0;
 
   CacheOp cacheop;
 
@@ -564,6 +562,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
   CACHEOP_CASE(LoadProto) {
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     ObjOperandId resultId = icregs.cacheIRReader.objOperandId();
+    BOUNDSCHECK(resultId);
     NativeObject* nobj =
         reinterpret_cast<NativeObject*>(icregs.icVals[objId.id()]);
     icregs.icVals[resultId.id()] =
@@ -731,6 +730,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     uint32_t objOffset = icregs.cacheIRReader.stubOffset();
     intptr_t obj = cstub->stubInfo()->getStubRawWord(cstub, objOffset);
+    BOUNDSCHECK(objId);
     icregs.icVals[objId.id()] = obj;
     DISPATCH_CACHEOP();
   }
@@ -741,6 +741,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     intptr_t obj = cstub->stubInfo()->getStubRawWord(cstub, objOffset);
     ObjOperandId receiverObjId = icregs.cacheIRReader.objOperandId();
     (void)receiverObjId;
+    BOUNDSCHECK(objId);
     icregs.icVals[objId.id()] = obj;
     DISPATCH_CACHEOP();
   }
@@ -785,6 +786,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     uint32_t valueOffset = icregs.cacheIRReader.stubOffset();
     Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
     uint32_t value = cstub->stubInfo()->getStubRawInt32(cstub, valueOffset);
+    BOUNDSCHECK(resultId);
     icregs.icVals[resultId.id()] = value;
     DISPATCH_CACHEOP();
   }
@@ -871,6 +873,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
 
   CACHEOP_CASE(LoadArgumentDynamicSlot) {
     ValOperandId resultId = icregs.cacheIRReader.valOperandId();
+    BOUNDSCHECK(resultId);
     Int32OperandId argcId = icregs.cacheIRReader.int32OperandId();
     uint8_t slotIndex = icregs.cacheIRReader.readByte();
     int32_t argc = int32_t(icregs.icVals[argcId.id()]);
@@ -881,6 +884,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
 
   CACHEOP_CASE(LoadArgumentFixedSlot) {
     ValOperandId resultId = icregs.cacheIRReader.valOperandId();
+    BOUNDSCHECK(resultId);
     uint8_t slotIndex = icregs.cacheIRReader.readByte();
     Value val = stack[slotIndex].asValue();
     TRACE_PRINTF(" -> slot %d: val %" PRIx64 "\n", int(slotIndex),
@@ -991,6 +995,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     Int32OperandId lhsId = icregs.cacheIRReader.int32OperandId();
     Int32OperandId rhsId = icregs.cacheIRReader.int32OperandId();
     Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    BOUNDSCHECK(resultId);
     int32_t lhs = int32_t(icregs.icVals[lhsId.id()]);
     int32_t rhs = int32_t(icregs.icVals[rhsId.id()]);
     int32_t result = ((lhs > rhs) ^ isMax) ? rhs : lhs;
@@ -1109,6 +1114,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
   CACHEOP_CASE(GuardToInt32Index) {
     ValOperandId valId = icregs.cacheIRReader.valOperandId();
     Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    BOUNDSCHECK(resultId);
     Value val = Value::fromRawBits(icregs.icVals[valId.id()]);
     if (val.isInt32()) {
       icregs.icVals[resultId.id()] = val.toInt32();
@@ -1289,6 +1295,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
   CACHEOP_CASE(CallInt32ToString) {
     Int32OperandId inputId = icregs.cacheIRReader.int32OperandId();
     StringOperandId resultId = icregs.cacheIRReader.stringOperandId();
+    BOUNDSCHECK(resultId);
     int32_t input = int32_t(icregs.icVals[inputId.id()]);
     JSLinearString* str =
         Int32ToStringPure(frameMgr.cxForLocalUseOnly(), input);
@@ -1322,6 +1329,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
   CACHEOP_CASE(LoadInt32ArrayLength) {
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    BOUNDSCHECK(resultId);
     NativeObject* nobj =
         reinterpret_cast<NativeObject*>(icregs.icVals[objId.id()]);
     ObjectElements* elems = nobj->getElementsHeader();
@@ -1424,6 +1432,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     StringOperandId strId = icregs.cacheIRReader.stringOperandId();
     Int32OperandId indexId = icregs.cacheIRReader.int32OperandId();
     StringOperandId resultId = icregs.cacheIRReader.stringOperandId();
+    BOUNDSCHECK(resultId);
     JSString* str =
         reinterpret_cast<JSLinearString*>(icregs.icVals[strId.id()]);
     (void)indexId;
