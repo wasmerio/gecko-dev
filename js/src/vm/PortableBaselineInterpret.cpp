@@ -1849,6 +1849,8 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     // printf("unknown CacheOp: %s\n", CacheIROpNames[int(op)]);
     return ICInterpretOpResult::NextIC;
   }
+
+#undef PREDICT_NEXT
 }
 
 #define NEXT_IC() frame->interpreterICEntry()++;
@@ -2233,6 +2235,9 @@ DEFINE_IC(CloseIter, 1, {
   icregs.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
 #define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
 
+#define PREDICT_NEXT(op) \
+  if (JSOp(*pc) == JSOp::op) goto label_##op;
+
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
                                            Stack& stack, JSObject* envChain,
                                            Value* ret) {
@@ -2464,12 +2469,8 @@ dispatch:
       uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (!result) {
         ADVANCE(jumpOffset);
-        if (JSOp(*pc) == JSOp::JumpTarget) {
-          goto jsop_JumpTarget;
-        }
-        if (JSOp(*pc) == JSOp::LoopHead) {
-          goto jsop_LoopHead;
-        }
+        PREDICT_NEXT(JumpTarget);
+        PREDICT_NEXT(LoopHead);
       } else {
         ADVANCE(JSOpLength_And);
       }
@@ -2487,12 +2488,8 @@ dispatch:
       uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (result) {
         ADVANCE(jumpOffset);
-        if (JSOp(*pc) == JSOp::JumpTarget) {
-          goto jsop_JumpTarget;
-        }
-        if (JSOp(*pc) == JSOp::LoopHead) {
-          goto jsop_LoopHead;
-        }
+        PREDICT_NEXT(JumpTarget);
+        PREDICT_NEXT(LoopHead);
       } else {
         ADVANCE(JSOpLength_Or);
       }
@@ -2510,12 +2507,8 @@ dispatch:
       uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (result) {
         ADVANCE(jumpOffset);
-        if (JSOp(*pc) == JSOp::JumpTarget) {
-          goto jsop_JumpTarget;
-        }
-        if (JSOp(*pc) == JSOp::LoopHead) {
-          goto jsop_LoopHead;
-        }
+        PREDICT_NEXT(JumpTarget);
+        PREDICT_NEXT(LoopHead);
       } else {
         ADVANCE(JSOpLength_JumpIfTrue);
       }
@@ -2533,12 +2526,8 @@ dispatch:
       uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (!result) {
         ADVANCE(jumpOffset);
-        if (JSOp(*pc) == JSOp::JumpTarget) {
-          goto jsop_JumpTarget;
-        }
-        if (JSOp(*pc) == JSOp::LoopHead) {
-          goto jsop_LoopHead;
-        }
+        PREDICT_NEXT(JumpTarget);
+        PREDICT_NEXT(LoopHead);
       } else {
         ADVANCE(JSOpLength_JumpIfFalse);
       }
@@ -3530,13 +3519,11 @@ dispatch:
       END_OP(Resume);
     }
 
-  jsop_JumpTarget:
     CASE(JumpTarget) {
       int32_t icIndex = GET_INT32(pc);
       frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
       END_OP(JumpTarget);
     }
-  jsop_LoopHead:
     CASE(LoopHead) {
       int32_t icIndex = GET_INT32(pc);
       frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
@@ -3550,12 +3537,8 @@ dispatch:
 
     CASE(Goto) {
       ADVANCE(GET_JUMP_OFFSET(pc));
-      if (JSOp(*pc) == JSOp::JumpTarget) {
-        goto jsop_JumpTarget;
-      }
-      if (JSOp(*pc) == JSOp::LoopHead) {
-        goto jsop_LoopHead;
-      }
+      PREDICT_NEXT(JumpTarget);
+      PREDICT_NEXT(LoopHead);
       DISPATCH();
     }
 
