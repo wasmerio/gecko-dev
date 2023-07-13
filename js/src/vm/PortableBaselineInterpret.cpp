@@ -63,6 +63,8 @@
 using namespace js;
 using namespace js::jit;
 
+static const bool kHybridICs = true;
+
 struct StackVal {
   uint64_t value;
 
@@ -2368,7 +2370,7 @@ dispatch:
     CASE(Typeof)
     CASE(TypeofExpr) {
       static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
-      if (JitOptions.pblHybrid) {
+      if (kHybridICs) {
         sp[0] = StackVal(StringValue(TypeOfOperation(
             Stack::handle(sp), frameMgr.cxForLocalUseOnly()->runtime())));
         NEXT_IC();
@@ -2448,7 +2450,7 @@ dispatch:
     }
 
     CASE(Not) {
-      if (JitOptions.pblHybrid) {
+      if (kHybridICs) {
         sp[0] = StackVal(BooleanValue(!ToBoolean(Stack::handle(sp))));
         NEXT_IC();
       } else {
@@ -2462,7 +2464,7 @@ dispatch:
 
     CASE(And) {
       bool result;
-      if (JitOptions.pblHybrid) {
+      if (kHybridICs) {
         result = ToBoolean(Stack::handle(sp));
         NEXT_IC();
       } else {
@@ -2482,7 +2484,7 @@ dispatch:
     }
     CASE(Or) {
       bool result;
-      if (JitOptions.pblHybrid) {
+      if (kHybridICs) {
         result = ToBoolean(Stack::handle(sp));
         NEXT_IC();
       } else {
@@ -2502,7 +2504,7 @@ dispatch:
     }
     CASE(JumpIfTrue) {
       bool result;
-      if (JitOptions.pblHybrid) {
+      if (kHybridICs) {
         result = ToBoolean(Stack::handle(sp));
         POP();
         NEXT_IC();
@@ -2523,7 +2525,7 @@ dispatch:
     }
     CASE(JumpIfFalse) {
       bool result;
-      if (JitOptions.pblHybrid) {
+      if (kHybridICs) {
         result = ToBoolean(Stack::handle(sp));
         POP();
         NEXT_IC();
@@ -2553,8 +2555,22 @@ dispatch:
           NEXT_IC();
           END_OP(Add);
         }
+      } else if (kHybridICs) {
+        MutableHandleValue lhs = Stack::handleMut(sp + 1);
+        MutableHandleValue rhs = Stack::handleMut(sp);
+        MutableHandleValue result = Stack::handleMut(sp + 1);
+        {
+          PUSH_EXIT_FRAME();
+          if (!AddOperation(cx, lhs, rhs, result)) {
+            goto error;
+          }
+        }
+        POP();
+        NEXT_IC();
+        END_OP(Add);
+      } else {
+        goto generic_binary;
       }
-      goto generic_binary;
     }
 
     CASE(Sub) {
@@ -2665,7 +2681,7 @@ dispatch:
 
     CASE(StrictEq)
     CASE(StrictNe) {
-      if (JitOptions.pblHybrid) {
+      if (kHybridICs) {
         bool result;
         HandleValue lval = Stack::handle(sp + 1);
         HandleValue rval = Stack::handle(sp);

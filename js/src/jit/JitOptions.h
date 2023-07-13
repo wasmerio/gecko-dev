@@ -64,7 +64,6 @@ struct DefaultJitOptions {
   bool disableRedundantGCBarriers;
   bool disableBailoutLoopCheck;
   bool portableBaselineInterpreter;
-  bool pblHybrid;
   bool baselineInterpreter;
   bool baselineJit;
   bool ion;
