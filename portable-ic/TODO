@@ -1,5 +1,11 @@
 - implement await/resume
 
+- PBL-hybrid for all "slower than baseline" ops
+  - unary, binary ops
+  - GetElem/SetElem? Or at least fastpaths
+
+- Cached sp, cx
+
 - pass all jit-tests
   - work out issue with EnvironmentIter::settle and assertions on GC (try a
     debug build running markdown.js)
