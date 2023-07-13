@@ -231,6 +231,15 @@ struct Stack {
   }
 
   StackVal& operator[](size_t index) { return sp[index]; }
+
+  HandleValue handle(size_t index) {
+    return HandleValue::fromMarkedLocation(
+        reinterpret_cast<Value*>(&sp[index]));
+  }
+  MutableHandleValue handleMut(size_t index) {
+    return MutableHandleValue::fromMarkedLocation(
+        reinterpret_cast<Value*>(&sp[index]));
+  }
 };
 
 struct ICRegs {
@@ -2471,8 +2480,8 @@ dispatch:
     }
 
     CASE(Not) {
-      if (stack[0].asValue().isBoolean()) {
-        stack[0] = StackVal(BooleanValue(!stack[0].asValue().toBoolean()));
+      if (JitOptions.pblHybrid) {
+        stack[0] = StackVal(BooleanValue(!ToBoolean(stack.handle(0))));
         NEXT_IC();
       } else {
         IC_POP_ARG(0);
@@ -2485,8 +2494,9 @@ dispatch:
 
     CASE(And) {
       bool result;
-      if (stack[0].asValue().isBoolean()) {
-        result = stack[0].asValue().toBoolean();
+      if (JitOptions.pblHybrid) {
+        result = ToBoolean(stack.handle(0));
+        NEXT_IC();
       } else {
         IC_SET_ARG_FROM_STACK(0, 0);
         INVOKE_IC(ToBool);
@@ -2504,8 +2514,9 @@ dispatch:
     }
     CASE(Or) {
       bool result;
-      if (stack[0].asValue().isBoolean()) {
-        result = stack[0].asValue().toBoolean();
+      if (JitOptions.pblHybrid) {
+        result = ToBoolean(stack.handle(0));
+        NEXT_IC();
       } else {
         IC_SET_ARG_FROM_STACK(0, 0);
         INVOKE_IC(ToBool);
@@ -2523,8 +2534,10 @@ dispatch:
     }
     CASE(JumpIfTrue) {
       bool result;
-      if (stack[0].asValue().isBoolean()) {
-        result = stack.pop().asValue().toBoolean();
+      if (JitOptions.pblHybrid) {
+        result = ToBoolean(stack.handle(0));
+        stack.pop();
+        NEXT_IC();
       } else {
         IC_POP_ARG(0);
         INVOKE_IC(ToBool);
@@ -2542,8 +2555,10 @@ dispatch:
     }
     CASE(JumpIfFalse) {
       bool result;
-      if (stack[0].asValue().isBoolean()) {
-        result = stack.pop().asValue().toBoolean();
+      if (JitOptions.pblHybrid) {
+        result = ToBoolean(stack.handle(0));
+        stack.pop();
+        NEXT_IC();
       } else {
         IC_POP_ARG(0);
         INVOKE_IC(ToBool);
