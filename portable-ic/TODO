@@ -4,7 +4,10 @@
   - unary, binary ops
   - GetElem/SetElem? Or at least fastpaths
 
-- Cached sp, cx
+- same-C++-frame call/ret for scripted->scripted
+  - keep a "depth counter"; on Ret, do inline ret and goto dispatch if
+    JS frames within this native frame remain
+  - factor out the frame push/pop from IC
 
 - pass all jit-tests
   - work out issue with EnvironmentIter::settle and assertions on GC (try a
