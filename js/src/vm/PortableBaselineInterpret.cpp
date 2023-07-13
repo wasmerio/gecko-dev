@@ -2583,8 +2583,22 @@ dispatch:
           NEXT_IC();
           END_OP(Sub);
         }
+      } else if (kHybridICs) {
+        MutableHandleValue lhs = Stack::handleMut(sp + 1);
+        MutableHandleValue rhs = Stack::handleMut(sp);
+        MutableHandleValue result = Stack::handleMut(sp + 1);
+        {
+          PUSH_EXIT_FRAME();
+          if (!SubOperation(cx, lhs, rhs, result)) {
+            goto error;
+          }
+        }
+        POP();
+        NEXT_IC();
+        END_OP(Sub);
+      } else {
+        goto generic_binary;
       }
-      goto generic_binary;
     }
 
   generic_binary:
