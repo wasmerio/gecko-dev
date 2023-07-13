@@ -30,6 +30,7 @@
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/EqualityOperations.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -2406,9 +2407,15 @@ dispatch:
     CASE(Typeof)
     CASE(TypeofExpr) {
       static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
-      IC_POP_ARG(0);
-      INVOKE_IC(Typeof);
-      IC_PUSH_RESULT();
+      if (JitOptions.pblHybrid) {
+        stack[0] = StackVal(StringValue(TypeOfOperation(
+            stack.handle(0), frameMgr.cxForLocalUseOnly()->runtime())));
+        NEXT_IC();
+      } else {
+        IC_POP_ARG(0);
+        INVOKE_IC(Typeof);
+        IC_PUSH_RESULT();
+      }
       END_OP(Typeof);
     }
 
@@ -2701,22 +2708,46 @@ dispatch:
       goto generic_cmp;
     }
 
-  generic_cmp:
     CASE(StrictEq)
     CASE(StrictNe) {
-      static_assert(JSOpLength_Eq == JSOpLength_Ne);
-      static_assert(JSOpLength_Eq == JSOpLength_StrictEq);
-      static_assert(JSOpLength_Eq == JSOpLength_StrictNe);
-      static_assert(JSOpLength_Eq == JSOpLength_Lt);
-      static_assert(JSOpLength_Eq == JSOpLength_Gt);
-      static_assert(JSOpLength_Eq == JSOpLength_Le);
-      static_assert(JSOpLength_Eq == JSOpLength_Ge);
-      IC_POP_ARG(1);
-      IC_POP_ARG(0);
-      INVOKE_IC(Compare);
-      IC_PUSH_RESULT();
-      END_OP(Eq);
+      if (JitOptions.pblHybrid) {
+        bool result;
+        HandleValue lval = stack.handle(1);
+        HandleValue rval = stack.handle(0);
+        if (stack[0].asValue().isString() && stack[1].asValue().isString()) {
+          PUSH_EXIT_FRAME();
+          if (!js::StrictlyEqual(cx, lval, rval, &result)) {
+            goto error;
+          }
+        } else {
+          if (!js::StrictlyEqual(nullptr, lval, rval, &result)) {
+            goto error;
+          }
+        }
+        stack.pop();
+        stack[0] = StackVal(
+            BooleanValue((JSOp(*pc) == JSOp::StrictEq) ? result : !result));
+        NEXT_IC();
+        END_OP(StrictEq);
+      } else {
+        goto generic_cmp;
+      }
     }
+
+  generic_cmp : {
+    static_assert(JSOpLength_Eq == JSOpLength_Ne);
+    static_assert(JSOpLength_Eq == JSOpLength_StrictEq);
+    static_assert(JSOpLength_Eq == JSOpLength_StrictNe);
+    static_assert(JSOpLength_Eq == JSOpLength_Lt);
+    static_assert(JSOpLength_Eq == JSOpLength_Gt);
+    static_assert(JSOpLength_Eq == JSOpLength_Le);
+    static_assert(JSOpLength_Eq == JSOpLength_Ge);
+    IC_POP_ARG(1);
+    IC_POP_ARG(0);
+    INVOKE_IC(Compare);
+    IC_PUSH_RESULT();
+    END_OP(Eq);
+  }
 
     CASE(Instanceof) {
       IC_POP_ARG(1);
