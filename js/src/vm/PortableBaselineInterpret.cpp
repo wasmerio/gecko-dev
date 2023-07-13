@@ -78,88 +78,53 @@ struct StackVal {
   }
 };
 
+#define PUSH(val) *--sp = val
+#define POP() (*sp++)
+#define POPN(n) sp += (n)
+
 struct Stack {
-  StackVal* sp;
   StackVal* fp;
   StackVal* base;
   StackVal* top;
-  Stack* parentStack;
+  StackVal* unwindingSP;
 
   Stack(PortableBaselineStack& pbs)
-      : sp(reinterpret_cast<StackVal*>(pbs.top)),
-        fp(sp),
+      : fp(reinterpret_cast<StackVal*>(pbs.top)),
         base(reinterpret_cast<StackVal*>(pbs.base)),
         top(reinterpret_cast<StackVal*>(pbs.top)),
-        parentStack(nullptr) {}
+        unwindingSP(nullptr) {}
 
-  Stack(Stack& other) {
-    *this = other;
-    parentStack = &other;
-  }
-
-  ~Stack() {
-    if (parentStack) {
-      *parentStack = *this;
-    }
-  }
-
-  Stack& operator=(const Stack& other) {
-    sp = other.sp;
-    fp = other.fp;
-    base = other.base;
-    top = other.top;
-    return *this;
-  }
-
-  inline bool check(size_t size) {
+  MOZ_ALWAYS_INLINE bool check(StackVal* sp, size_t size) {
     return reinterpret_cast<uintptr_t>(base) + size <=
            reinterpret_cast<uintptr_t>(sp);
   }
 
-  [[nodiscard]] StackVal* allocate(size_t size) {
-    if (!check(size)) {
+  [[nodiscard]] MOZ_ALWAYS_INLINE StackVal* allocate(StackVal* sp,
+                                                     size_t size) {
+    if (!check(sp, size)) {
       return nullptr;
     }
     sp = reinterpret_cast<StackVal*>(reinterpret_cast<uintptr_t>(sp) - size);
     return sp;
   }
 
-  [[nodiscard]] bool push(StackVal v) {
-    if (sp == base) {
-      return false;
-    }
-    *--sp = v;
-    return true;
-  }
-  void pushUnchecked(StackVal v) { *--sp = v; }
-  StackVal pop() {
-    MOZ_ASSERT(sp + 1 <= top);
-    MOZ_ASSERT(sp < fp);
-    return *sp++;
-  }
-  void popn(size_t len) {
-    MOZ_ASSERT(sp + len <= top);
-    sp += len;
-    MOZ_ASSERT(sp <= fp);
+  uint32_t frameSize(StackVal* sp, BaselineFrame* curFrame) const {
+    return sizeof(StackVal) * (reinterpret_cast<StackVal*>(fp) - sp);
   }
 
-  StackVal* cur() const { return sp; }
-  void restore(StackVal* s) { sp = s; }
-
-  uint32_t frameSize(BaselineFrame* curFrame) const {
-    return sizeof(StackVal) * (reinterpret_cast<StackVal*>(fp) - cur());
-  }
-
-  [[nodiscard]] BaselineFrame* pushFrame(JSContext* cx, JSObject* envChain) {
+  [[nodiscard]] MOZ_ALWAYS_INLINE BaselineFrame* pushFrame(StackVal* sp,
+                                                           JSContext* cx,
+                                                           JSObject* envChain) {
     TRACE_PRINTF("pushFrame: sp = %p fp = %p\n", sp, fp);
-    if (!push(StackVal(fp))) {
+    if (sp == base) {
       return nullptr;
     }
-    fp = cur();
+    PUSH(StackVal(fp));
+    fp = sp;
     TRACE_PRINTF("pushFrame: new fp = %p\n", fp);
 
     BaselineFrame* frame =
-        reinterpret_cast<BaselineFrame*>(allocate(BaselineFrame::Size()));
+        reinterpret_cast<BaselineFrame*>(allocate(sp, BaselineFrame::Size()));
     if (!frame) {
       return nullptr;
     }
@@ -175,53 +140,52 @@ struct Stack {
     return frame;
   }
 
-  void popFrame(JSContext* cx) {
+  StackVal* popFrame(StackVal* sp, JSContext* cx) {
     StackVal* newTOS = fp + 1;
     fp = reinterpret_cast<StackVal*>(fp->asVoidPtr());
     MOZ_ASSERT(fp);
     TRACE_PRINTF("popFrame: fp = %p\n", fp);
-    restore(newTOS);
+    return newTOS;
   }
 
-  void setFrameSize(BaselineFrame* prevFrame) {
+  void setFrameSize(StackVal* sp, BaselineFrame* prevFrame) {
 #ifdef DEBUG
     MOZ_ASSERT(fp != nullptr);
     uintptr_t frameSize =
-        reinterpret_cast<uintptr_t>(fp) - reinterpret_cast<uintptr_t>(cur());
+        reinterpret_cast<uintptr_t>(fp) - reinterpret_cast<uintptr_t>(sp);
     MOZ_ASSERT(reinterpret_cast<uintptr_t>(fp) >=
-               reinterpret_cast<uintptr_t>(cur()));
+               reinterpret_cast<uintptr_t>(sp));
     TRACE_PRINTF("pushExitFrame: fp = %p cur() = %p -> frameSize = %d\n", fp,
-                 cur(), int(frameSize));
+                 sp, int(frameSize));
     MOZ_ASSERT(frameSize >= BaselineFrame::Size());
     prevFrame->setDebugFrameSize(frameSize);
 #endif
   }
 
-  [[nodiscard]] StackVal* pushExitFrame(BaselineFrame* prevFrame) {
+  [[nodiscard]] MOZ_ALWAYS_INLINE StackVal* pushExitFrame(
+      StackVal* sp, BaselineFrame* prevFrame) {
     uint8_t* prevFP =
         reinterpret_cast<uint8_t*>(prevFrame) + BaselineFrame::Size();
     MOZ_ASSERT(reinterpret_cast<StackVal*>(prevFP) == fp);
-    setFrameSize(prevFrame);
+    setFrameSize(sp, prevFrame);
 
-    if (!check(sizeof(StackVal) * 4)) {
+    if (!check(sp, sizeof(StackVal) * 4)) {
       return nullptr;
     }
 
-    pushUnchecked(
-        StackVal(MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)));
-    pushUnchecked(StackVal(nullptr));  // fake return address.
-    pushUnchecked(StackVal(prevFP));
-    StackVal* exitFP = cur();
+    PUSH(StackVal(MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)));
+    PUSH(StackVal(nullptr));  // fake return address.
+    PUSH(StackVal(prevFP));
+    StackVal* exitFP = sp;
     fp = exitFP;
     TRACE_PRINTF(" -> fp = %p\n", fp);
-    pushUnchecked(StackVal(uint64_t(ExitFrameType::Bare)));
+    PUSH(StackVal(uint64_t(ExitFrameType::Bare)));
     return exitFP;
   }
 
   void popExitFrame(StackVal* fp) {
     StackVal* prevFP = reinterpret_cast<StackVal*>(fp->asVoidPtr());
     MOZ_ASSERT(prevFP);
-    restore(fp + 3);
     this->fp = prevFP;
     TRACE_PRINTF("popExitFrame: fp -> %p sp -> %p\n", fp, sp);
   }
@@ -231,15 +195,11 @@ struct Stack {
                                             BaselineFrame::Size());
   }
 
-  StackVal& operator[](size_t index) { return sp[index]; }
-
-  HandleValue handle(size_t index) {
-    return HandleValue::fromMarkedLocation(
-        reinterpret_cast<Value*>(&sp[index]));
+  static HandleValue handle(StackVal* sp) {
+    return HandleValue::fromMarkedLocation(reinterpret_cast<Value*>(sp));
   }
-  MutableHandleValue handleMut(size_t index) {
-    return MutableHandleValue::fromMarkedLocation(
-        reinterpret_cast<Value*>(&sp[index]));
+  static MutableHandleValue handleMut(StackVal* sp) {
+    return MutableHandleValue::fromMarkedLocation(reinterpret_cast<Value*>(sp));
   }
 };
 
@@ -318,17 +278,19 @@ class VMFrame {
   void* prevSavedStack;
 
  public:
-  VMFrame(VMFrameManager& mgr, Stack& stack_, jsbytecode* pc)
+  VMFrame(VMFrameManager& mgr, Stack& stack_, StackVal* sp, jsbytecode* pc)
       : cx(mgr.cx), stack(stack_) {
     mgr.frame->interpreterPC() = pc;
-    exitFP = stack.pushExitFrame(mgr.frame);
+    exitFP = stack.pushExitFrame(sp, mgr.frame);
     if (!exitFP) {
       return;
     }
     cx->activation()->asJit()->setJSExitFP(reinterpret_cast<uint8_t*>(exitFP));
     prevSavedStack = cx->portableBaselineStack().top;
-    cx->portableBaselineStack().top = reinterpret_cast<void*>(stack.sp);
+    cx->portableBaselineStack().top = reinterpret_cast<void*>(spBelowFrame());
   }
+
+  StackVal* spBelowFrame() { return exitFP - 1; }
 
   ~VMFrame() {
     stack.popExitFrame(exitFP);
@@ -359,7 +321,7 @@ enum class PBIResult {
 };
 
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
-                                           Stack& parentStack,
+                                           Stack& stack, StackVal* sp,
                                            JSObject* envChain, Value* ret);
 
 #define TRY(x)               \
@@ -367,13 +329,13 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     return PBIResult::Error; \
   }
 
-#define PUSH_UNCHECKED(val) stack.pushUnchecked(val)
-
-#define PUSH_EXIT_FRAME_OR_RET(value) \
-  VMFrame cx(frameMgr, stack, pc);    \
-  if (!cx.success()) {                \
-    return value;                     \
-  }
+#define PUSH_EXIT_FRAME_OR_RET(value)                           \
+  VMFrame cx(frameMgr, stack, sp, pc);                          \
+  if (!cx.success()) {                                          \
+    return value;                                               \
+  }                                                             \
+  StackVal* sp = cx.spBelowFrame(); /* shadow the definition */ \
+  (void)sp;                         /* avoid unused-variable warnings */
 
 enum class ICInterpretOpResult {
   NextIC,
@@ -386,9 +348,10 @@ enum class ICInterpretOpResult {
 
 #define PUSH_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(ICInterpretOpResult::Error);
 
-static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
-    BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
-    ICRegs& icregs, Stack& stack, ICCacheIRStub* cstub, jsbytecode* pc) {
+static ICInterpretOpResult MOZ_ALWAYS_INLINE
+ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
+               ICRegs& icregs, Stack& stack, StackVal* sp, ICCacheIRStub* cstub,
+               jsbytecode* pc) {
 #define CACHEOP_CASE(name)                                                   \
   cacheop_##name                                                             \
       : TRACE_PRINTF("cacheop (frame %p pc %p stub %p): " #name "\n", frame, \
@@ -929,7 +892,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     Int32OperandId argcId = icregs.cacheIRReader.int32OperandId();
     uint8_t slotIndex = icregs.cacheIRReader.readByte();
     int32_t argc = int32_t(icregs.icVals[argcId.id()]);
-    Value val = stack[slotIndex + argc].asValue();
+    Value val = sp[slotIndex + argc].asValue();
     icregs.icVals[resultId.id()] = val.asRawBits();
     DISPATCH_CACHEOP();
   }
@@ -938,7 +901,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
     ValOperandId resultId = icregs.cacheIRReader.valOperandId();
     BOUNDSCHECK(resultId);
     uint8_t slotIndex = icregs.cacheIRReader.readByte();
-    Value val = stack[slotIndex].asValue();
+    Value val = sp[slotIndex].asValue();
     TRACE_PRINTF(" -> slot %d: val %" PRIx64 "\n", int(slotIndex),
                  val.asRawBits());
     icregs.icVals[resultId.id()] = val.asRawBits();
@@ -1262,43 +1225,40 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
 
     uint32_t extra = 1 + flags.isConstructing() + isNative;
     uint32_t totalArgs = argc + extra;
-    StackVal* origArgs = stack.cur();
+    StackVal* origArgs = sp;
 
     {
       PUSH_IC_FRAME();
       // This will not be an Exit frame but a BaselinStub frame, so
       // replace the ExitFrameType with the ICStub pointer.
-      stack[0] = StackVal(cstub);
+      sp[0] = StackVal(cstub);
 
-      if (!stack.check(sizeof(StackVal) * (totalArgs + 6))) {
+      if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 6))) {
         return ICInterpretOpResult::Error;
       }
 
       // Push args.
       for (uint32_t i = 0; i < totalArgs; i++) {
-        stack.pushUnchecked(origArgs[i]);
+        PUSH(origArgs[i]);
       }
-      Value* args = reinterpret_cast<Value*>(stack.cur());
+      Value* args = reinterpret_cast<Value*>(sp);
 
       TRACE_PRINTF("pushing callee: %p\n", callee);
-      stack.pushUnchecked(
-          StackVal(CalleeToToken(callee, /* isConstructing = */ false)));
-      stack.pushUnchecked(StackVal(
+      PUSH(StackVal(CalleeToToken(callee, /* isConstructing = */ false)));
+      PUSH(StackVal(
           MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
-      stack.pushUnchecked(StackVal(nullptr));  // fake return address.
 
       if (isNative) {
         // We *also* need an exit frame (the native baseline
         // execution would invoke a trampoline here).
         StackVal* trampolinePrevFP = stack.fp;
-        stack.pushUnchecked(StackVal(stack.fp));
-        stack.fp = stack.cur();
-        stack.pushUnchecked(StackVal(uint64_t(ExitFrameType::Bare)));
-        stack.pushUnchecked(StackVal(nullptr));  // fake return address.
+        PUSH(StackVal(stack.fp));
+        stack.fp = sp;
+        PUSH(StackVal(uint64_t(ExitFrameType::Bare)));
+        PUSH(StackVal(nullptr));  // fake return address.
         cx.getCx()->activation()->asJit()->setJSExitFP(
             reinterpret_cast<uint8_t*>(stack.fp));
-        cx.getCx()->portableBaselineStack().top =
-            reinterpret_cast<void*>(stack.sp);
+        cx.getCx()->portableBaselineStack().top = reinterpret_cast<void*>(sp);
 
         JSNative native = ignoresRv
                               ? callee->jitInfo()->ignoresReturnValueMethod
@@ -1306,7 +1266,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         bool success = native(cx, argc, args);
 
         stack.fp = trampolinePrevFP;
-        stack.popn(3);
+        POPN(3);
 
         if (!success) {
           return ICInterpretOpResult::Error;
@@ -1314,7 +1274,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         icregs.icResult = args[0].asRawBits();
       } else {
         switch (PortableBaselineInterpret(
-            cx, state, stack, /* envChain = */ nullptr,
+            cx, state, stack, sp, /* envChain = */ nullptr,
             reinterpret_cast<Value*>(&icregs.icResult))) {
           case PBIResult::Ok:
             break;
@@ -1877,19 +1837,19 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
 
 #define NEXT_IC() frame->interpreterICEntry()++;
 
-#define INVOKE_IC(kind)                                          \
-  switch (IC##kind(frame, frameMgr, state, icregs, stack, pc)) { \
-    case PBIResult::Ok:                                          \
-      break;                                                     \
-    case PBIResult::Error:                                       \
-      goto error;                                                \
-    case PBIResult::Unwind:                                      \
-      goto unwind;                                               \
-    case PBIResult::UnwindError:                                 \
-      goto unwind_error;                                         \
-    case PBIResult::UnwindRet:                                   \
-      goto unwind_ret;                                           \
-  }                                                              \
+#define INVOKE_IC(kind)                                              \
+  switch (IC##kind(frame, frameMgr, state, icregs, stack, sp, pc)) { \
+    case PBIResult::Ok:                                              \
+      break;                                                         \
+    case PBIResult::Error:                                           \
+      goto error;                                                    \
+    case PBIResult::Unwind:                                          \
+      goto unwind;                                                   \
+    case PBIResult::UnwindError:                                     \
+      goto unwind_error;                                             \
+    case PBIResult::UnwindRet:                                       \
+      goto unwind_ret;                                               \
+  }                                                                  \
   NEXT_IC();
 
 #define SAVE_INPUTS(arity)            \
@@ -1935,7 +1895,7 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
 #define DEFINE_IC(kind, arity, fallback_body)                                 \
   static PBIResult MOZ_ALWAYS_INLINE IC##kind(                                \
       BaselineFrame* frame, VMFrameManager& frameMgr, State& state,           \
-      ICRegs& icregs, Stack& stack, jsbytecode* pc) {                         \
+      ICRegs& icregs, Stack& stack, StackVal* sp, jsbytecode* pc) {           \
     ICStub* stub = frame->interpreterICEntry()->firstStub();                  \
     uint64_t inputs[3];                                                       \
     SAVE_INPUTS(arity);                                                       \
@@ -1952,8 +1912,8 @@ static ICInterpretOpResult MOZ_ALWAYS_INLINE ICInterpretOps(
         ICCacheIRStub* cstub = stub->toCacheIRStub();                         \
         cstub->incrementEnteredCount();                                       \
         new (&icregs.cacheIRReader) CacheIRReader(cstub->stubInfo()->code()); \
-        switch (ICInterpretOps(frame, frameMgr, state, icregs, stack, cstub,  \
-                               pc)) {                                         \
+        switch (ICInterpretOps(frame, frameMgr, state, icregs, stack, sp,     \
+                               cstub, pc)) {                                  \
           case ICInterpretOpResult::NextIC:                                   \
             stub = stub->maybeNext();                                         \
             RESTORE_INPUTS(arity);                                            \
@@ -2000,7 +1960,7 @@ DEFINE_IC(Call, 1, {
   uint32_t argc = uint32_t(icregs.icVals[0]);
   uint32_t totalArgs =
       argc + icregs.extraArgs;  // this, callee, (cosntructing?), func args
-  Value* args = reinterpret_cast<Value*>(&stack[0]);
+  Value* args = reinterpret_cast<Value*>(&sp[0]);
   TRACE_PRINTF("Call fallback: argc %d totalArgs %d args %p\n", argc, totalArgs,
                args);
   // Reverse values on the stack.
@@ -2250,18 +2210,18 @@ DEFINE_IC(CloseIter, 1, {
 #define END_OP(op) ADVANCE_AND_DISPATCH(JSOpLength_##op);
 
 #define IC_SET_ARG_FROM_STACK(index, stack_index) \
-  icregs.icVals[(index)] = stack[(stack_index)].asUInt64();
-#define IC_POP_ARG(index) icregs.icVals[(index)] = stack.pop().asUInt64();
+  icregs.icVals[(index)] = sp[(stack_index)].asUInt64();
+#define IC_POP_ARG(index) icregs.icVals[(index)] = (*sp++).asUInt64();
 #define IC_SET_VAL_ARG(index, expr) icregs.icVals[(index)] = (expr).asRawBits();
 #define IC_SET_OBJ_ARG(index, expr) \
   icregs.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
-#define IC_PUSH_RESULT() PUSH_UNCHECKED(StackVal(icregs.icResult));
+#define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
 
 #define PREDICT_NEXT(op) \
   if (JSOp(*pc) == JSOp::op) goto label_##op;
 
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
-                                           Stack& parentStack,
+                                           Stack& stack, StackVal* sp,
                                            JSObject* envChain, Value* ret) {
 #define OPCODE_LABEL(op, ...) LABEL(op),
 #define TRAILING_LABEL(v) LABEL(default),
@@ -2278,23 +2238,25 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     return PBIResult::Error;
   }
 
-  Stack stack(parentStack);
-
-  TRY(stack.pushFrame(cx_, envChain));
+  PUSH(StackVal(nullptr));  // Fake return address.
+  BaselineFrame* frame = stack.pushFrame(sp, cx_, envChain);
+  if (!frame) {
+    return PBIResult::Error;
+  }
+  sp = reinterpret_cast<StackVal*>(frame);
 
   ICRegs icregs;
-  BaselineFrame* frame = stack.frameFromFP();
   RootedScript script(cx_, frame->script());
   jsbytecode* pc = frame->interpreterPC();
 
   // Check max stack depth once, so we don't need to check it
   // otherwise below for ordinary stack-manipulation opcodes (just for
   // exit frames).
-  TRY(stack.check(script->nslots()));
+  TRY(stack.check(sp, script->nslots()));
 
   uint32_t nfixed = script->nfixed();
   for (uint32_t i = 0; i < nfixed; i++) {
-    stack.pushUnchecked(StackVal(UndefinedValue()));
+    PUSH(StackVal(UndefinedValue()));
   }
   ret->setUndefined();
 
@@ -2312,7 +2274,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   }
 
   TRACE_PRINTF("Entering: sp = %p fp = %p frame = %p, script = %p, pc = %p\n",
-               stack.sp, stack.fp, frame, script.get(), pc);
+               sp, stack.fp, frame, script.get(), pc);
   TRACE_PRINTF("nslots = %d nfixed = %d\n", int(script->nslots()),
                int(script->nfixed()));
 
@@ -2324,16 +2286,15 @@ dispatch:
 #ifdef TRACE_INTERP
     {
       JSOp op = JSOp(*pc);
-      printf("stack[0] = %" PRIx64 " stack[1] = %" PRIx64 " stack[2] = %" PRIx64
-             "\n",
-             stack[0].asUInt64(), stack[1].asUInt64(), stack[2].asUInt64());
+      printf("sp[0] = %" PRIx64 " sp[1] = %" PRIx64 " sp[2] = %" PRIx64 "\n",
+             sp[0].asUInt64(), sp[1].asUInt64(), sp[2].asUInt64());
       printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(), pc,
              CodeName(op),
              (int)(frame->interpreterICEntry() -
                    script->jitScript()->icScript()->icEntries()),
              frameMgr.cxForLocalUseOnly()->isExceptionPending());
       printf("sp = %p fp = %p\n", stack.sp, stack.fp);
-      printf("TOS tag: %d\n", int(stack[0].asValue().asRawBits() >> 47));
+      printf("TOS tag: %d\n", int(sp[0].asValue().asRawBits() >> 47));
       fflush(stdout);
     }
 #endif
@@ -2342,65 +2303,65 @@ dispatch:
 
     CASE(Nop) { END_OP(Nop); }
     CASE(Undefined) {
-      PUSH_UNCHECKED(StackVal(UndefinedValue()));
+      PUSH(StackVal(UndefinedValue()));
       END_OP(Undefined);
     }
     CASE(Null) {
-      PUSH_UNCHECKED(StackVal(NullValue()));
+      PUSH(StackVal(NullValue()));
       END_OP(Null);
     }
     CASE(False) {
-      PUSH_UNCHECKED(StackVal(BooleanValue(false)));
+      PUSH(StackVal(BooleanValue(false)));
       END_OP(False);
     }
     CASE(True) {
-      PUSH_UNCHECKED(StackVal(BooleanValue(true)));
+      PUSH(StackVal(BooleanValue(true)));
       END_OP(True);
     }
     CASE(Int32) {
-      PUSH_UNCHECKED(StackVal(Int32Value(GET_INT32(pc))));
+      PUSH(StackVal(Int32Value(GET_INT32(pc))));
       END_OP(Int32);
     }
     CASE(Zero) {
-      PUSH_UNCHECKED(StackVal(Int32Value(0)));
+      PUSH(StackVal(Int32Value(0)));
       END_OP(Zero);
     }
     CASE(One) {
-      PUSH_UNCHECKED(StackVal(Int32Value(1)));
+      PUSH(StackVal(Int32Value(1)));
       END_OP(One);
     }
     CASE(Int8) {
-      PUSH_UNCHECKED(StackVal(Int32Value(GET_INT8(pc))));
+      PUSH(StackVal(Int32Value(GET_INT8(pc))));
       END_OP(Int8);
     }
     CASE(Uint16) {
-      PUSH_UNCHECKED(StackVal(Int32Value(GET_UINT16(pc))));
+      PUSH(StackVal(Int32Value(GET_UINT16(pc))));
       END_OP(Uint16);
     }
     CASE(Uint24) {
-      PUSH_UNCHECKED(StackVal(Int32Value(GET_UINT24(pc))));
+      PUSH(StackVal(Int32Value(GET_UINT24(pc))));
       END_OP(Uint24);
     }
     CASE(Double) {
-      PUSH_UNCHECKED(StackVal(GET_INLINE_VALUE(pc)));
+      PUSH(StackVal(GET_INLINE_VALUE(pc)));
       END_OP(Double);
     }
     CASE(BigInt) {
-      PUSH_UNCHECKED(StackVal(JS::BigIntValue(script->getBigInt(pc))));
+      PUSH(StackVal(JS::BigIntValue(script->getBigInt(pc))));
       END_OP(BigInt);
     }
     CASE(String) {
-      PUSH_UNCHECKED(StackVal(StringValue(script->getString(pc))));
+      PUSH(StackVal(StringValue(script->getString(pc))));
       END_OP(String);
     }
     CASE(Symbol) {
-      PUSH_UNCHECKED(StackVal(
+      PUSH(StackVal(
           SymbolValue(frameMgr.cxForLocalUseOnly()->wellKnownSymbols().get(
               GET_UINT8(pc)))));
       END_OP(Symbol);
     }
     CASE(Void) {
-      stack[0] = StackVal(JS::UndefinedValue());
+      sp[0] = StackVal(JS::UndefinedValue());
       END_OP(Void);
     }
 
@@ -2408,8 +2369,8 @@ dispatch:
     CASE(TypeofExpr) {
       static_assert(JSOpLength_Typeof == JSOpLength_TypeofExpr);
       if (JitOptions.pblHybrid) {
-        stack[0] = StackVal(StringValue(TypeOfOperation(
-            stack.handle(0), frameMgr.cxForLocalUseOnly()->runtime())));
+        sp[0] = StackVal(StringValue(TypeOfOperation(
+            Stack::handle(sp), frameMgr.cxForLocalUseOnly()->runtime())));
         NEXT_IC();
       } else {
         IC_POP_ARG(0);
@@ -2420,7 +2381,7 @@ dispatch:
     }
 
     CASE(Pos) {
-      if (stack[0].asValue().isNumber()) {
+      if (sp[0].asValue().isNumber()) {
         // Nothing!
         NEXT_IC();
         END_OP(Pos);
@@ -2429,10 +2390,10 @@ dispatch:
       }
     }
     CASE(Neg) {
-      if (stack[0].asValue().isInt32()) {
-        int32_t i = stack[0].asValue().toInt32();
+      if (sp[0].asValue().isInt32()) {
+        int32_t i = sp[0].asValue().toInt32();
         if (i != 0 && i != INT32_MIN) {
-          stack[0] = StackVal(Int32Value(-i));
+          sp[0] = StackVal(Int32Value(-i));
           NEXT_IC();
           END_OP(Neg);
         }
@@ -2441,10 +2402,10 @@ dispatch:
     }
 
     CASE(Inc) {
-      if (stack[0].asValue().isInt32()) {
-        int32_t i = stack[0].asValue().toInt32();
+      if (sp[0].asValue().isInt32()) {
+        int32_t i = sp[0].asValue().toInt32();
         if (i != INT32_MAX) {
-          stack[0] = StackVal(Int32Value(i + 1));
+          sp[0] = StackVal(Int32Value(i + 1));
           NEXT_IC();
           END_OP(Inc);
         }
@@ -2452,10 +2413,10 @@ dispatch:
       goto generic_unary;
     }
     CASE(Dec) {
-      if (stack[0].asValue().isInt32()) {
-        int32_t i = stack[0].asValue().toInt32();
+      if (sp[0].asValue().isInt32()) {
+        int32_t i = sp[0].asValue().toInt32();
         if (i != INT32_MIN) {
-          stack[0] = StackVal(Int32Value(i - 1));
+          sp[0] = StackVal(Int32Value(i - 1));
           NEXT_IC();
           END_OP(Dec);
         }
@@ -2464,9 +2425,9 @@ dispatch:
     }
 
     CASE(BitNot) {
-      if (stack[0].asValue().isInt32()) {
-        int32_t i = stack[0].asValue().toInt32();
-        stack[0] = StackVal(Int32Value(~i));
+      if (sp[0].asValue().isInt32()) {
+        int32_t i = sp[0].asValue().toInt32();
+        sp[0] = StackVal(Int32Value(~i));
         NEXT_IC();
         END_OP(Inc);
       }
@@ -2488,12 +2449,12 @@ dispatch:
 
     CASE(Not) {
       if (JitOptions.pblHybrid) {
-        stack[0] = StackVal(BooleanValue(!ToBoolean(stack.handle(0))));
+        sp[0] = StackVal(BooleanValue(!ToBoolean(Stack::handle(sp))));
         NEXT_IC();
       } else {
         IC_POP_ARG(0);
         INVOKE_IC(ToBool);
-        PUSH_UNCHECKED(StackVal(
+        PUSH(StackVal(
             BooleanValue(!Value::fromRawBits(icregs.icResult).toBoolean())));
       }
       END_OP(Not);
@@ -2502,7 +2463,7 @@ dispatch:
     CASE(And) {
       bool result;
       if (JitOptions.pblHybrid) {
-        result = ToBoolean(stack.handle(0));
+        result = ToBoolean(Stack::handle(sp));
         NEXT_IC();
       } else {
         IC_SET_ARG_FROM_STACK(0, 0);
@@ -2522,7 +2483,7 @@ dispatch:
     CASE(Or) {
       bool result;
       if (JitOptions.pblHybrid) {
-        result = ToBoolean(stack.handle(0));
+        result = ToBoolean(Stack::handle(sp));
         NEXT_IC();
       } else {
         IC_SET_ARG_FROM_STACK(0, 0);
@@ -2542,8 +2503,8 @@ dispatch:
     CASE(JumpIfTrue) {
       bool result;
       if (JitOptions.pblHybrid) {
-        result = ToBoolean(stack.handle(0));
-        stack.pop();
+        result = ToBoolean(Stack::handle(sp));
+        POP();
         NEXT_IC();
       } else {
         IC_POP_ARG(0);
@@ -2563,8 +2524,8 @@ dispatch:
     CASE(JumpIfFalse) {
       bool result;
       if (JitOptions.pblHybrid) {
-        result = ToBoolean(stack.handle(0));
-        stack.pop();
+        result = ToBoolean(Stack::handle(sp));
+        POP();
         NEXT_IC();
       } else {
         IC_POP_ARG(0);
@@ -2583,12 +2544,12 @@ dispatch:
     }
 
     CASE(Add) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        int64_t lhs = stack[1].asValue().toInt32();
-        int64_t rhs = stack[0].asValue().toInt32();
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int64_t lhs = sp[1].asValue().toInt32();
+        int64_t rhs = sp[0].asValue().toInt32();
         if (lhs + rhs <= int64_t(INT32_MAX)) {
-          stack.pop();
-          stack[0] = StackVal(Int32Value(int32_t(lhs + rhs)));
+          POP();
+          sp[0] = StackVal(Int32Value(int32_t(lhs + rhs)));
           NEXT_IC();
           END_OP(Add);
         }
@@ -2597,12 +2558,12 @@ dispatch:
     }
 
     CASE(Sub) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        int64_t lhs = stack[1].asValue().toInt32();
-        int64_t rhs = stack[0].asValue().toInt32();
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int64_t lhs = sp[1].asValue().toInt32();
+        int64_t rhs = sp[0].asValue().toInt32();
         if (lhs - rhs >= int64_t(INT32_MIN)) {
-          stack.pop();
-          stack[0] = StackVal(Int32Value(int32_t(lhs - rhs)));
+          POP();
+          sp[0] = StackVal(Int32Value(int32_t(lhs - rhs)));
           NEXT_IC();
           END_OP(Sub);
         }
@@ -2640,11 +2601,10 @@ dispatch:
     }
 
     CASE(Eq) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        bool result =
-            stack[0].asValue().toInt32() == stack[1].asValue().toInt32();
-        stack.pop();
-        stack[0] = StackVal(BooleanValue(result));
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        bool result = sp[0].asValue().toInt32() == sp[1].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
         END_OP(Eq);
       }
@@ -2652,11 +2612,10 @@ dispatch:
     }
 
     CASE(Ne) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        bool result =
-            stack[0].asValue().toInt32() != stack[1].asValue().toInt32();
-        stack.pop();
-        stack[0] = StackVal(BooleanValue(result));
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        bool result = sp[0].asValue().toInt32() != sp[1].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
         END_OP(Ne);
       }
@@ -2664,44 +2623,40 @@ dispatch:
     }
 
     CASE(Lt) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        bool result =
-            stack[1].asValue().toInt32() < stack[0].asValue().toInt32();
-        stack.pop();
-        stack[0] = StackVal(BooleanValue(result));
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        bool result = sp[1].asValue().toInt32() < sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
         END_OP(Lt);
       }
       goto generic_cmp;
     }
     CASE(Le) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        bool result =
-            stack[1].asValue().toInt32() <= stack[0].asValue().toInt32();
-        stack.pop();
-        stack[0] = StackVal(BooleanValue(result));
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        bool result = sp[1].asValue().toInt32() <= sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
         END_OP(Le);
       }
       goto generic_cmp;
     }
     CASE(Gt) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        bool result =
-            stack[1].asValue().toInt32() > stack[0].asValue().toInt32();
-        stack.pop();
-        stack[0] = StackVal(BooleanValue(result));
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        bool result = sp[1].asValue().toInt32() > sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
         END_OP(Gt);
       }
       goto generic_cmp;
     }
     CASE(Ge) {
-      if (stack[0].asValue().isInt32() && stack[1].asValue().isInt32()) {
-        bool result =
-            stack[1].asValue().toInt32() >= stack[0].asValue().toInt32();
-        stack.pop();
-        stack[0] = StackVal(BooleanValue(result));
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        bool result = sp[1].asValue().toInt32() >= sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
         END_OP(Ge);
       }
@@ -2712,9 +2667,9 @@ dispatch:
     CASE(StrictNe) {
       if (JitOptions.pblHybrid) {
         bool result;
-        HandleValue lval = stack.handle(1);
-        HandleValue rval = stack.handle(0);
-        if (stack[0].asValue().isString() && stack[1].asValue().isString()) {
+        HandleValue lval = Stack::handle(sp + 1);
+        HandleValue rval = Stack::handle(sp);
+        if (sp[0].asValue().isString() && sp[1].asValue().isString()) {
           PUSH_EXIT_FRAME();
           if (!js::StrictlyEqual(cx, lval, rval, &result)) {
             goto error;
@@ -2724,8 +2679,8 @@ dispatch:
             goto error;
           }
         }
-        stack.pop();
-        stack[0] = StackVal(
+        POP();
+        sp[0] = StackVal(
             BooleanValue((JSOp(*pc) == JSOp::StrictEq) ? result : !result));
         NEXT_IC();
         END_OP(StrictEq);
@@ -2773,14 +2728,14 @@ dispatch:
     }
 
     CASE(ToString) {
-      if (stack[0].asValue().isString()) {
+      if (sp[0].asValue().isString()) {
         END_OP(ToString);
       }
-      FakeRooted s(nullptr, stack[0].asValue());
+      FakeRooted s(nullptr, sp[0].asValue());
       if (JSString* result = ToStringSlow<NoGC>(nullptr, s)) {
-        stack[0] = StackVal(StringValue(result));
+        sp[0] = StackVal(StringValue(result));
       } else {
-        state.value0 = stack.pop().asValue();
+        state.value0 = POP().asValue();
         {
           PUSH_EXIT_FRAME();
           result = ToString<CanGC>(cx, state.value0);
@@ -2788,23 +2743,22 @@ dispatch:
             goto error;
           }
         }
-        PUSH_UNCHECKED(StackVal(StringValue(result)));
+        PUSH(StackVal(StringValue(result)));
       }
       END_OP(ToString);
     }
 
     CASE(IsNullOrUndefined) {
-      bool result =
-          stack[0].asValue().isNull() || stack[0].asValue().isUndefined();
-      PUSH_UNCHECKED(StackVal(BooleanValue(result)));
+      bool result = sp[0].asValue().isNull() || sp[0].asValue().isUndefined();
+      PUSH(StackVal(BooleanValue(result)));
       END_OP(IsNullOrUndefined);
     }
 
     CASE(GlobalThis) {
-      PUSH_UNCHECKED(StackVal(ObjectValue(*frameMgr.cxForLocalUseOnly()
-                                               ->global()
-                                               ->lexicalEnvironment()
-                                               .thisObject())));
+      PUSH(StackVal(ObjectValue(*frameMgr.cxForLocalUseOnly()
+                                     ->global()
+                                     ->lexicalEnvironment()
+                                     .thisObject())));
       END_OP(GlobalThis);
     }
 
@@ -2814,18 +2768,18 @@ dispatch:
         state.obj0 = frame->environmentChain();
         js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
       }
-      PUSH_UNCHECKED(StackVal(state.value0));
+      PUSH(StackVal(state.value0));
       END_OP(NonSyntacticGlobalThis);
     }
 
     CASE(NewTarget) {
-      PUSH_UNCHECKED(StackVal(frame->newTarget()));
+      PUSH(StackVal(frame->newTarget()));
       END_OP(NewTarget);
     }
 
     CASE(DynamicImport) {
-      state.value0 = stack.pop().asValue();  // options
-      state.value1 = stack.pop().asValue();  // specifier
+      state.value0 = POP().asValue();  // options
+      state.value1 = POP().asValue();  // specifier
       JSObject* promise;
       {
         PUSH_EXIT_FRAME();
@@ -2835,7 +2789,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*promise)));
+      PUSH(StackVal(ObjectValue(*promise)));
       END_OP(DynamicImport);
     }
 
@@ -2848,7 +2802,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*metaObject)));
+      PUSH(StackVal(ObjectValue(*metaObject)));
       END_OP(ImportMeta);
     }
 
@@ -2863,17 +2817,17 @@ dispatch:
       END_OP(NewObject);
     }
     CASE(Object) {
-      PUSH_UNCHECKED(StackVal(ObjectValue(*script->getObject(pc))));
+      PUSH(StackVal(ObjectValue(*script->getObject(pc))));
       END_OP(Object);
     }
     CASE(ObjWithProto) {
-      state.value0 = stack[0].asValue();
+      state.value0 = sp[0].asValue();
       JSObject* obj;
       {
         PUSH_EXIT_FRAME();
         obj = ObjectWithProtoOperation(cx, state.value0);
       }
-      stack[0] = StackVal(ObjectValue(*obj));
+      sp[0] = StackVal(ObjectValue(*obj));
       END_OP(ObjWithProto);
     }
 
@@ -2888,16 +2842,16 @@ dispatch:
       static_assert(JSOpLength_InitElem == JSOpLength_InitElemInc);
       static_assert(JSOpLength_InitElem == JSOpLength_SetElem);
       static_assert(JSOpLength_InitElem == JSOpLength_StrictSetElem);
-      StackVal val = stack[0];
+      StackVal val = sp[0];
       IC_POP_ARG(2);
       IC_POP_ARG(1);
       IC_SET_ARG_FROM_STACK(0, 0);
       if (JSOp(*pc) == JSOp::SetElem || JSOp(*pc) == JSOp::StrictSetElem) {
-        stack[0] = val;
+        sp[0] = val;
       }
       INVOKE_IC(SetElem);
       if (JSOp(*pc) == JSOp::InitElemInc) {
-        PUSH_UNCHECKED(StackVal(
+        PUSH(StackVal(
             Int32Value(Value::fromRawBits(icregs.icVals[1]).toInt32() + 1)));
       }
       END_OP(InitElem);
@@ -2912,8 +2866,8 @@ dispatch:
       static_assert(JSOpLength_InitPropGetter == JSOpLength_InitPropSetter);
       static_assert(JSOpLength_InitPropGetter ==
                     JSOpLength_InitHiddenPropSetter);
-      state.obj1 = &stack.pop().asValue().toObject();  // val
-      state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
+      state.obj1 = &POP().asValue().toObject();  // val
+      state.obj0 = &sp[0].asValue().toObject();  // obj; leave on stack
       state.name0 = script->getName(pc);
       {
         PUSH_EXIT_FRAME();
@@ -2934,9 +2888,9 @@ dispatch:
       static_assert(JSOpLength_InitElemGetter == JSOpLength_InitElemSetter);
       static_assert(JSOpLength_InitElemGetter ==
                     JSOpLength_InitHiddenElemSetter);
-      state.obj1 = &stack.pop().asValue().toObject();  // val
-      state.value0 = stack.pop().asValue();            // idval
-      state.obj0 = &stack[0].asValue().toObject();     // obj; leave on stack
+      state.obj1 = &POP().asValue().toObject();  // val
+      state.value0 = POP().asValue();            // idval
+      state.obj0 = &sp[0].asValue().toObject();  // obj; leave on stack
       {
         PUSH_EXIT_FRAME();
         if (!InitElemGetterSetterOperation(cx, pc, state.obj0, state.value0,
@@ -2981,7 +2935,7 @@ dispatch:
     }
 
     CASE(DelProp) {
-      state.value0 = stack.pop().asValue();
+      state.value0 = POP().asValue();
       state.name0 = script->getName(pc);
       bool res = false;
       {
@@ -2990,11 +2944,11 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(BooleanValue(res)));
+      PUSH(StackVal(BooleanValue(res)));
       END_OP(DelProp);
     }
     CASE(StrictDelProp) {
-      state.value0 = stack.pop().asValue();
+      state.value0 = POP().asValue();
       state.name0 = script->getName(pc);
       bool res = false;
       {
@@ -3003,12 +2957,12 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(BooleanValue(res)));
+      PUSH(StackVal(BooleanValue(res)));
       END_OP(StrictDelProp);
     }
     CASE(DelElem) {
-      state.value1 = stack.pop().asValue();
-      state.value0 = stack.pop().asValue();
+      state.value1 = POP().asValue();
+      state.value0 = POP().asValue();
       bool res = false;
       {
         PUSH_EXIT_FRAME();
@@ -3016,12 +2970,12 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(BooleanValue(res)));
+      PUSH(StackVal(BooleanValue(res)));
       END_OP(DelElem);
     }
     CASE(StrictDelElem) {
-      state.value1 = stack.pop().asValue();
-      state.value0 = stack.pop().asValue();
+      state.value1 = POP().asValue();
+      state.value0 = POP().asValue();
       bool res = false;
       {
         PUSH_EXIT_FRAME();
@@ -3029,7 +2983,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(BooleanValue(res)));
+      PUSH(StackVal(BooleanValue(res)));
       END_OP(StrictDelElem);
     }
 
@@ -3059,13 +3013,12 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(SymbolValue(symbol)));
+      PUSH(StackVal(SymbolValue(symbol)));
       END_OP(NewPrivateName);
     }
 
     CASE(SuperBase) {
-      JSFunction& superEnvFunc =
-          stack.pop().asValue().toObject().as<JSFunction>();
+      JSFunction& superEnvFunc = POP().asValue().toObject().as<JSFunction>();
       MOZ_ASSERT(superEnvFunc.allowSuperProperty());
       MOZ_ASSERT(superEnvFunc.baseScript()->needsHomeObject());
       const Value& homeObjVal = superEnvFunc.getExtendedSlot(
@@ -3074,7 +3027,7 @@ dispatch:
       JSObject* homeObj = &homeObjVal.toObject();
       JSObject* superBase = HomeObjectSuperBase(homeObj);
 
-      PUSH_UNCHECKED(StackVal(ObjectOrNullValue(superBase)));
+      PUSH(StackVal(ObjectOrNullValue(superBase)));
       END_OP(SuperBase);
     }
 
@@ -3083,9 +3036,9 @@ dispatch:
       // stack signature: receiver, lval, rval => rval
       static_assert(JSOpLength_SetPropSuper == JSOpLength_StrictSetPropSuper);
       bool strict = JSOp(*pc) == JSOp::StrictSetPropSuper;
-      state.value2 = stack.pop().asValue();  // rval
-      state.value1 = stack.pop().asValue();  // lval
-      state.value0 = stack.pop().asValue();  // receiver
+      state.value2 = POP().asValue();  // rval
+      state.value1 = POP().asValue();  // lval
+      state.value0 = POP().asValue();  // receiver
       state.name0 = script->getName(pc);
       {
         PUSH_EXIT_FRAME();
@@ -3096,7 +3049,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.value2));
+      PUSH(StackVal(state.value2));
       END_OP(SetPropSuper);
     }
 
@@ -3105,10 +3058,10 @@ dispatch:
       // stack signature: receiver, key, lval, rval => rval
       static_assert(JSOpLength_SetElemSuper == JSOpLength_StrictSetElemSuper);
       bool strict = JSOp(*pc) == JSOp::StrictSetElemSuper;
-      state.value3 = stack.pop().asValue();  // rval
-      state.value2 = stack.pop().asValue();  // lval
-      state.value1 = stack.pop().asValue();  // index
-      state.value0 = stack.pop().asValue();  // receiver
+      state.value3 = POP().asValue();  // rval
+      state.value2 = POP().asValue();  // lval
+      state.value1 = POP().asValue();  // index
+      state.value0 = POP().asValue();  // receiver
       {
         PUSH_EXIT_FRAME();
         // SetElementSuper(cx, lval, receiver, index, rval, strict)
@@ -3118,7 +3071,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.value2));  // value
+      PUSH(StackVal(state.value2));  // value
       END_OP(SetElemSuper);
     }
 
@@ -3131,46 +3084,48 @@ dispatch:
 
     CASE(MoreIter) {
       // iter => iter, name
-      Value v = IteratorMore(&stack[0].asValue().toObject());
-      PUSH_UNCHECKED(StackVal(v));
+      Value v = IteratorMore(&sp[0].asValue().toObject());
+      PUSH(StackVal(v));
       END_OP(MoreIter);
     }
 
     CASE(IsNoIter) {
       // iter => iter, bool
-      bool result = stack[0].asValue().isMagic(JS_NO_ITER_VALUE);
-      PUSH_UNCHECKED(StackVal(BooleanValue(result)));
+      bool result = sp[0].asValue().isMagic(JS_NO_ITER_VALUE);
+      PUSH(StackVal(BooleanValue(result)));
       END_OP(IsNoIter);
     }
 
     CASE(EndIter) {
       // iter, interval =>
-      stack.pop();
-      CloseIterator(&stack.pop().asValue().toObject());
+      POP();
+      CloseIterator(&POP().asValue().toObject());
       END_OP(EndIter);
     }
 
     CASE(CloseIter) {
-      IC_SET_OBJ_ARG(0, &stack.pop().asValue().toObject());
+      IC_SET_OBJ_ARG(0, &POP().asValue().toObject());
       INVOKE_IC(CloseIter);
       END_OP(CloseIter);
     }
 
     CASE(CheckIsObj) {
-      if (!stack[0].asValue().isObject()) {
+      if (!sp[0].asValue().isObject()) {
         PUSH_EXIT_FRAME();
         MOZ_ALWAYS_FALSE(
             js::ThrowCheckIsObject(cx, js::CheckIsObjectKind(GET_UINT8(pc))));
+        /* abandon frame; error handler will re-establish sp */
         goto error;
       }
       END_OP(CheckIsObj);
     }
 
     CASE(CheckObjCoercible) {
-      state.value0 = stack[0].asValue();
+      state.value0 = sp[0].asValue();
       if (state.value0.isNullOrUndefined()) {
         PUSH_EXIT_FRAME();
         MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, state.value0));
+        /* abandon frame; error handler will re-establish sp */
         goto error;
       }
       END_OP(CheckObjCoercible);
@@ -3178,8 +3133,8 @@ dispatch:
 
     CASE(ToAsyncIter) {
       // iter, next => asynciter
-      state.value0 = stack.pop().asValue();            // next
-      state.obj0 = &stack.pop().asValue().toObject();  // iter
+      state.value0 = POP().asValue();            // next
+      state.obj0 = &POP().asValue().toObject();  // iter
 
       JSObject* result;
       {
@@ -3189,14 +3144,14 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*result)));
+      PUSH(StackVal(ObjectValue(*result)));
       END_OP(ToAsyncIter);
     }
 
     CASE(MutateProto) {
       // obj, protoVal => obj
-      state.value0 = stack.pop().asValue();
-      state.obj0 = &stack[0].asValue().toObject();
+      state.value0 = POP().asValue();
+      state.obj0 = &sp[0].asValue().toObject();
       {
         PUSH_EXIT_FRAME();
         if (!MutatePrototype(cx, state.obj0.as<PlainObject>(), state.value0)) {
@@ -3214,8 +3169,8 @@ dispatch:
 
     CASE(InitElemArray) {
       // array, val => array
-      state.value0 = stack.pop().asValue();
-      state.obj0 = &stack[0].asValue().toObject();
+      state.value0 = POP().asValue();
+      state.obj0 = &sp[0].asValue().toObject();
       {
         PUSH_EXIT_FRAME();
         InitElemArrayOperation(cx, pc, state.obj0.as<ArrayObject>(),
@@ -3225,7 +3180,7 @@ dispatch:
     }
 
     CASE(Hole) {
-      PUSH_UNCHECKED(StackVal(MagicValue(JS_ELEMENTS_HOLE)));
+      PUSH(StackVal(MagicValue(JS_ELEMENTS_HOLE)));
       END_OP(Hole);
     }
 
@@ -3239,7 +3194,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*obj)));
+      PUSH(StackVal(ObjectValue(*obj)));
       END_OP(RegExp);
     }
 
@@ -3254,14 +3209,14 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*res)));
+      PUSH(StackVal(ObjectValue(*res)));
       END_OP(Lambda);
     }
 
     CASE(SetFunName) {
       // fun, name => fun
-      state.value0 = stack.pop().asValue();  // name
-      state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
+      state.value0 = POP().asValue();  // name
+      state.fun0 = &sp[0].asValue().toObject().as<JSFunction>();
       FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc));
       {
         PUSH_EXIT_FRAME();
@@ -3274,8 +3229,8 @@ dispatch:
 
     CASE(InitHomeObject) {
       // fun, homeObject => fun
-      state.obj0 = &stack.pop().asValue().toObject();  // homeObject
-      state.fun0 = &stack[0].asValue().toObject().as<JSFunction>();
+      state.obj0 = &POP().asValue().toObject();  // homeObject
+      state.fun0 = &sp[0].asValue().toObject().as<JSFunction>();
       MOZ_ASSERT(state.fun0->allowSuperProperty());
       MOZ_ASSERT(state.obj0->is<PlainObject>() || state.obj0->is<JSFunction>());
       state.fun0->setExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT,
@@ -3284,7 +3239,7 @@ dispatch:
     }
 
     CASE(CheckClassHeritage) {
-      state.value0 = stack[0].asValue();
+      state.value0 = sp[0].asValue();
       {
         PUSH_EXIT_FRAME();
         if (!CheckClassHeritageOperation(cx, state.value0)) {
@@ -3296,7 +3251,7 @@ dispatch:
 
     CASE(FunWithProto) {
       // proto => obj
-      state.obj0 = &stack.pop().asValue().toObject();  // proto
+      state.obj0 = &POP().asValue().toObject();  // proto
       state.obj1 = frame->environmentChain();
       state.fun0 = script->getFunction(pc);
       JSObject* obj;
@@ -3307,7 +3262,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*obj)));
+      PUSH(StackVal(ObjectValue(*obj)));
       END_OP(FunWithProto);
     }
 
@@ -3321,7 +3276,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*builtin)));
+      PUSH(StackVal(ObjectValue(*builtin)));
       END_OP(BuiltinObject);
     }
 
@@ -3343,8 +3298,8 @@ dispatch:
       icregs.extraArgs = 2;
       icregs.spreadCall = false;
       INVOKE_IC(Call);
-      stack.popn(argc + 2);
-      PUSH_UNCHECKED(StackVal(Value::fromRawBits(icregs.icResult)));
+      POPN(argc + 2);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
       END_OP(Call);
     }
 
@@ -3358,8 +3313,8 @@ dispatch:
       icregs.extraArgs = 3;
       icregs.spreadCall = false;
       INVOKE_IC(Call);
-      stack.popn(argc + 3);
-      PUSH_UNCHECKED(StackVal(Value::fromRawBits(icregs.icResult)));
+      POPN(argc + 3);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
       END_OP(SuperCall);
     }
 
@@ -3372,8 +3327,8 @@ dispatch:
       icregs.extraArgs = 2;
       icregs.spreadCall = true;
       INVOKE_IC(Call);
-      stack.popn(3);
-      PUSH_UNCHECKED(StackVal(Value::fromRawBits(icregs.icResult)));
+      POPN(3);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
       END_OP(SpreadCall);
     }
 
@@ -3384,8 +3339,8 @@ dispatch:
       icregs.extraArgs = 3;
       icregs.spreadCall = true;
       INVOKE_IC(Call);
-      stack.popn(4);
-      PUSH_UNCHECKED(StackVal(Value::fromRawBits(icregs.icResult)));
+      POPN(4);
+      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
       END_OP(SpreadSuperCall);
     }
 
@@ -3405,7 +3360,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.res));
+      PUSH(StackVal(state.res));
       END_OP(ImplicitThis);
     }
 
@@ -3414,26 +3369,26 @@ dispatch:
       MOZ_ASSERT(!cso->as<ArrayObject>().isExtensible());
       MOZ_ASSERT(cso->as<ArrayObject>().containsPure(
           frameMgr.cxForLocalUseOnly()->names().raw));
-      PUSH_UNCHECKED(StackVal(ObjectValue(*cso)));
+      PUSH(StackVal(ObjectValue(*cso)));
       END_OP(CallSiteObj);
     }
 
     CASE(IsConstructing) {
-      PUSH_UNCHECKED(StackVal(MagicValue(JS_IS_CONSTRUCTING)));
+      PUSH(StackVal(MagicValue(JS_IS_CONSTRUCTING)));
       END_OP(IsConstructing);
     }
 
     CASE(SuperFun) {
-      JSObject* superEnvFunc = &stack.pop().asValue().toObject();
+      JSObject* superEnvFunc = &POP().asValue().toObject();
       JSObject* superFun = SuperFunOperation(superEnvFunc);
-      PUSH_UNCHECKED(StackVal(ObjectOrNullValue(superFun)));
+      PUSH(StackVal(ObjectOrNullValue(superFun)));
       END_OP(SuperFun);
     }
 
     CASE(CheckThis)
     CASE(CheckThisReinit) {
       static_assert(JSOpLength_CheckThis == JSOpLength_CheckThisReinit);
-      if (!stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+      if (!sp[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
         PUSH_EXIT_FRAME();
         MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
         goto error;
@@ -3450,66 +3405,66 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*generator)));
+      PUSH(StackVal(ObjectValue(*generator)));
       END_OP(Generator);
     }
 
     CASE(InitialYield) {
       // gen => rval, gen, resumeKind
-      state.obj0 = &stack[0].asValue().toObject();
-      uint32_t frameSize = stack.frameSize(frame);
+      state.obj0 = &sp[0].asValue().toObject();
+      uint32_t frameSize = stack.frameSize(sp, frame);
       {
         PUSH_EXIT_FRAME();
         if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
           goto error;
         }
       }
-      *ret = stack[0].asValue();
-      stack.popFrame(frameMgr.cxForLocalUseOnly());
-      stack.pop();  // fake return address
+      *ret = sp[0].asValue();
+      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
+      POP();  // fake return address
       return PBIResult::Ok;
     }
 
     CASE(Await)
     CASE(Yield) {
       // rval1, gen => rval2, gen, resumeKind
-      state.obj0 = &stack[0].asValue().toObject();
-      uint32_t frameSize = stack.frameSize(frame);
+      state.obj0 = &sp[0].asValue().toObject();
+      uint32_t frameSize = stack.frameSize(sp, frame);
       {
         PUSH_EXIT_FRAME();
         if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
           goto error;
         }
       }
-      *ret = stack[0].asValue();
-      stack.popFrame(frameMgr.cxForLocalUseOnly());
-      stack.pop();  // fake return address
+      *ret = sp[0].asValue();
+      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
+      POP();  // fake return address
       return PBIResult::Ok;
     }
 
     CASE(FinalYieldRval) {
       // gen =>
-      state.obj0 = &stack.pop().asValue().toObject();
+      state.obj0 = &POP().asValue().toObject();
       {
         PUSH_EXIT_FRAME();
         if (!FinalSuspend(cx, state.obj0, pc)) {
           goto error;
         }
       }
-      stack.popFrame(frameMgr.cxForLocalUseOnly());
-      stack.pop();  // fake return address
+      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
+      POP();  // fake return address
       return PBIResult::Ok;
     }
 
     CASE(IsGenClosing) {
-      PUSH_UNCHECKED(StackVal(MagicValue(JS_GENERATOR_CLOSING)));
+      PUSH(StackVal(MagicValue(JS_GENERATOR_CLOSING)));
       END_OP(IsGenClosing);
     }
 
     CASE(AsyncAwait) {
       // value, gen => promise
-      state.obj0 = &stack.pop().asValue().toObject();  // gen
-      state.value0 = stack.pop().asValue();            // value
+      state.obj0 = &POP().asValue().toObject();  // gen
+      state.value0 = POP().asValue();            // value
       JSObject* promise;
       {
         PUSH_EXIT_FRAME();
@@ -3519,14 +3474,14 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*promise)));
+      PUSH(StackVal(ObjectValue(*promise)));
       END_OP(AsyncAwait);
     }
 
     CASE(AsyncResolve) {
       // valueOrReason, gen => promise
-      state.obj0 = &stack.pop().asValue().toObject();  // gen
-      state.value0 = stack.pop().asValue();            // valueOrReason
+      state.obj0 = &POP().asValue().toObject();  // gen
+      state.value0 = POP().asValue();            // valueOrReason
       auto resolveKind = AsyncFunctionResolveKind(GET_UINT8(pc));
       JSObject* promise;
       {
@@ -3538,13 +3493,13 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*promise)));
+      PUSH(StackVal(ObjectValue(*promise)));
       END_OP(AsyncResolve);
     }
 
     CASE(CanSkipAwait) {
       // value => value, can_skip
-      state.value0 = stack[0].asValue();
+      state.value0 = sp[0].asValue();
       bool result = false;
       {
         PUSH_EXIT_FRAME();
@@ -3552,37 +3507,37 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(BooleanValue(result)));
+      PUSH(StackVal(BooleanValue(result)));
       END_OP(CanSkipAwait);
     }
 
     CASE(MaybeExtractAwaitValue) {
       // value, can_skip => value_or_resolved, can_skip
-      state.value1 = stack.pop().asValue();  // can_skip
-      state.value0 = stack.pop().asValue();  // value
+      state.value1 = POP().asValue();  // can_skip
+      state.value0 = POP().asValue();  // value
       if (state.value1.toBoolean()) {
         PUSH_EXIT_FRAME();
         if (!ExtractAwaitValue(cx, state.value0, &state.value0)) {
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.value0));
-      PUSH_UNCHECKED(StackVal(state.value1));
+      PUSH(StackVal(state.value0));
+      PUSH(StackVal(state.value1));
       END_OP(MaybeExtractAwaitValue);
     }
 
     CASE(ResumeKind) {
       GeneratorResumeKind resumeKind = ResumeKindFromPC(pc);
-      PUSH_UNCHECKED(StackVal(Int32Value(int32_t(resumeKind))));
+      PUSH(StackVal(Int32Value(int32_t(resumeKind))));
       END_OP(ResumeKind);
     }
 
     CASE(CheckResumeKind) {
       // rval, gen, resumeKind => rval
       GeneratorResumeKind resumeKind =
-          IntToResumeKind(stack.pop().asValue().toInt32());
-      state.obj0 = &stack.pop().asValue().toObject();  // gen
-      state.value0 = stack[0].asValue();               // rval
+          IntToResumeKind(POP().asValue().toInt32());
+      state.obj0 = &POP().asValue().toObject();  // gen
+      state.value0 = sp[0].asValue();            // rval
       if (resumeKind != GeneratorResumeKind::Next) {
         PUSH_EXIT_FRAME();
         MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(
@@ -3622,7 +3577,7 @@ dispatch:
     }
 
     CASE(Coalesce) {
-      if (!stack[0].asValue().isNullOrUndefined()) {
+      if (!sp[0].asValue().isNullOrUndefined()) {
         ADVANCE(GET_JUMP_OFFSET(pc));
         DISPATCH();
       } else {
@@ -3631,9 +3586,9 @@ dispatch:
     }
 
     CASE(Case) {
-      bool cond = stack.pop().asValue().toBoolean();
+      bool cond = POP().asValue().toBoolean();
       if (cond) {
-        stack.pop();
+        POP();
         ADVANCE(GET_JUMP_OFFSET(pc));
         DISPATCH();
       } else {
@@ -3642,7 +3597,7 @@ dispatch:
     }
 
     CASE(Default) {
-      stack.pop();
+      POP();
       ADVANCE(GET_JUMP_OFFSET(pc));
       DISPATCH();
     }
@@ -3651,7 +3606,7 @@ dispatch:
       int32_t len = GET_JUMP_OFFSET(pc);
       int32_t low = GET_JUMP_OFFSET(pc + 1 * JUMP_OFFSET_LEN);
       int32_t high = GET_JUMP_OFFSET(pc + 2 * JUMP_OFFSET_LEN);
-      Value v = stack.pop().asValue();
+      Value v = POP().asValue();
       int32_t i = 0;
       if (v.isInt32()) {
         i = v.toInt32();
@@ -3671,32 +3626,32 @@ dispatch:
     }
 
     CASE(Return) {
-      *ret = stack.pop().asValue();
-      stack.popFrame(frameMgr.cxForLocalUseOnly());
-      stack.pop();  // fake return address
+      *ret = POP().asValue();
+      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
+      POP();  // fake return address
       return PBIResult::Ok;
     }
 
     CASE(GetRval) {
-      PUSH_UNCHECKED(StackVal(*ret));
+      PUSH(StackVal(*ret));
       END_OP(GetRval);
     }
 
     CASE(SetRval) {
-      *ret = stack.pop().asValue();
+      *ret = POP().asValue();
       END_OP(SetRval);
     }
 
     CASE(RetRval) {
-      stack.popFrame(frameMgr.cxForLocalUseOnly());
-      stack.pop();  // fake return address
+      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
+      POP();  // fake return address
       return PBIResult::Ok;
     }
 
     CASE(CheckReturn) {
-      Value thisval = stack.pop().asValue();
+      Value thisval = POP().asValue();
       if (ret->isObject()) {
-        PUSH_UNCHECKED(StackVal(*ret));
+        PUSH(StackVal(*ret));
       } else if (!ret->isUndefined()) {
         PUSH_EXIT_FRAME();
         state.value0 = *ret;
@@ -3708,13 +3663,13 @@ dispatch:
         MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
         goto error;
       } else {
-        PUSH_UNCHECKED(StackVal(thisval));
+        PUSH(StackVal(thisval));
       }
       END_OP(CheckReturn);
     }
 
     CASE(Throw) {
-      state.value0 = stack.pop().asValue();
+      state.value0 = POP().asValue();
       {
         PUSH_EXIT_FRAME();
         MOZ_ALWAYS_FALSE(ThrowOperation(cx, state.value0));
@@ -3754,30 +3709,30 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.res));
+      PUSH(StackVal(state.res));
       END_OP(Exception);
     }
 
     CASE(Finally) { END_OP(Finally); }
 
     CASE(Uninitialized) {
-      PUSH_UNCHECKED(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
+      PUSH(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
       END_OP(Uninitialized);
     }
     CASE(InitLexical) {
       uint32_t i = GET_LOCALNO(pc);
-      frame->unaliasedLocal(i) = stack[0].asValue();
+      frame->unaliasedLocal(i) = sp[0].asValue();
       END_OP(InitLexical);
     }
 
     CASE(InitAliasedLexical) {
       EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
       EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-      obj.setAliasedBinding(ec, stack[0].asValue());
+      obj.setAliasedBinding(ec, sp[0].asValue());
       END_OP(InitAliasedLexical);
     }
     CASE(CheckLexical) {
-      if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+      if (sp[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
         PUSH_EXIT_FRAME();
         ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script, pc);
         goto error;
@@ -3785,7 +3740,7 @@ dispatch:
       END_OP(CheckLexical);
     }
     CASE(CheckAliasedLexical) {
-      if (stack[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+      if (sp[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
         PUSH_EXIT_FRAME();
         ReportRuntimeLexicalError(cx, JSMSG_UNINITIALIZED_LEXICAL, script, pc);
         goto error;
@@ -3824,35 +3779,35 @@ dispatch:
     CASE(GetArg) {
       unsigned i = GET_ARGNO(pc);
       if (script->argsObjAliasesFormals()) {
-        PUSH_UNCHECKED(StackVal(frame->argsObj().arg(i)));
+        PUSH(StackVal(frame->argsObj().arg(i)));
       } else {
-        PUSH_UNCHECKED(StackVal(frame->unaliasedFormal(i)));
+        PUSH(StackVal(frame->unaliasedFormal(i)));
       }
       END_OP(GetArg);
     }
 
     CASE(GetFrameArg) {
       uint32_t i = GET_ARGNO(pc);
-      PUSH_UNCHECKED(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
+      PUSH(StackVal(frame->unaliasedFormal(i, DONT_CHECK_ALIASING)));
       END_OP(GetFrameArg);
     }
 
     CASE(GetLocal) {
       uint32_t i = GET_LOCALNO(pc);
       TRACE_PRINTF(" -> local: %d\n", int(i));
-      PUSH_UNCHECKED(StackVal(frame->unaliasedLocal(i)));
+      PUSH(StackVal(frame->unaliasedLocal(i)));
       END_OP(GetLocal);
     }
 
     CASE(ArgumentsLength) {
-      PUSH_UNCHECKED(StackVal(Int32Value(frame->numActualArgs())));
+      PUSH(StackVal(Int32Value(frame->numActualArgs())));
       END_OP(ArgumentsLength);
     }
 
     CASE(GetActualArg) {
       MOZ_ASSERT(!script->needsArgsObj());
-      uint32_t index = stack[0].asValue().toInt32();
-      stack[0] = StackVal(frame->unaliasedActual(index));
+      uint32_t index = sp[0].asValue().toInt32();
+      sp[0] = StackVal(frame->unaliasedActual(index));
       END_OP(GetActualArg);
     }
 
@@ -3861,20 +3816,20 @@ dispatch:
       static_assert(JSOpLength_GetAliasedVar == JSOpLength_GetAliasedDebugVar);
       EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
       EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
-      PUSH_UNCHECKED(StackVal(obj.aliasedBinding(ec)));
+      PUSH(StackVal(obj.aliasedBinding(ec)));
       END_OP(GetAliasedVar);
     }
 
     CASE(GetImport) {
       state.obj0 = frame->environmentChain();
-      state.value0 = stack[0].asValue();
+      state.value0 = sp[0].asValue();
       {
         PUSH_EXIT_FRAME();
         if (!GetImportOperation(cx, state.obj0, script, pc, &state.value0)) {
           goto error;
         }
       }
-      stack[0] = StackVal(state.value0);
+      sp[0] = StackVal(state.value0);
       END_OP(GetImport);
     }
 
@@ -3885,7 +3840,7 @@ dispatch:
     }
 
     CASE(Callee) {
-      PUSH_UNCHECKED(StackVal(frame->calleev()));
+      PUSH(StackVal(frame->calleev()));
       END_OP(Callee);
     }
 
@@ -3895,7 +3850,7 @@ dispatch:
       for (unsigned i = 0; i < numHops; i++) {
         env = &env->as<EnvironmentObject>().enclosingEnvironment();
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(env->as<CallObject>().callee())));
+      PUSH(StackVal(ObjectValue(env->as<CallObject>().callee())));
       END_OP(EnvCallee);
     }
 
@@ -3912,7 +3867,7 @@ dispatch:
       static_assert(JSOpLength_SetProp == JSOpLength_StrictSetGName);
       IC_POP_ARG(1);
       IC_POP_ARG(0);
-      PUSH_UNCHECKED(StackVal(icregs.icVals[1]));
+      PUSH(StackVal(icregs.icVals[1]));
       INVOKE_IC(SetProp);
       END_OP(SetProp);
     }
@@ -3938,9 +3893,9 @@ dispatch:
     CASE(SetArg) {
       unsigned i = GET_ARGNO(pc);
       if (script->argsObjAliasesFormals()) {
-        frame->argsObj().setArg(i, stack[0].asValue());
+        frame->argsObj().setArg(i, sp[0].asValue());
       } else {
-        frame->unaliasedFormal(i) = stack[0].asValue();
+        frame->unaliasedFormal(i) = sp[0].asValue();
       }
       END_OP(SetArg);
     }
@@ -3948,7 +3903,7 @@ dispatch:
     CASE(SetLocal) {
       uint32_t i = GET_LOCALNO(pc);
       TRACE_PRINTF(" -> local: %d\n", int(i));
-      frame->unaliasedLocal(i) = stack[0].asValue();
+      frame->unaliasedLocal(i) = sp[0].asValue();
       END_OP(SetLocal);
     }
 
@@ -3956,12 +3911,12 @@ dispatch:
       EnvironmentCoordinate ec = EnvironmentCoordinate(pc);
       EnvironmentObject& obj = getEnvironmentFromCoordinate(frame, ec);
       MOZ_ASSERT(!IsUninitializedLexical(obj.aliasedBinding(ec)));
-      obj.setAliasedBinding(ec, stack[0].asValue());
+      obj.setAliasedBinding(ec, sp[0].asValue());
       END_OP(SetAliasedVar);
     }
 
     CASE(SetIntrinsic) {
-      state.value0 = stack[0].asValue();
+      state.value0 = sp[0].asValue();
       {
         PUSH_EXIT_FRAME();
         if (!SetIntrinsicOperation(cx, script, pc, state.value0)) {
@@ -4030,7 +3985,7 @@ dispatch:
     }
     CASE(EnterWith) {
       state.scope0 = script->getScope(pc);
-      state.value0 = stack.pop().asValue();
+      state.value0 = POP().asValue();
       {
         PUSH_EXIT_FRAME();
         if (!EnterWithOperation(cx, frame, state.value0,
@@ -4051,7 +4006,7 @@ dispatch:
         PUSH_EXIT_FRAME();
         varObj = BindVarOperation(cx, state.obj0);
       }
-      PUSH_UNCHECKED(StackVal(ObjectValue(*varObj)));
+      PUSH(StackVal(ObjectValue(*varObj)));
       END_OP(BindVar);
     }
 
@@ -4078,7 +4033,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.res));
+      PUSH(StackVal(state.res));
       END_OP(DelName);
     }
 
@@ -4089,7 +4044,7 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.res));
+      PUSH(StackVal(state.res));
       END_OP(Arguments);
     }
 
@@ -4106,53 +4061,53 @@ dispatch:
           goto error;
         }
       }
-      PUSH_UNCHECKED(StackVal(state.res));
+      PUSH(StackVal(state.res));
       END_OP(FunctionThis);
     }
 
     CASE(Pop) {
-      stack.pop();
+      POP();
       END_OP(Pop);
     }
     CASE(PopN) {
       uint32_t n = GET_UINT16(pc);
-      stack.popn(n);
+      POPN(n);
       END_OP(PopN);
     }
     CASE(Dup) {
-      StackVal value = stack[0];
-      PUSH_UNCHECKED(value);
+      StackVal value = sp[0];
+      PUSH(value);
       END_OP(Dup);
     }
     CASE(Dup2) {
-      StackVal value1 = stack[0];
-      StackVal value2 = stack[1];
-      PUSH_UNCHECKED(value2);
-      PUSH_UNCHECKED(value1);
+      StackVal value1 = sp[0];
+      StackVal value2 = sp[1];
+      PUSH(value2);
+      PUSH(value1);
       END_OP(Dup2);
     }
     CASE(DupAt) {
       unsigned i = GET_UINT24(pc);
-      StackVal value = stack[i];
-      PUSH_UNCHECKED(value);
+      StackVal value = sp[i];
+      PUSH(value);
       END_OP(DupAt);
     }
     CASE(Swap) {
-      std::swap(stack[0], stack[1]);
+      std::swap(sp[0], sp[1]);
       END_OP(Swap);
     }
     CASE(Pick) {
       unsigned i = GET_UINT8(pc);
-      StackVal tmp = stack[i];
-      memmove(&stack[1], &stack[0], sizeof(StackVal) * i);
-      stack[0] = tmp;
+      StackVal tmp = sp[i];
+      memmove(&sp[1], &sp[0], sizeof(StackVal) * i);
+      sp[0] = tmp;
       END_OP(Pick);
     }
     CASE(Unpick) {
       unsigned i = GET_UINT8(pc);
-      StackVal tmp = stack[0];
-      memmove(&stack[0], &stack[1], sizeof(StackVal) * i);
-      stack[i] = tmp;
+      StackVal tmp = sp[0];
+      memmove(&sp[0], &sp[1], sizeof(StackVal) * i);
+      sp[i] = tmp;
       END_OP(Unpick);
     }
     CASE(DebugCheckSelfHosted) { END_OP(DebugCheckSelfHosted); }
@@ -4179,21 +4134,21 @@ error:
         TRACE_PRINTF(" -> Return from entry frame\n");
         *ret = MagicValue(JS_ION_ERROR);
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
-        stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
+        stack.unwindingSP = reinterpret_cast<StackVal*>(rfe.stackPointer);
         goto unwind_error;
       case ExceptionResumeKind::Catch:
         pc = frame->interpreterPC();
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
-        stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
+        stack.unwindingSP = reinterpret_cast<StackVal*>(rfe.stackPointer);
         TRACE_PRINTF(" -> catch to pc %p\n", pc);
         goto unwind;
       case ExceptionResumeKind::Finally:
         pc = frame->interpreterPC();
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
-        stack.sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
+        stack.unwindingSP = reinterpret_cast<StackVal*>(rfe.stackPointer);
         TRACE_PRINTF(" -> finally to pc %p\n", pc);
-        PUSH_UNCHECKED(StackVal(rfe.exception));
-        PUSH_UNCHECKED(StackVal(BooleanValue(true)));
+        PUSH(StackVal(rfe.exception));
+        PUSH(StackVal(BooleanValue(true)));
         goto unwind;
       case ExceptionResumeKind::ForcedReturnBaseline:
         TRACE_PRINTF(" -> forced return\n");
@@ -4221,6 +4176,7 @@ unwind:
       reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
     return PBIResult::Unwind;
   }
+  sp = stack.unwindingSP;
   DISPATCH();
 unwind_error:
   if (reinterpret_cast<uintptr_t>(stack.fp) >
@@ -4242,6 +4198,7 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                     Value* result) {
   State state(cx);
   Stack stack(cx->portableBaselineStack());
+  StackVal* sp = stack.top;
 
   // Expected stack frame:
   // - argN
@@ -4256,19 +4213,18 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
     argc++;
   }
 
-  if (!stack.check(sizeof(StackVal) * (argc + 3))) {
+  if (!stack.check(sp, sizeof(StackVal) * (argc + 3))) {
     return false;
   }
 
   for (size_t i = 0; i < argc; i++) {
-    stack.pushUnchecked(StackVal(argv[argc - 1 - i]));
+    PUSH(StackVal(argv[argc - 1 - i]));
   }
-  stack.pushUnchecked(StackVal(calleeToken));
-  stack.pushUnchecked(StackVal(
+  PUSH(StackVal(calleeToken));
+  PUSH(StackVal(
       MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
-  stack.pushUnchecked(StackVal(nullptr));  // Fake return address.
 
-  switch (PortableBaselineInterpret(cx, state, stack, envChain, result)) {
+  switch (PortableBaselineInterpret(cx, state, stack, sp, envChain, result)) {
     case PBIResult::Ok:
     case PBIResult::UnwindRet:
       break;
@@ -4278,10 +4234,6 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
     case PBIResult::Unwind:
       MOZ_CRASH("Should not unwind out of top / entry frame");
   }
-
-  // Pop the descriptor, calleeToken, and args. (Return address is
-  // popped in callee.)
-  stack.popn(2 + argc);
 
   return true;
 }
