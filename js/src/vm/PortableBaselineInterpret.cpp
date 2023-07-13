@@ -2472,7 +2472,7 @@ dispatch:
         INVOKE_IC(ToBool);
         result = Value::fromRawBits(icregs.icResult).toBoolean();
       }
-      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      int32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (!result) {
         ADVANCE(jumpOffset);
         PREDICT_NEXT(JumpTarget);
@@ -2492,7 +2492,7 @@ dispatch:
         INVOKE_IC(ToBool);
         result = Value::fromRawBits(icregs.icResult).toBoolean();
       }
-      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      int32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (result) {
         ADVANCE(jumpOffset);
         PREDICT_NEXT(JumpTarget);
@@ -2513,7 +2513,7 @@ dispatch:
         INVOKE_IC(ToBool);
         result = Value::fromRawBits(icregs.icResult).toBoolean();
       }
-      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      int32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (result) {
         ADVANCE(jumpOffset);
         PREDICT_NEXT(JumpTarget);
@@ -2534,7 +2534,7 @@ dispatch:
         INVOKE_IC(ToBool);
         result = Value::fromRawBits(icregs.icResult).toBoolean();
       }
-      uint32_t jumpOffset = GET_JUMP_OFFSET(pc);
+      int32_t jumpOffset = GET_JUMP_OFFSET(pc);
       if (!result) {
         ADVANCE(jumpOffset);
         PREDICT_NEXT(JumpTarget);
