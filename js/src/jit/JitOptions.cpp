@@ -132,6 +132,10 @@ DefaultJitOptions::DefaultJitOptions() {
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   // Whether the Portable Baseline Interpreter is enabled.
   SET_DEFAULT(portableBaselineInterpreter, false);
+
+  // Whether PBL (portable baseline) is in "hybrid" mode, using only
+  // ICs where they are likely to cause significant speedups.
+  SET_DEFAULT(pblHybrid, true);
 #endif
 
   // Emit baseline interpreter and interpreter entry frames to distinguish which
