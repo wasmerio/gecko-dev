@@ -3926,7 +3926,7 @@ dispatch:
           goto error;
         }
       }
-      *ret = sp[0].asValue();
+      frame->setReturnValue(sp[0].asValue());
       goto do_return;
     }
 
@@ -3941,7 +3941,7 @@ dispatch:
           goto error;
         }
       }
-      *ret = sp[0].asValue();
+      frame->setReturnValue(sp[0].asValue());
       goto do_return;
     }
 
@@ -4127,17 +4127,17 @@ dispatch:
     }
 
     CASE(Return) {
-      *ret = POP().asValue();
+      frame->setReturnValue(POP().asValue());
       goto do_return;
     }
 
     CASE(GetRval) {
-      PUSH(StackVal(*ret));
+      PUSH(StackVal(frame->returnValue()));
       END_OP(GetRval);
     }
 
     CASE(SetRval) {
-      *ret = POP().asValue();
+      frame->setReturnValue(POP().asValue());
       END_OP(SetRval);
     }
 
@@ -4149,9 +4149,11 @@ dispatch:
       // If FP is higher than the entry frame now, return; otherwise,
       // do an inline state update.
       if (stack.fp > entryFrame) {
+        *ret = frame->returnValue();
         return PBIResult::Ok;
       } else {
         TRACE_PRINTF("Return fastpath\n");
+        Value ret = frame->returnValue();
 
         // Pop exit frame as well.
         sp = stack.popFrame();
@@ -4162,10 +4164,7 @@ dispatch:
         // calls or spread calls.
         POPN(argc + 2);
         // Push return value.
-        PUSH(StackVal(*ret));
-        // Reset (shared) return slot -- otherwise other returns in
-        // the same C++ frame may get a spurious non-undefined result.
-        *ret = UndefinedValue();
+        PUSH(StackVal(ret));
 
         // Set PC, frame, and current script.
         frame = reinterpret_cast<BaselineFrame*>(
@@ -4180,11 +4179,11 @@ dispatch:
 
     CASE(CheckReturn) {
       Value thisval = POP().asValue();
-      if (ret->isObject()) {
-        PUSH(StackVal(*ret));
+      if (frame->returnValue().isObject()) {
+        PUSH(StackVal(frame->returnValue()));
       } else if (!ret->isUndefined()) {
         PUSH_EXIT_FRAME();
-        state.value0 = *ret;
+        state.value0 = frame->returnValue();
         ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK,
                          state.value0, nullptr);
         goto error;
@@ -4662,7 +4661,7 @@ error:
     switch (rfe.kind) {
       case ExceptionResumeKind::EntryFrame:
         TRACE_PRINTF(" -> Return from entry frame\n");
-        *ret = MagicValue(JS_ION_ERROR);
+        frame->setReturnValue(MagicValue(JS_ION_ERROR));
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
         stack.unwindingSP = reinterpret_cast<StackVal*>(rfe.stackPointer);
         goto unwind_error;
@@ -4724,6 +4723,7 @@ unwind_ret:
       reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
     return PBIResult::UnwindRet;
   }
+  *ret = frame->returnValue();
   return PBIResult::Ok;
 }
 
