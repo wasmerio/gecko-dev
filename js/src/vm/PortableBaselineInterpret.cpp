@@ -2464,9 +2464,20 @@ dispatch:
       static_assert(JSOpLength_Pos == JSOpLength_Inc);
       static_assert(JSOpLength_Pos == JSOpLength_Dec);
       static_assert(JSOpLength_Pos == JSOpLength_ToNumeric);
-      IC_POP_ARG(0);
-      INVOKE_IC(UnaryArith);
-      IC_PUSH_RESULT();
+      if (sp[0].asValue().isNumeric()) {
+        NEXT_IC();
+      } else if (kHybridICs) {
+        PUSH_EXIT_FRAME();
+        MutableHandleValue val = Stack::handleMut(&sp[0]);
+        if (!ToNumeric(cx, val)) {
+          goto error;
+        }
+        NEXT_IC();
+      } else {
+        IC_POP_ARG(0);
+        INVOKE_IC(UnaryArith);
+        IC_PUSH_RESULT();
+      }
       END_OP(Pos);
     }
 
@@ -2576,6 +2587,13 @@ dispatch:
           NEXT_IC();
           END_OP(Add);
         }
+      } else if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(DoubleValue(lhs + rhs));
+        NEXT_IC();
+        END_OP(Add);
       } else if (kHybridICs) {
         MutableHandleValue lhs = Stack::handleMut(sp + 1);
         MutableHandleValue rhs = Stack::handleMut(sp);
@@ -2604,6 +2622,13 @@ dispatch:
           NEXT_IC();
           END_OP(Sub);
         }
+      } else if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(DoubleValue(lhs - rhs));
+        NEXT_IC();
+        END_OP(Add);
       } else if (kHybridICs) {
         MutableHandleValue lhs = Stack::handleMut(sp + 1);
         MutableHandleValue rhs = Stack::handleMut(sp);
@@ -2620,6 +2645,199 @@ dispatch:
       } else {
         goto generic_binary;
       }
+    }
+
+    CASE(Mul) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int64_t lhs = sp[1].asValue().toInt32();
+        int64_t rhs = sp[0].asValue().toInt32();
+        int64_t product = lhs * rhs;
+        if (product >= int64_t(INT32_MIN) && product <= int64_t(INT32_MAX)) {
+          POP();
+          sp[0] = StackVal(Int32Value(int32_t(product)));
+          NEXT_IC();
+          END_OP(Mul);
+        }
+      } else if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(DoubleValue(lhs * rhs));
+        NEXT_IC();
+        END_OP(Mul);
+      } else if (kHybridICs) {
+        MutableHandleValue lhs = Stack::handleMut(sp + 1);
+        MutableHandleValue rhs = Stack::handleMut(sp);
+        MutableHandleValue result = Stack::handleMut(sp + 1);
+        {
+          PUSH_EXIT_FRAME();
+          if (!MulOperation(cx, lhs, rhs, result)) {
+            goto error;
+          }
+        }
+        POP();
+        NEXT_IC();
+        END_OP(Mul);
+      } else {
+        goto generic_binary;
+      }
+    }
+    CASE(Div) {
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(DoubleValue(NumberDiv(lhs, rhs)));
+        NEXT_IC();
+        END_OP(Div);
+      }
+      if (kHybridICs) {
+        MutableHandleValue lhs = Stack::handleMut(sp + 1);
+        MutableHandleValue rhs = Stack::handleMut(sp);
+        MutableHandleValue result = Stack::handleMut(sp + 1);
+        {
+          PUSH_EXIT_FRAME();
+          if (!DivOperation(cx, lhs, rhs, result)) {
+            goto error;
+          }
+        }
+        POP();
+        NEXT_IC();
+        END_OP(Div);
+      }
+      goto generic_binary;
+    }
+    CASE(Mod) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int64_t lhs = sp[1].asValue().toInt32();
+        int64_t rhs = sp[0].asValue().toInt32();
+        if (lhs > 0 && rhs > 0) {
+          int64_t mod = lhs % lhs;
+          POP();
+          sp[0] = StackVal(Int32Value(int32_t(mod)));
+          NEXT_IC();
+          END_OP(Mod);
+        }
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(DoubleValue(NumberMod(lhs, rhs)));
+        NEXT_IC();
+        END_OP(Mod);
+      }
+      if (kHybridICs) {
+        MutableHandleValue lhs = Stack::handleMut(sp + 1);
+        MutableHandleValue rhs = Stack::handleMut(sp);
+        MutableHandleValue result = Stack::handleMut(sp + 1);
+        {
+          PUSH_EXIT_FRAME();
+          if (!ModOperation(cx, lhs, rhs, result)) {
+            goto error;
+          }
+        }
+        POP();
+        NEXT_IC();
+        END_OP(Mod);
+      }
+      goto generic_binary;
+    }
+    CASE(Pow) {
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(DoubleValue(ecmaPow(lhs, rhs)));
+        NEXT_IC();
+        END_OP(Pow);
+      }
+      if (kHybridICs) {
+        MutableHandleValue lhs = Stack::handleMut(sp + 1);
+        MutableHandleValue rhs = Stack::handleMut(sp);
+        MutableHandleValue result = Stack::handleMut(sp + 1);
+        {
+          PUSH_EXIT_FRAME();
+          if (!PowOperation(cx, lhs, rhs, result)) {
+            goto error;
+          }
+        }
+        POP();
+        NEXT_IC();
+        END_OP(Pow);
+      }
+      goto generic_binary;
+    }
+    CASE(BitOr) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int32_t lhs = sp[1].asValue().toInt32();
+        int32_t rhs = sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(Int32Value(lhs | rhs));
+        NEXT_IC();
+        END_OP(BitOr);
+      }
+      goto generic_binary;
+    }
+    CASE(BitAnd) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int32_t lhs = sp[1].asValue().toInt32();
+        int32_t rhs = sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(Int32Value(lhs & rhs));
+        NEXT_IC();
+        END_OP(BitAnd);
+      }
+      goto generic_binary;
+    }
+    CASE(BitXor) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int32_t lhs = sp[1].asValue().toInt32();
+        int32_t rhs = sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(Int32Value(lhs ^ rhs));
+        NEXT_IC();
+        END_OP(BitXor);
+      }
+      goto generic_binary;
+    }
+    CASE(Lsh) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        // Unsigned to avoid undefined behavior on left-shift overflow
+        // (see comment in BitLshOperation in Interpreter.cpp).
+        uint32_t lhs = uint32_t(sp[1].asValue().toInt32());
+        uint32_t rhs = uint32_t(sp[0].asValue().toInt32());
+        POP();
+        rhs &= 31;
+        sp[0] = StackVal(Int32Value(int32_t(lhs << rhs)));
+        NEXT_IC();
+        END_OP(Lsh);
+      }
+      goto generic_binary;
+    }
+    CASE(Rsh) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        int32_t lhs = sp[1].asValue().toInt32();
+        int32_t rhs = sp[0].asValue().toInt32();
+        POP();
+        rhs &= 31;
+        sp[0] = StackVal(Int32Value(lhs >> rhs));
+        NEXT_IC();
+        END_OP(Rsh);
+      }
+      goto generic_binary;
+    }
+    CASE(Ursh) {
+      if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
+        uint32_t lhs = uint32_t(sp[1].asValue().toInt32());
+        int32_t rhs = sp[0].asValue().toInt32();
+        POP();
+        rhs &= 31;
+        sp[0] = StackVal(Int32Value(int32_t(lhs >> rhs)));
+        NEXT_IC();
+        END_OP(Rsh);
+      }
+      goto generic_binary;
     }
 
   generic_binary:
@@ -2659,6 +2877,13 @@ dispatch:
         NEXT_IC();
         END_OP(Eq);
       }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        bool result = sp[0].asValue().toNumber() == sp[1].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Eq);
+      }
       goto generic_cmp;
     }
 
@@ -2669,6 +2894,13 @@ dispatch:
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
         END_OP(Ne);
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        bool result = sp[0].asValue().toNumber() != sp[1].asValue().toNumber();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Eq);
       }
       goto generic_cmp;
     }
