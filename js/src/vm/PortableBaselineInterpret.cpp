@@ -46,7 +46,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -142,7 +142,7 @@ struct Stack {
     return frame;
   }
 
-  StackVal* popFrame(StackVal* sp, JSContext* cx) {
+  StackVal* popFrame() {
     StackVal* newTOS = fp + 1;
     fp = reinterpret_cast<StackVal*>(fp->asVoidPtr());
     MOZ_ASSERT(fp);
@@ -189,7 +189,7 @@ struct Stack {
     StackVal* prevFP = reinterpret_cast<StackVal*>(fp->asVoidPtr());
     MOZ_ASSERT(prevFP);
     this->fp = prevFP;
-    TRACE_PRINTF("popExitFrame: fp -> %p sp -> %p\n", fp, sp);
+    TRACE_PRINTF("popExitFrame: fp -> %p\n", fp);
   }
 
   BaselineFrame* frameFromFP() {
@@ -266,6 +266,8 @@ class VMFrameManager {
     // calling into the rest of the runtime).
     cx_ = nullptr;
   }
+
+  void switchToFrame(BaselineFrame* frame) { this->frame = frame; }
 
   // Provides the JSContext, but *only* if no calls into the rest of
   // the runtime (that may invoke a GC or stack walk) occur. Avoids
@@ -2247,6 +2249,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   }
   sp = reinterpret_cast<StackVal*>(frame);
 
+  // Save the entry frame so that when unwinding, we know when to
+  // return from this C++ frame.
+  StackVal* entryFrame = sp;
+
   ICRegs icregs;
   RootedScript script(cx_, frame->script());
   jsbytecode* pc = frame->interpreterPC();
@@ -2254,7 +2260,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   // Check max stack depth once, so we don't need to check it
   // otherwise below for ordinary stack-manipulation opcodes (just for
   // exit frames).
-  TRY(stack.check(sp, script->nslots()));
+  TRY(stack.check(sp, sizeof(StackVal) * script->nslots()));
 
   uint32_t nfixed = script->nfixed();
   for (uint32_t i = 0; i < nfixed; i++) {
@@ -2295,7 +2301,7 @@ dispatch:
              (int)(frame->interpreterICEntry() -
                    script->jitScript()->icScript()->icEntries()),
              frameMgr.cxForLocalUseOnly()->isExceptionPending());
-      printf("sp = %p fp = %p\n", stack.sp, stack.fp);
+      printf("sp = %p fp = %p\n", sp, stack.fp);
       printf("TOS tag: %d\n", int(sp[0].asValue().asRawBits() >> 47));
       fflush(stdout);
     }
@@ -2762,7 +2768,8 @@ dispatch:
         END_OP(ToString);
       }
       FakeRooted s(nullptr, sp[0].asValue());
-      if (JSString* result = ToStringSlow<NoGC>(nullptr, s)) {
+      if (JSString* result =
+              ToStringSlow<NoGC>(frameMgr.cxForLocalUseOnly(), s)) {
         sp[0] = StackVal(StringValue(result));
       } else {
         state.value0 = POP().asValue();
@@ -3324,6 +3331,110 @@ dispatch:
       static_assert(JSOpLength_Call == JSOpLength_Eval);
       static_assert(JSOpLength_Call == JSOpLength_StrictEval);
       uint32_t argc = GET_ARGC(pc);
+      do {
+        HandleValue callee = Stack::handle(sp + argc + 1);
+        if (callee.isObject() && callee.toObject().is<JSFunction>()) {
+          JSFunction* func = &callee.toObject().as<JSFunction>();
+          if (!func->hasBaseScript() || !func->isInterpreted() ||
+              func->isClassConstructor()) {
+            break;
+          }
+          if (!func->baseScript()->hasBytecode()) {
+            break;
+          }
+          JSScript* calleeScript = func->baseScript()->asJSScript();
+          if (!calleeScript->hasJitScript()) {
+            break;
+          }
+          if (frameMgr.cxForLocalUseOnly()->realm() != calleeScript->realm()) {
+            break;
+          }
+          if (argc < func->nargs()) {
+            break;
+          }
+
+          // Fast-path: function, interpreted, has JitScript, not a
+          // class constructor, same realm, no argument underflow.
+
+          uint32_t totalArgs = argc + 1;
+          StackVal* origArgs = sp;
+
+          TRACE_PRINTF("Call fastpath: argc = %d origArgs = %p callee = %" PRIx64 "\n",
+                       argc, origArgs, callee.get().asRawBits());
+
+          // 0. Save current PC in current frame, so we can retrieve
+          // it later. Update to next IC in this frame as well; we're
+          // skipping the IC-using slowpath.
+          ADVANCE(JSOpLength_Call);
+          frame->interpreterPC() = pc;
+          NEXT_IC();
+
+          // 1. Push a baseline stub frame. Don't use the frame manager
+          // -- we don't want the frame to be auto-freed when we leave
+          // this scope, and we don't want to shadow `sp`.
+          StackVal* exitFP = stack.pushExitFrame(sp, frame);
+          if (!exitFP) {
+            goto error;
+          }
+          TRACE_PRINTF("exit frame at %p\n", exitFP);
+          sp = exitFP - 1;
+
+          // 2. Modify exit code to nullptr (this is where ICStubReg is
+          // normally saved; the tracing code can skip if null).
+          sp[0] = StackVal(nullptr);
+
+          // 3. Push args in proper order (they are reversed in our
+          // downward-growth stack compared to what the calling
+          // convention expects).
+          TRY(stack.check(sp, sizeof(StackVal) * (totalArgs + 3)));
+          for (uint32_t i = 0; i < totalArgs; i++) {
+            PUSH(origArgs[i]);
+          }
+
+          // 4. Push inter-frame content: callee token, descriptor for
+          // above.
+          PUSH(StackVal(CalleeToToken(func, /* isConstructing = */ false)));
+          PUSH(StackVal(
+              MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
+
+          // 5. Push fake return address, set script, push baseline frame.
+          PUSH(StackVal(nullptr));
+          script.set(calleeScript);
+          BaselineFrame* newFrame =
+              stack.pushFrame(sp, frameMgr.cxForLocalUseOnly(),
+                              /* envChain = */ func->environment());
+          if (!newFrame) {
+            goto error;
+          }
+          TRACE_PRINTF("callee frame at %p\n", newFrame);
+          frame = newFrame;
+          frameMgr.switchToFrame(frame);
+          // 6. Set up PC and SP for callee.
+          sp = reinterpret_cast<StackVal*>(frame);
+          pc = calleeScript->code();
+          // 7. Check callee stack space for max stack depth.
+          if (!stack.check(sp, sizeof(StackVal) * calleeScript->nslots())) {
+            goto error;
+          }
+          // 8. Push local slots, and set return value to `undefined` by
+          // default.
+          uint32_t nfixed = calleeScript->nfixed();
+          for (uint32_t i = 0; i < nfixed; i++) {
+            PUSH(StackVal(UndefinedValue()));
+          }
+          ret->setUndefined();
+          // 9. Initialize environment objects.
+          if (func->needsFunctionEnvironmentObjects()) {
+            PUSH_EXIT_FRAME();
+            TRY(js::InitFunctionEnvironmentObjects(cx, frame));
+          }
+
+          // Everything is switched to callee context now -- dispatch!
+          DISPATCH();
+        }
+      } while (0);
+
+      // Slow path: use the IC!
       icregs.icVals[0] = argc;
       icregs.extraArgs = 2;
       icregs.spreadCall = false;
@@ -3450,9 +3561,7 @@ dispatch:
         }
       }
       *ret = sp[0].asValue();
-      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
-      POP();  // fake return address
-      return PBIResult::Ok;
+      goto do_return;
     }
 
     CASE(Await)
@@ -3467,9 +3576,7 @@ dispatch:
         }
       }
       *ret = sp[0].asValue();
-      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
-      POP();  // fake return address
-      return PBIResult::Ok;
+      goto do_return;
     }
 
     CASE(FinalYieldRval) {
@@ -3481,9 +3588,7 @@ dispatch:
           goto error;
         }
       }
-      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
-      POP();  // fake return address
-      return PBIResult::Ok;
+      goto do_return;
     }
 
     CASE(IsGenClosing) {
@@ -3657,9 +3762,7 @@ dispatch:
 
     CASE(Return) {
       *ret = POP().asValue();
-      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
-      POP();  // fake return address
-      return PBIResult::Ok;
+      goto do_return;
     }
 
     CASE(GetRval) {
@@ -3672,10 +3775,38 @@ dispatch:
       END_OP(SetRval);
     }
 
+  do_return:
     CASE(RetRval) {
-      sp = stack.popFrame(sp, frameMgr.cxForLocalUseOnly());
-      POP();  // fake return address
-      return PBIResult::Ok;
+      uint32_t argc = frame->numActualArgs();
+      sp = stack.popFrame();
+
+      // If FP is higher than the entry frame now, return; otherwise,
+      // do an inline state update.
+      if (stack.fp > entryFrame) {
+        return PBIResult::Ok;
+      } else {
+        TRACE_PRINTF("Return fastpath\n");
+
+        // Pop exit frame as well.
+        sp = stack.popFrame();
+        // Pop fake return address.
+        POP();
+        // Pop args -- this is always `argc + 2` because we only do
+        // this optimization for ordinary calls, not constructing
+        // calls or spread calls.
+        POPN(argc + 2);
+        // Push return value.
+        PUSH(StackVal(*ret));
+
+        // Set PC, frame, and current script.
+        frame = reinterpret_cast<BaselineFrame*>(
+            reinterpret_cast<uintptr_t>(stack.fp) - BaselineFrame::Size());
+        frameMgr.switchToFrame(frame);
+        pc = frame->interpreterPC();
+        script.set(frame->script());
+
+        DISPATCH();
+      }
     }
 
     CASE(CheckReturn) {
@@ -4207,6 +4338,11 @@ unwind:
     return PBIResult::Unwind;
   }
   sp = stack.unwindingSP;
+  frame = reinterpret_cast<BaselineFrame*>(
+      reinterpret_cast<uintptr_t>(stack.fp) - BaselineFrame::Size());
+  frameMgr.switchToFrame(frame);
+  pc = frame->interpreterPC();
+  script.set(frame->script());
   DISPATCH();
 unwind_error:
   if (reinterpret_cast<uintptr_t>(stack.fp) >
