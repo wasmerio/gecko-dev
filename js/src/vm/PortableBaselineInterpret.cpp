@@ -1256,10 +1256,10 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
         // We *also* need an exit frame (the native baseline
         // execution would invoke a trampoline here).
         StackVal* trampolinePrevFP = stack.fp;
+        PUSH(StackVal(nullptr));  // fake return address.
         PUSH(StackVal(stack.fp));
         stack.fp = sp;
         PUSH(StackVal(uint64_t(ExitFrameType::Bare)));
-        PUSH(StackVal(nullptr));  // fake return address.
         cx.getCx()->activation()->asJit()->setJSExitFP(
             reinterpret_cast<uint8_t*>(stack.fp));
         cx.getCx()->portableBaselineStack().top = reinterpret_cast<void*>(sp);
@@ -3359,8 +3359,9 @@ dispatch:
           uint32_t totalArgs = argc + 1;
           StackVal* origArgs = sp;
 
-          TRACE_PRINTF("Call fastpath: argc = %d origArgs = %p callee = %" PRIx64 "\n",
-                       argc, origArgs, callee.get().asRawBits());
+          TRACE_PRINTF(
+              "Call fastpath: argc = %d origArgs = %p callee = %" PRIx64 "\n",
+              argc, origArgs, callee.get().asRawBits());
 
           // 0. Save current PC in current frame, so we can retrieve
           // it later. Update to next IC in this frame as well; we're
@@ -4362,7 +4363,7 @@ unwind_ret:
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
-                                    size_t numActualArgs,
+                                    size_t numActualArgs, size_t numFormals,
                                     CalleeToken calleeToken, JSObject* envChain,
                                     Value* result) {
   State state(cx);
@@ -4382,16 +4383,22 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
     argc++;
   }
 
-  if (!stack.check(sp, sizeof(StackVal) * (argc + 3))) {
+  size_t finalArgc = std::max(numActualArgs, numFormals);
+  if (!stack.check(sp, sizeof(StackVal) * (finalArgc + 3))) {
     return false;
   }
 
+  if (numActualArgs < numFormals) {
+    for (size_t i = numActualArgs; i < numFormals; i++) {
+      PUSH(StackVal(UndefinedValue()));
+    }
+  }
   for (size_t i = 0; i < argc; i++) {
     PUSH(StackVal(argv[argc - 1 - i]));
   }
   PUSH(StackVal(calleeToken));
   PUSH(StackVal(
-      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActualArgs)));
+      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, finalArgc)));
 
   switch (PortableBaselineInterpret(cx, state, stack, sp, envChain, result)) {
     case PBIResult::Ok:
@@ -4416,22 +4423,31 @@ MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
     return MethodStatus::Method_Compiled;
   }
   if (state.script()->hasForceInterpreterOp()) {
+    printf("Not entering PBL: force interp\n");
     return MethodStatus::Method_CantCompile;
   }
   if (state.script()->nslots() > BaselineMaxScriptSlots) {
+    printf("Not entering PBL: max slots %d greater than max %d\n",
+           int(state.script()->nslots()), int(BaselineMaxScriptSlots));
     return MethodStatus::Method_CantCompile;
   }
   if (state.isInvoke()) {
     InvokeState& invoke = *state.asInvoke();
     if (TooManyActualArguments(invoke.args().length())) {
+      printf("Not entering PBL: too many args (%d)\n",
+             int(invoke.args().length()));
       return MethodStatus::Method_CantCompile;
     }
   }
   if (state.script()->getWarmUpCount() <=
       JitOptions.portableBaselineInterpreterWarmUpThreshold) {
+    printf("Not entering PBL: warm up count %d not high enough (%d) yet\n",
+           int(state.script()->getWarmUpCount()),
+           int(JitOptions.portableBaselineInterpreterWarmUpThreshold));
     return MethodStatus::Method_Skipped;
   }
   if (!cx->realm()->ensureJitRealmExists(cx)) {
+    printf("Not entering PBL: JIT realm does not exist\n");
     return MethodStatus::Method_Error;
   }
 

@@ -65,6 +65,7 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
   JSObject* envChain;
   CalleeToken calleeToken;
 
+  unsigned numFormals = 0;
   if (state.isInvoke()) {
     const CallArgs& args = state.asInvoke()->args();
     numActualArgs = args.length();
@@ -80,11 +81,9 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
     envChain = nullptr;
     calleeToken = CalleeToToken(&args.callee().as<JSFunction>(), constructing);
 
-    unsigned numFormals = script->function()->nargs();
+    numFormals = script->function()->nargs();
     if (numFormals > numActualArgs) {
-#ifdef ENABLE_PORTABLE_BASELINE_INTERP
-      return EnterJitStatus::NotEntered;
-#else
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
       code = cx->runtime()->jitRuntime()->getArgumentsRectifier().value;
 #endif
     }
@@ -122,7 +121,8 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
     nogc.reset();
 #  endif
     if (!PortableBaselineTrampoline(cx, maxArgc, maxArgv, numActualArgs,
-                                    calleeToken, envChain, result.address())) {
+                                    numFormals, calleeToken, envChain,
+                                    result.address())) {
       return EnterJitStatus::Error;
     }
 #endif  // ENABLE_PORTABLE_BASELINE_INTERP
