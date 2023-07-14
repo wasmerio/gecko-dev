@@ -3797,6 +3797,9 @@ dispatch:
         POPN(argc + 2);
         // Push return value.
         PUSH(StackVal(*ret));
+        // Reset (shared) return slot -- otherwise other returns in
+        // the same C++ frame may get a spurious non-undefined result.
+        *ret = UndefinedValue();
 
         // Set PC, frame, and current script.
         frame = reinterpret_cast<BaselineFrame*>(
