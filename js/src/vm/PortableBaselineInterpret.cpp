@@ -2406,6 +2406,11 @@ dispatch:
           END_OP(Neg);
         }
       }
+      if (sp[0].asValue().isNumber()) {
+        sp[0] = StackVal(NumberValue(-sp[0].asValue().toNumber()));
+        NEXT_IC();
+        END_OP(Neg);
+      }
       goto generic_unary;
     }
 
@@ -2418,6 +2423,11 @@ dispatch:
           END_OP(Inc);
         }
       }
+      if (sp[0].asValue().isNumber()) {
+        sp[0] = StackVal(NumberValue(sp[0].asValue().toNumber() + 1));
+        NEXT_IC();
+        END_OP(Inc);
+      }
       goto generic_unary;
     }
     CASE(Dec) {
@@ -2428,6 +2438,11 @@ dispatch:
           NEXT_IC();
           END_OP(Dec);
         }
+      }
+      if (sp[0].asValue().isNumber()) {
+        sp[0] = StackVal(NumberValue(sp[0].asValue().toNumber() - 1));
+        NEXT_IC();
+        END_OP(Dec);
       }
       goto generic_unary;
     }
@@ -2955,6 +2970,37 @@ dispatch:
     }
 
     CASE(GetElem) {
+      HandleValue lhs = Stack::handle(&sp[0]);
+      HandleValue rhs = Stack::handle(&sp[1]);
+      uint32_t index;
+      if (IsDefinitelyIndex(rhs, &index)) {
+        if (lhs.isString()) {
+          JSString* str = lhs.toString();
+          if (index < str->length() && str->isLinear()) {
+            JSLinearString* linear = &str->asLinear();
+            char16_t c = linear->latin1OrTwoByteChar(index);
+            StaticStrings& sstr = frameMgr.cxForLocalUseOnly()->staticStrings();
+            if (sstr.hasUnit(c)) {
+              sp[1] = StackVal(StringValue(sstr.getUnit(c)));
+              POP();
+              NEXT_IC();
+              END_OP(GetElem);
+            }
+          }
+        }
+        if (lhs.isObject()) {
+          JSObject* obj = &lhs.toObject();
+          Value ret;
+          if (GetElementNoGC(frameMgr.cxForLocalUseOnly(), obj, lhs, index,
+                             &ret)) {
+            sp[1] = StackVal(ret);
+            POP();
+            NEXT_IC();
+            END_OP(GetElem);
+          }
+        }
+      }
+
       IC_POP_ARG(1);
       IC_POP_ARG(0);
       INVOKE_IC(GetElem);
