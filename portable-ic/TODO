@@ -1,33 +1,26 @@
-- implement await/resume
+- Correctness/completeness
+  - implement await/resume
+  - pass all jit-tests
 
-- PBL-hybrid for all "slower than baseline" ops
-  - unary, binary ops
-  - GetElem/SetElem? Or at least fastpaths
+- Performance
+  - PBL-hybrid for all "slower than baseline" ops
+    - unary, binary ops
+    - GetElem/SetElem? Or at least fastpaths
+    - monomorphize the interpreter on a bool template param and select
+      at entry which option to take
+  - implement CallScriptedFunction for ctors
+  - implement as many CacheIR ops as needed to completely cover markdown renderer
+  - OSR (on-stack replacement)
+  - implement direct-threaded opts in Wasmtime/Cranelift
 
-- same-C++-frame call/ret for scripted->scripted
-  - keep a "depth counter"; on Ret, do inline ret and goto dispatch if
-    JS frames within this native frame remain
-  - factor out the frame push/pop from IC
+- Wasm
+  - on wasm and other 32-bit platforms: make StackVal properly push
+    32-bit values? stick to 64-bit layout for BaselineFrame,
+    JitFrameLayout, etc?
+  - weval the IC interp and PBL interp loops
+    - memory-rename the stack and icVals too
 
-- pass all jit-tests
-  - work out issue with EnvironmentIter::settle and assertions on GC (try a
-    debug build running markdown.js)
-
-- implement CallScriptedFunction for ctors
-
-- implement as many CacheIR ops as needed to completely cover markdown renderer
-- opts:
-  - "next-op fusion": cover a few likely next ops with if-goto
-    - for bonus points, make these edges acyclic; then the wasm compilation can
-      handle it too without any loop-backedges
-  - cover a few common cases (e.g. int32 compare/arith) without doing ICs at all
-  - cache unchanging values (stubInfo?) as needed
-
-- weval the IC interp and PBL interp loops
-  - memory-rename the stack and icVals too
-
-- OSR (on-stack replacement)
-
-- on wasm and other 32-bit platforms: make StackVal properly push
-  32-bit values? stick to 64-bit layout for BaselineFrame,
-  JitFrameLayout, etc?
+- Tests
+  - markdown
+  - Octane
+  
