@@ -2868,6 +2868,15 @@ dispatch:
         END_OP(Eq);
       }
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[1].asValue().toNumber();
+        bool result = lhs == rhs;
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Eq);
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         bool result = sp[0].asValue().toNumber() == sp[1].asValue().toNumber();
         POP();
         sp[0] = StackVal(BooleanValue(result));
@@ -2880,6 +2889,15 @@ dispatch:
     CASE(Ne) {
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
         bool result = sp[0].asValue().toInt32() != sp[1].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Ne);
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[1].asValue().toNumber();
+        bool result = lhs != rhs;
         POP();
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
@@ -2903,11 +2921,29 @@ dispatch:
         NEXT_IC();
         END_OP(Lt);
       }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[1].asValue().toNumber();
+        bool result = lhs < rhs;
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Lt);
+      }
       goto generic_cmp;
     }
     CASE(Le) {
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
         bool result = sp[1].asValue().toInt32() <= sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Le);
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[1].asValue().toNumber();
+        bool result = lhs <= rhs;
         POP();
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
@@ -2923,11 +2959,29 @@ dispatch:
         NEXT_IC();
         END_OP(Gt);
       }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[1].asValue().toNumber();
+        bool result = lhs > rhs;
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Gt);
+      }
       goto generic_cmp;
     }
     CASE(Ge) {
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
         bool result = sp[1].asValue().toInt32() >= sp[0].asValue().toInt32();
+        POP();
+        sp[0] = StackVal(BooleanValue(result));
+        NEXT_IC();
+        END_OP(Ge);
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+        double lhs = sp[1].asValue().toNumber();
+        double rhs = sp[1].asValue().toNumber();
+        bool result = lhs >= rhs;
         POP();
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
