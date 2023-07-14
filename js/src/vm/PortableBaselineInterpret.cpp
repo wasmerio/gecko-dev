@@ -46,7 +46,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -3789,8 +3789,8 @@ dispatch:
 
         // Pop exit frame as well.
         sp = stack.popFrame();
-        // Pop fake return address.
-        POP();
+        // Pop fake return address and descriptor.
+        POPN(2);
         // Pop args -- this is always `argc + 2` because we only do
         // this optimization for ordinary calls, not constructing
         // calls or spread calls.
