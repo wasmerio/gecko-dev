@@ -2840,34 +2840,24 @@ dispatch:
       goto generic_binary;
     }
 
-  generic_binary:
-    CASE(BitOr)
-    CASE(BitXor)
-    CASE(BitAnd)
-    CASE(Lsh)
-    CASE(Rsh)
-    CASE(Ursh)
-    CASE(Mul)
-    CASE(Div)
-    CASE(Mod)
-    CASE(Pow) {
-      static_assert(JSOpLength_BitOr == JSOpLength_BitXor);
-      static_assert(JSOpLength_BitOr == JSOpLength_BitAnd);
-      static_assert(JSOpLength_BitOr == JSOpLength_Lsh);
-      static_assert(JSOpLength_BitOr == JSOpLength_Rsh);
-      static_assert(JSOpLength_BitOr == JSOpLength_Ursh);
-      static_assert(JSOpLength_BitOr == JSOpLength_Add);
-      static_assert(JSOpLength_BitOr == JSOpLength_Sub);
-      static_assert(JSOpLength_BitOr == JSOpLength_Mul);
-      static_assert(JSOpLength_BitOr == JSOpLength_Div);
-      static_assert(JSOpLength_BitOr == JSOpLength_Mod);
-      static_assert(JSOpLength_BitOr == JSOpLength_Pow);
-      IC_POP_ARG(1);
-      IC_POP_ARG(0);
-      INVOKE_IC(BinaryArith);
-      IC_PUSH_RESULT();
-      END_OP(Div);
-    }
+  generic_binary : {
+    static_assert(JSOpLength_BitOr == JSOpLength_BitXor);
+    static_assert(JSOpLength_BitOr == JSOpLength_BitAnd);
+    static_assert(JSOpLength_BitOr == JSOpLength_Lsh);
+    static_assert(JSOpLength_BitOr == JSOpLength_Rsh);
+    static_assert(JSOpLength_BitOr == JSOpLength_Ursh);
+    static_assert(JSOpLength_BitOr == JSOpLength_Add);
+    static_assert(JSOpLength_BitOr == JSOpLength_Sub);
+    static_assert(JSOpLength_BitOr == JSOpLength_Mul);
+    static_assert(JSOpLength_BitOr == JSOpLength_Div);
+    static_assert(JSOpLength_BitOr == JSOpLength_Mod);
+    static_assert(JSOpLength_BitOr == JSOpLength_Pow);
+    IC_POP_ARG(1);
+    IC_POP_ARG(0);
+    INVOKE_IC(BinaryArith);
+    IC_PUSH_RESULT();
+    END_OP(Div);
+  }
 
     CASE(Eq) {
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
@@ -3091,14 +3081,42 @@ dispatch:
     }
 
     CASE(NewInit) {
-      INVOKE_IC(NewObject);
-      IC_PUSH_RESULT();
-      END_OP(NewInit);
+      if (kHybridICs) {
+        JSObject* obj;
+        {
+          PUSH_EXIT_FRAME();
+          obj = NewObjectOperation(cx, script, pc);
+          if (!obj) {
+            goto error;
+          }
+        }
+        PUSH(StackVal(ObjectValue(*obj)));
+        NEXT_IC();
+        END_OP(NewInit);
+      } else {
+        INVOKE_IC(NewObject);
+        IC_PUSH_RESULT();
+        END_OP(NewInit);
+      }
     }
     CASE(NewObject) {
-      INVOKE_IC(NewObject);
-      IC_PUSH_RESULT();
-      END_OP(NewObject);
+      if (kHybridICs) {
+        JSObject* obj;
+        {
+          PUSH_EXIT_FRAME();
+          obj = NewObjectOperation(cx, script, pc);
+          if (!obj) {
+            goto error;
+          }
+        }
+        PUSH(StackVal(ObjectValue(*obj)));
+        NEXT_IC();
+        END_OP(NewObject);
+      } else {
+        INVOKE_IC(NewObject);
+        IC_PUSH_RESULT();
+        END_OP(NewObject);
+      }
     }
     CASE(Object) {
       PUSH(StackVal(ObjectValue(*script->getObject(pc))));
@@ -3477,9 +3495,24 @@ dispatch:
     }
 
     CASE(NewArray) {
-      INVOKE_IC(NewArray);
-      IC_PUSH_RESULT();
-      END_OP(NewArray);
+      if (kHybridICs) {
+        ArrayObject* obj;
+        {
+          PUSH_EXIT_FRAME();
+          uint32_t length = GET_UINT32(pc);
+          obj = NewArrayOperation(cx, length);
+          if (!obj) {
+            goto error;
+          }
+        }
+        PUSH(StackVal(ObjectValue(*obj)));
+        NEXT_IC();
+        END_OP(NewArray);
+      } else {
+        INVOKE_IC(NewArray);
+        IC_PUSH_RESULT();
+        END_OP(NewArray);
+      }
     }
 
     CASE(InitElemArray) {
