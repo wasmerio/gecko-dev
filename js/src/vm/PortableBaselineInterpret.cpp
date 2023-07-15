@@ -4728,7 +4728,7 @@ unwind_ret:
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
-                                    size_t numActualArgs, size_t numFormals,
+                                    size_t numFormals, size_t numActuals,
                                     CalleeToken calleeToken, JSObject* envChain,
                                     Value* result) {
   State state(cx);
@@ -4744,26 +4744,35 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   // - descriptor
   // - "return address" (nullptr for top frame)
 
-  if (CalleeTokenIsConstructing(calleeToken)) {
-    argc++;
-  }
+  // `argc` is the number of args *including* `this` (`N + 1`
+  // above). `numFormals` is the minimum `N`; if less, we need to push
+  // `UndefinedValue`s above. We need to pass an argc (including
+  // `this`) accoundint for the extra undefs in the descriptor's argc.
+  //
+  // If constructing, there is an additional `newTarget` at the end.
+  //
+  // Note that `callee`, which is in the stack signature for a `Call`
+  // JSOp, does *not* appear in this count: it is separately passed in
+  // the `calleeToken`.
 
-  size_t finalArgc = std::max(numActualArgs, numFormals);
-  if (!stack.check(sp, sizeof(StackVal) * (finalArgc + 3))) {
+  bool constructing = CalleeTokenIsConstructing(calleeToken);
+  size_t numCalleeActuals = std::max(numActuals, numFormals);
+  size_t totalArgs = numCalleeActuals + 1 + constructing;
+  size_t numUndefs = numCalleeActuals - numActuals;
+
+  if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 3))) {
     return false;
   }
 
-  if (numActualArgs < numFormals) {
-    for (size_t i = numActualArgs; i < numFormals; i++) {
-      PUSH(StackVal(UndefinedValue()));
-    }
+  for (size_t i = 0; i < numUndefs; i++) {
+    PUSH(StackVal(UndefinedValue()));
   }
   for (size_t i = 0; i < argc; i++) {
     PUSH(StackVal(argv[argc - 1 - i]));
   }
   PUSH(StackVal(calleeToken));
   PUSH(StackVal(
-      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, finalArgc)));
+      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActuals)));
 
   switch (PortableBaselineInterpret(cx, state, stack, sp, envChain, result)) {
     case PBIResult::Ok:
@@ -4788,31 +4797,22 @@ MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
     return MethodStatus::Method_Compiled;
   }
   if (state.script()->hasForceInterpreterOp()) {
-    printf("Not entering PBL: force interp\n");
     return MethodStatus::Method_CantCompile;
   }
   if (state.script()->nslots() > BaselineMaxScriptSlots) {
-    printf("Not entering PBL: max slots %d greater than max %d\n",
-           int(state.script()->nslots()), int(BaselineMaxScriptSlots));
     return MethodStatus::Method_CantCompile;
   }
   if (state.isInvoke()) {
     InvokeState& invoke = *state.asInvoke();
     if (TooManyActualArguments(invoke.args().length())) {
-      printf("Not entering PBL: too many args (%d)\n",
-             int(invoke.args().length()));
       return MethodStatus::Method_CantCompile;
     }
   }
   if (state.script()->getWarmUpCount() <=
       JitOptions.portableBaselineInterpreterWarmUpThreshold) {
-    printf("Not entering PBL: warm up count %d not high enough (%d) yet\n",
-           int(state.script()->getWarmUpCount()),
-           int(JitOptions.portableBaselineInterpreterWarmUpThreshold));
     return MethodStatus::Method_Skipped;
   }
   if (!cx->realm()->ensureJitRealmExists(cx)) {
-    printf("Not entering PBL: JIT realm does not exist\n");
     return MethodStatus::Method_Error;
   }
 

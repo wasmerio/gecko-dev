@@ -120,8 +120,8 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
 #  ifdef DEBUG
     nogc.reset();
 #  endif
-    if (!PortableBaselineTrampoline(cx, maxArgc, maxArgv, numActualArgs,
-                                    numFormals, calleeToken, envChain,
+    if (!PortableBaselineTrampoline(cx, maxArgc, maxArgv, numFormals,
+                                    numActualArgs, calleeToken, envChain,
                                     result.address())) {
       return EnterJitStatus::Error;
     }
