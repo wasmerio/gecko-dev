@@ -4764,6 +4764,9 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
     return false;
   }
 
+  if (constructing) {
+    PUSH(StackVal(argv[argc]));
+  }
   for (size_t i = 0; i < numUndefs; i++) {
     PUSH(StackVal(UndefinedValue()));
   }
@@ -4772,7 +4775,7 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   }
   PUSH(StackVal(calleeToken));
   PUSH(StackVal(
-      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActuals)));
+      MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numCalleeActuals)));
 
   switch (PortableBaselineInterpret(cx, state, stack, sp, envChain, result)) {
     case PBIResult::Ok:
