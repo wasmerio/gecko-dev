@@ -2457,13 +2457,7 @@ dispatch:
       goto generic_unary;
     }
 
-  generic_unary:
     CASE(ToNumeric) {
-      static_assert(JSOpLength_Pos == JSOpLength_Neg);
-      static_assert(JSOpLength_Pos == JSOpLength_BitNot);
-      static_assert(JSOpLength_Pos == JSOpLength_Inc);
-      static_assert(JSOpLength_Pos == JSOpLength_Dec);
-      static_assert(JSOpLength_Pos == JSOpLength_ToNumeric);
       if (sp[0].asValue().isNumeric()) {
         NEXT_IC();
       } else if (kHybridICs) {
@@ -2474,12 +2468,22 @@ dispatch:
         }
         NEXT_IC();
       } else {
-        IC_POP_ARG(0);
-        INVOKE_IC(UnaryArith);
-        IC_PUSH_RESULT();
+        goto generic_unary;
       }
-      END_OP(Pos);
+      END_OP(ToNumeric);
     }
+
+  generic_unary : {
+    static_assert(JSOpLength_Pos == JSOpLength_Neg);
+    static_assert(JSOpLength_Pos == JSOpLength_BitNot);
+    static_assert(JSOpLength_Pos == JSOpLength_Inc);
+    static_assert(JSOpLength_Pos == JSOpLength_Dec);
+    static_assert(JSOpLength_Pos == JSOpLength_ToNumeric);
+    IC_POP_ARG(0);
+    INVOKE_IC(UnaryArith);
+    IC_PUSH_RESULT();
+    END_OP(Pos);
+  }
 
     CASE(Not) {
       if (kHybridICs) {
