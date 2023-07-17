@@ -4747,26 +4747,31 @@ error:
   DISPATCH();
 
 unwind:
+  TRACE_PRINTF("unwind: fp = %p entryFrame = %p\n", stack.fp, entryFrame);
   if (reinterpret_cast<uintptr_t>(stack.fp) >
-      reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
+      reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
+    TRACE_PRINTF(" -> returning\n");
     return PBIResult::Unwind;
   }
   sp = stack.unwindingSP;
   frame = reinterpret_cast<BaselineFrame*>(
       reinterpret_cast<uintptr_t>(stack.fp) - BaselineFrame::Size());
+  TRACE_PRINTF(" -> setting sp to %p, frame to %p\n", sp, frame);
   frameMgr.switchToFrame(frame);
   pc = frame->interpreterPC();
   script.set(frame->script());
   DISPATCH();
 unwind_error:
+  TRACE_PRINTF("unwind_error: fp = %p entryFrame = %p\n", stack.fp, entryFrame);
   if (reinterpret_cast<uintptr_t>(stack.fp) >
-      reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
+      reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
     return PBIResult::UnwindError;
   }
   return PBIResult::Error;
 unwind_ret:
+  TRACE_PRINTF("unwind_ret: fp = %p entryFrame = %p\n", stack.fp, entryFrame);
   if (reinterpret_cast<uintptr_t>(stack.fp) >
-      reinterpret_cast<uintptr_t>(frame) + BaselineFrame::Size()) {
+      reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
     return PBIResult::UnwindRet;
   }
   *ret = frame->returnValue();
