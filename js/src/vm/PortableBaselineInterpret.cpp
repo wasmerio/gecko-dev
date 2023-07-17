@@ -2467,8 +2467,8 @@ dispatch:
       if (sp[0].asValue().isNumeric()) {
         NEXT_IC();
       } else if (kHybridICs) {
-        PUSH_EXIT_FRAME();
         MutableHandleValue val = Stack::handleMut(&sp[0]);
+        PUSH_EXIT_FRAME();
         if (!ToNumeric(cx, val)) {
           goto error;
         }
