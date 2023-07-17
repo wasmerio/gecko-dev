@@ -2726,7 +2726,7 @@ dispatch:
         int64_t lhs = sp[1].asValue().toInt32();
         int64_t rhs = sp[0].asValue().toInt32();
         if (lhs > 0 && rhs > 0) {
-          int64_t mod = lhs % lhs;
+          int64_t mod = lhs % rhs;
           POP();
           sp[0] = StackVal(Int32Value(int32_t(mod)));
           NEXT_IC();
