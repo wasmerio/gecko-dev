@@ -2888,7 +2888,7 @@ dispatch:
       }
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
-        double rhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
         bool result = lhs == rhs;
         POP();
         sp[0] = StackVal(BooleanValue(result));
@@ -2915,7 +2915,7 @@ dispatch:
       }
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
-        double rhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
         bool result = lhs != rhs;
         POP();
         sp[0] = StackVal(BooleanValue(result));
@@ -2942,8 +2942,11 @@ dispatch:
       }
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
-        double rhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
         bool result = lhs < rhs;
+        if (std::isnan(lhs) || std::isnan(rhs)) {
+          result = false;
+        }
         POP();
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
@@ -2961,8 +2964,11 @@ dispatch:
       }
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
-        double rhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
         bool result = lhs <= rhs;
+        if (std::isnan(lhs) || std::isnan(rhs)) {
+          result = false;
+        }
         POP();
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
@@ -2980,8 +2986,11 @@ dispatch:
       }
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
-        double rhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
         bool result = lhs > rhs;
+        if (std::isnan(lhs) || std::isnan(rhs)) {
+          result = false;
+        }
         POP();
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
@@ -2999,8 +3008,11 @@ dispatch:
       }
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
-        double rhs = sp[1].asValue().toNumber();
+        double rhs = sp[0].asValue().toNumber();
         bool result = lhs >= rhs;
+        if (std::isnan(lhs) || std::isnan(rhs)) {
+          result = false;
+        }
         POP();
         sp[0] = StackVal(BooleanValue(result));
         NEXT_IC();
