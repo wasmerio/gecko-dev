@@ -2833,9 +2833,14 @@ dispatch:
         int32_t rhs = sp[0].asValue().toInt32();
         POP();
         rhs &= 31;
-        sp[0] = StackVal(Int32Value(int32_t(lhs >> rhs)));
+        uint32_t result = lhs >> rhs;
+        if (result <= uint32_t(INT32_MAX)) {
+          sp[0] = StackVal(Int32Value(int32_t(result)));
+        } else {
+          sp[0] = StackVal(DoubleValue(double(result)));
+        }
         NEXT_IC();
-        END_OP(Rsh);
+        END_OP(Ursh);
       }
       goto generic_binary;
     }
