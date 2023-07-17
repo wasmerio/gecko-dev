@@ -3771,7 +3771,8 @@ dispatch:
           // 3. Push args in proper order (they are reversed in our
           // downward-growth stack compared to what the calling
           // convention expects).
-          if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 3) + kStackMargin)) {
+          if (!stack.check(sp,
+                           sizeof(StackVal) * (totalArgs + 3) + kStackMargin)) {
             ReportOverRecursed(frameMgr.cxForLocalUseOnly());
             goto error;
           }
@@ -4072,7 +4073,18 @@ dispatch:
     }
 
     CASE(Resume) {
-      MOZ_CRASH("implement resume");
+      Value gen = sp[2].asValue();
+      state.obj0 = &gen.toObject();
+      Value* callerSP = reinterpret_cast<Value*>(sp);
+      {
+        PUSH_EXIT_FRAME();
+        TRACE_PRINTF("Going to C++ interp for Resume\n");
+        if (!InterpretResume(cx, state.obj0, callerSP, &state.value0)) {
+          goto error;
+        }
+      }
+      POPN(2);
+      sp[0] = StackVal(state.value0);
       END_OP(Resume);
     }
 
