@@ -3293,8 +3293,8 @@ dispatch:
     }
 
     CASE(GetElem) {
-      HandleValue lhs = Stack::handle(&sp[0]);
-      HandleValue rhs = Stack::handle(&sp[1]);
+      HandleValue lhs = Stack::handle(&sp[1]);
+      HandleValue rhs = Stack::handle(&sp[0]);
       uint32_t index;
       if (IsDefinitelyIndex(rhs, &index)) {
         if (lhs.isString()) {
