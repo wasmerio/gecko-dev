@@ -1239,6 +1239,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
       sp[0] = StackVal(cstub);
 
       if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 6))) {
+        ReportOverRecursed(frameMgr.cxForLocalUseOnly());
         return ICInterpretOpResult::Error;
       }
 
@@ -2225,6 +2226,9 @@ DEFINE_IC(CloseIter, 1, {
 #define PREDICT_NEXT(op) \
   if (JSOp(*pc) == JSOp::op) goto label_##op;
 
+// Large enough for an exit frame.
+static const size_t kStackMargin = 1024;
+
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
                                            Stack& stack, StackVal* sp,
                                            JSObject* envChain, Value* ret) {
@@ -2242,6 +2246,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   if (!recursion.check(cx_)) {
     return PBIResult::Error;
   }
+
+  // TODO: check PBL stack too; ReportOverRecursed on error.
 
   PUSH(StackVal(nullptr));  // Fake return address.
   BaselineFrame* frame = stack.pushFrame(sp, cx_, envChain);
@@ -2261,7 +2267,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   // Check max stack depth once, so we don't need to check it
   // otherwise below for ordinary stack-manipulation opcodes (just for
   // exit frames).
-  TRY(stack.check(sp, sizeof(StackVal) * script->nslots()));
+  if (!stack.check(sp, sizeof(StackVal) * script->nslots() + kStackMargin)) {
+    ReportOverRecursed(cx_);
+    return PBIResult::Error;
+  }
 
   uint32_t nfixed = script->nfixed();
   for (uint32_t i = 0; i < nfixed; i++) {
@@ -3762,7 +3771,10 @@ dispatch:
           // 3. Push args in proper order (they are reversed in our
           // downward-growth stack compared to what the calling
           // convention expects).
-          TRY(stack.check(sp, sizeof(StackVal) * (totalArgs + 3)));
+          if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 3) + kStackMargin)) {
+            ReportOverRecursed(frameMgr.cxForLocalUseOnly());
+            goto error;
+          }
           for (uint32_t i = 0; i < totalArgs; i++) {
             PUSH(origArgs[i]);
           }
