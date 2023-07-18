@@ -2240,13 +2240,6 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 #undef OPCODE_LABEL
 #undef TRAILING_LABEL
 
-  AutoCheckRecursionLimit recursion(cx_);
-  if (!recursion.check(cx_)) {
-    return PBIResult::Error;
-  }
-
-  // TODO: check PBL stack too; ReportOverRecursed on error.
-
   PUSH(StackVal(nullptr));  // Fake return address.
   BaselineFrame* frame = stack.pushFrame(sp, cx_, envChain);
   if (!frame) {
@@ -2262,11 +2255,21 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   RootedScript script(cx_, frame->script());
   jsbytecode* pc = frame->interpreterPC();
 
+  VMFrameManager frameMgr(cx_, frame);
+
+  AutoCheckRecursionLimit recursion(frameMgr.cxForLocalUseOnly());
+  if (!recursion.checkDontReport(frameMgr.cxForLocalUseOnly())) {
+    PUSH_EXIT_FRAME();
+    ReportOverRecursed(frameMgr.cxForLocalUseOnly());
+    return PBIResult::Error;
+  }
+
   // Check max stack depth once, so we don't need to check it
   // otherwise below for ordinary stack-manipulation opcodes (just for
   // exit frames).
   if (!stack.check(sp, sizeof(StackVal) * script->nslots() + kStackMargin)) {
-    ReportOverRecursed(cx_);
+    PUSH_EXIT_FRAME();
+    ReportOverRecursed(frameMgr.cxForLocalUseOnly());
     return PBIResult::Error;
   }
 
@@ -2275,8 +2278,6 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     PUSH(StackVal(UndefinedValue()));
   }
   ret->setUndefined();
-
-  VMFrameManager frameMgr(cx_, frame);
 
   if (CalleeTokenIsFunction(frame->calleeToken())) {
     JSFunction* func = CalleeTokenToFunction(frame->calleeToken());
@@ -3783,6 +3784,7 @@ dispatch:
           // convention expects).
           if (!stack.check(sp,
                            sizeof(StackVal) * (totalArgs + 3) + kStackMargin)) {
+            PUSH_EXIT_FRAME();
             ReportOverRecursed(frameMgr.cxForLocalUseOnly());
             goto error;
           }
