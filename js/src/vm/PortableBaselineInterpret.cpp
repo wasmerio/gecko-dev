@@ -2315,6 +2315,13 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
   }
 
+  if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
+    PUSH_EXIT_FRAME();
+    if (!InterruptCheck(cx)) {
+      goto error;
+    }
+  }
+
   TRACE_PRINTF("Entering: sp = %p fp = %p frame = %p, script = %p, pc = %p\n",
                sp, stack.fp, frame, script.get(), pc);
   TRACE_PRINTF("nslots = %d nfixed = %d\n", int(script->nslots()),
@@ -3870,6 +3877,13 @@ dispatch:
               goto error;
             }
           }
+          // 11. Check for interrupts.
+          if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
+            PUSH_EXIT_FRAME();
+            if (!InterruptCheck(cx)) {
+              goto error;
+            }
+          }
 
           // Everything is switched to callee context now -- dispatch!
           DISPATCH();
@@ -4852,6 +4866,9 @@ error:
         PUSH(StackVal(BooleanValue(true)));
         goto unwind;
       case ExceptionResumeKind::ForcedReturnBaseline:
+        pc = frame->interpreterPC();
+        stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
+        stack.unwindingSP = reinterpret_cast<StackVal*>(rfe.stackPointer);
         TRACE_PRINTF(" -> forced return\n");
         goto unwind_ret;
       case ExceptionResumeKind::ForcedReturnIon:
@@ -4893,21 +4910,43 @@ unwind_error:
       reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
     return PBIResult::UnwindError;
   }
-  return PBIResult::Error;
+  if (reinterpret_cast<uintptr_t>(stack.fp) ==
+      reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
+    return PBIResult::Error;
+  }
+  sp = stack.unwindingSP;
+  frame = reinterpret_cast<BaselineFrame*>(
+      reinterpret_cast<uintptr_t>(stack.fp) - BaselineFrame::Size());
+  TRACE_PRINTF(" -> setting sp to %p, frame to %p\n", sp, frame);
+  frameMgr.switchToFrame(frame);
+  pc = frame->interpreterPC();
+  script.set(frame->script());
+  goto error;
 unwind_ret:
   TRACE_PRINTF("unwind_ret: fp = %p entryFrame = %p\n", stack.fp, entryFrame);
   if (reinterpret_cast<uintptr_t>(stack.fp) >
       reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
     return PBIResult::UnwindRet;
   }
-  if (frame->isDebuggee()) {
-    PUSH_EXIT_FRAME();
-    if (!DebugEpilogueOnBaselineReturn(cx, frame, pc)) {
-      goto error;
+  if (reinterpret_cast<uintptr_t>(stack.fp) ==
+      reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
+    if (frame->isDebuggee()) {
+      PUSH_EXIT_FRAME();
+      if (!DebugEpilogueOnBaselineReturn(cx, frame, pc)) {
+        goto error;
+      }
     }
+    *ret = frame->returnValue();
+    return PBIResult::Ok;
   }
-  *ret = frame->returnValue();
-  return PBIResult::Ok;
+  sp = stack.unwindingSP;
+  frame = reinterpret_cast<BaselineFrame*>(
+      reinterpret_cast<uintptr_t>(stack.fp) - BaselineFrame::Size());
+  TRACE_PRINTF(" -> setting sp to %p, frame to %p\n", sp, frame);
+  frameMgr.switchToFrame(frame);
+  pc = frame->interpreterPC();
+  script.set(frame->script());
+  goto do_return;
 
 debug : {
   TRACE_PRINTF("hit debug point\n");
