@@ -63,7 +63,7 @@
 using namespace js;
 using namespace js::jit;
 
-static const bool kHybridICs = false;
+static const bool kHybridICs = true;
 
 struct StackVal {
   uint64_t value;
@@ -2600,14 +2600,16 @@ dispatch:
           NEXT_IC();
           END_OP(Add);
         }
-      } else if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
         sp[0] = StackVal(DoubleValue(lhs + rhs));
         NEXT_IC();
         END_OP(Add);
-      } else if (kHybridICs) {
+      }
+      if (kHybridICs) {
         MutableHandleValue lhs = Stack::handleMut(sp + 1);
         MutableHandleValue rhs = Stack::handleMut(sp);
         MutableHandleValue result = Stack::handleMut(sp + 1);
@@ -2620,9 +2622,8 @@ dispatch:
         POP();
         NEXT_IC();
         END_OP(Add);
-      } else {
-        goto generic_binary;
       }
+      goto generic_binary;
     }
 
     CASE(Sub) {
@@ -2635,14 +2636,16 @@ dispatch:
           NEXT_IC();
           END_OP(Sub);
         }
-      } else if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
         sp[0] = StackVal(DoubleValue(lhs - rhs));
         NEXT_IC();
         END_OP(Add);
-      } else if (kHybridICs) {
+      }
+      if (kHybridICs) {
         MutableHandleValue lhs = Stack::handleMut(sp + 1);
         MutableHandleValue rhs = Stack::handleMut(sp);
         MutableHandleValue result = Stack::handleMut(sp + 1);
@@ -2655,9 +2658,8 @@ dispatch:
         POP();
         NEXT_IC();
         END_OP(Sub);
-      } else {
-        goto generic_binary;
       }
+      goto generic_binary;
     }
 
     CASE(Mul) {
@@ -2671,14 +2673,16 @@ dispatch:
           NEXT_IC();
           END_OP(Mul);
         }
-      } else if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
+      }
+      if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
         sp[0] = StackVal(DoubleValue(lhs * rhs));
         NEXT_IC();
         END_OP(Mul);
-      } else if (kHybridICs) {
+      }
+      if (kHybridICs) {
         MutableHandleValue lhs = Stack::handleMut(sp + 1);
         MutableHandleValue rhs = Stack::handleMut(sp);
         MutableHandleValue result = Stack::handleMut(sp + 1);
@@ -2691,9 +2695,8 @@ dispatch:
         POP();
         NEXT_IC();
         END_OP(Mul);
-      } else {
-        goto generic_binary;
       }
+      goto generic_binary;
     }
     CASE(Div) {
       if (sp[0].asValue().isNumber() && sp[1].asValue().isNumber()) {
