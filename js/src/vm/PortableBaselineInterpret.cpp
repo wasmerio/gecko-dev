@@ -539,11 +539,10 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE(GuardShape) {
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     uint32_t shapeOffset = icregs.cacheIRReader.stubOffset();
-    NativeObject* nobj =
-        reinterpret_cast<NativeObject*>(icregs.icVals[objId.id()]);
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
     uintptr_t expectedShape =
         cstub->stubInfo()->getStubRawWord(cstub, shapeOffset);
-    if (reinterpret_cast<uintptr_t>(nobj->shape()) != expectedShape) {
+    if (reinterpret_cast<uintptr_t>(obj->shape()) != expectedShape) {
       return ICInterpretOpResult::NextIC;
     }
     DISPATCH_CACHEOP();
@@ -552,11 +551,10 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE(GuardProto) {
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     uint32_t protoOffset = icregs.cacheIRReader.stubOffset();
-    NativeObject* nobj =
-        reinterpret_cast<NativeObject*>(icregs.icVals[objId.id()]);
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
     uintptr_t expectedProto =
         cstub->stubInfo()->getStubRawWord(cstub, protoOffset);
-    if (reinterpret_cast<uintptr_t>(nobj->staticPrototype()) != expectedProto) {
+    if (reinterpret_cast<uintptr_t>(obj->staticPrototype()) != expectedProto) {
       return ICInterpretOpResult::NextIC;
     }
     PREDICT_NEXT(LoadProto);
