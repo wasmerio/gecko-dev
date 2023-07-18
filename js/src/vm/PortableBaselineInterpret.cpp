@@ -2101,12 +2101,12 @@ DEFINE_IC(GetElem, 2, {
 });
 
 DEFINE_IC(GetElemSuper, 3, {
-  IC_LOAD_VAL(value0, 0);
-  IC_LOAD_VAL(value1, 1);
-  IC_LOAD_VAL(value2, 2);
+  IC_LOAD_VAL(value0, 0);  // receiver
+  IC_LOAD_VAL(value1, 1);  // obj (lhs)
+  IC_LOAD_VAL(value2, 2);  // key (rhs)
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoGetElemSuperFallback(cx, frame, fallback, state.value0, state.value1,
-                              state.value2, &state.res)) {
+  if (!DoGetElemSuperFallback(cx, frame, fallback, state.value1, state.value2,
+                              state.value0, &state.res)) {
     goto error;
   }
 });
@@ -3348,8 +3348,11 @@ dispatch:
     }
 
     CASE(GetElemSuper) {
-      IC_POP_ARG(2);
+      // N.B.: second and third args are out of order! See the saga at
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=1709328; this is
+      // an echo of that issue.
       IC_POP_ARG(1);
+      IC_POP_ARG(2);
       IC_POP_ARG(0);
       INVOKE_IC(GetElemSuper);
       IC_PUSH_RESULT();
