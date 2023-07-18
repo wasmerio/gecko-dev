@@ -1,4 +1,4 @@
-// |jit-test| exitstatus: 6;
+// |jit-test| exitstatus: 6; skip-if: getBuildConfiguration()['pbl']
 
 setInterruptCallback(() => false);
 0n == {
