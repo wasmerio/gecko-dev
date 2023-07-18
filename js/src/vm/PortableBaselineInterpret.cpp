@@ -63,7 +63,7 @@
 using namespace js;
 using namespace js::jit;
 
-static const bool kHybridICs = true;
+static const bool kHybridICs = false;
 
 struct StackVal {
   uint64_t value;
@@ -3357,7 +3357,7 @@ dispatch:
       bool res = false;
       {
         PUSH_EXIT_FRAME();
-        if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
+        if (!DelPropOperation<false>(cx, state.value0, state.name0, &res)) {
           goto error;
         }
       }
@@ -3383,7 +3383,7 @@ dispatch:
       bool res = false;
       {
         PUSH_EXIT_FRAME();
-        if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
+        if (!DelElemOperation<false>(cx, state.value0, state.value1, &res)) {
           goto error;
         }
       }
