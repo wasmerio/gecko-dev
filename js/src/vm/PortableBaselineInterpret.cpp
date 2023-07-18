@@ -70,19 +70,35 @@ struct StackVal {
 
   explicit StackVal(uint64_t v) : value(v) {}
   explicit StackVal(Value v) : value(v.asRawBits()) {}
-  explicit StackVal(void* v) : value(reinterpret_cast<uint64_t>(v)) {}
 
   uint64_t asUInt64() const { return value; }
   Value asValue() const { return Value::fromRawBits(value); }
+};
+
+struct StackValNative {
+  uintptr_t value;
+
+  explicit StackValNative(void* v) : value(reinterpret_cast<uintptr_t>(v)) {}
+  explicit StackValNative(uint32_t v) : value(v) {}
+
   void* asVoidPtr() const { return reinterpret_cast<void*>(value); }
   CalleeToken asCalleeToken() const {
     return reinterpret_cast<CalleeToken>(value);
   }
 };
 
-#define PUSH(val) *--sp = val
+#define PUSH(val) *--sp = (val)
 #define POP() (*sp++)
 #define POPN(n) sp += (n)
+
+#define PUSHNATIVE(val)                                               \
+  do {                                                                \
+    StackValNative* nativeSP = reinterpret_cast<StackValNative*>(sp); \
+    *--nativeSP = (val);                                              \
+    sp = reinterpret_cast<StackVal*>(nativeSP);                       \
+  } while (0)
+#define POPNNATIVE(n) \
+  sp = reinterpret_cast<StackVal*>(reinterpret_cast<StackValNative*>(sp) + (n))
 
 struct Stack {
   StackVal* fp;
@@ -121,7 +137,7 @@ struct Stack {
     if (sp == base) {
       return nullptr;
     }
-    PUSH(StackVal(fp));
+    PUSHNATIVE(StackValNative(fp));
     fp = sp;
     TRACE_PRINTF("pushFrame: new fp = %p\n", fp);
 
@@ -143,8 +159,10 @@ struct Stack {
   }
 
   StackVal* popFrame() {
-    StackVal* newTOS = fp + 1;
-    fp = reinterpret_cast<StackVal*>(fp->asVoidPtr());
+    StackVal* newTOS =
+        reinterpret_cast<StackVal*>(reinterpret_cast<StackValNative*>(fp) + 1);
+    fp = reinterpret_cast<StackVal*>(
+        reinterpret_cast<StackValNative*>(fp)->asVoidPtr());
     MOZ_ASSERT(fp);
     TRACE_PRINTF("popFrame: fp = %p\n", fp);
     return newTOS;
@@ -175,18 +193,20 @@ struct Stack {
       return nullptr;
     }
 
-    PUSH(StackVal(MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)));
-    PUSH(StackVal(nullptr));  // fake return address.
-    PUSH(StackVal(prevFP));
+    PUSHNATIVE(StackValNative(
+        MakeFrameDescriptorForJitCall(FrameType::BaselineJS, 0)));
+    PUSHNATIVE(StackValNative(nullptr));  // fake return address.
+    PUSHNATIVE(StackValNative(prevFP));
     StackVal* exitFP = sp;
     fp = exitFP;
     TRACE_PRINTF(" -> fp = %p\n", fp);
-    PUSH(StackVal(uint64_t(ExitFrameType::Bare)));
+    PUSHNATIVE(StackValNative(uint32_t(ExitFrameType::Bare)));
     return exitFP;
   }
 
   void popExitFrame(StackVal* fp) {
-    StackVal* prevFP = reinterpret_cast<StackVal*>(fp->asVoidPtr());
+    StackVal* prevFP = reinterpret_cast<StackVal*>(
+        reinterpret_cast<StackValNative*>(fp)->asVoidPtr());
     MOZ_ASSERT(prevFP);
     this->fp = prevFP;
     TRACE_PRINTF("popExitFrame: fp -> %p\n", fp);
@@ -1234,7 +1254,8 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
       PUSH_IC_FRAME();
       // This will not be an Exit frame but a BaselinStub frame, so
       // replace the ExitFrameType with the ICStub pointer.
-      sp[0] = StackVal(cstub);
+      POPNNATIVE(1);
+      PUSHNATIVE(StackValNative(cstub));
 
       if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 6))) {
         ReportOverRecursed(frameMgr.cxForLocalUseOnly());
@@ -1248,18 +1269,19 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
       Value* args = reinterpret_cast<Value*>(sp);
 
       TRACE_PRINTF("pushing callee: %p\n", callee);
-      PUSH(StackVal(CalleeToToken(callee, /* isConstructing = */ false)));
-      PUSH(StackVal(
+      PUSHNATIVE(
+          StackValNative(CalleeToToken(callee, /* isConstructing = */ false)));
+      PUSHNATIVE(StackValNative(
           MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
 
       if (isNative) {
         // We *also* need an exit frame (the native baseline
         // execution would invoke a trampoline here).
         StackVal* trampolinePrevFP = stack.fp;
-        PUSH(StackVal(nullptr));  // fake return address.
-        PUSH(StackVal(stack.fp));
+        PUSHNATIVE(StackValNative(nullptr));  // fake return address.
+        PUSHNATIVE(StackValNative(stack.fp));
         stack.fp = sp;
-        PUSH(StackVal(uint64_t(ExitFrameType::Bare)));
+        PUSHNATIVE(StackValNative(uint32_t(ExitFrameType::Bare)));
         cx.getCx()->activation()->asJit()->setJSExitFP(
             reinterpret_cast<uint8_t*>(stack.fp));
         cx.getCx()->portableBaselineStack().top = reinterpret_cast<void*>(sp);
@@ -1270,7 +1292,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
         bool success = native(cx, argc, args);
 
         stack.fp = trampolinePrevFP;
-        POPN(3);
+        POPNNATIVE(3);
 
         if (!success) {
           return ICInterpretOpResult::Error;
@@ -2253,7 +2275,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 #undef OPCODE_LABEL
 #undef TRAILING_LABEL
 
-  PUSH(StackVal(nullptr));  // Fake return address.
+  PUSHNATIVE(StackValNative(nullptr));  // Fake return address.
   BaselineFrame* frame = stack.pushFrame(sp, cx_, envChain);
   if (!frame) {
     return PBIResult::Error;
@@ -3815,7 +3837,8 @@ dispatch:
 
           // 2. Modify exit code to nullptr (this is where ICStubReg is
           // normally saved; the tracing code can skip if null).
-          sp[0] = StackVal(nullptr);
+          POPNNATIVE(1);
+          PUSHNATIVE(StackValNative(nullptr));
 
           // 3. Push args in proper order (they are reversed in our
           // downward-growth stack compared to what the calling
@@ -3832,12 +3855,13 @@ dispatch:
 
           // 4. Push inter-frame content: callee token, descriptor for
           // above.
-          PUSH(StackVal(CalleeToToken(func, /* isConstructing = */ false)));
-          PUSH(StackVal(
+          PUSHNATIVE(StackValNative(
+              CalleeToToken(func, /* isConstructing = */ false)));
+          PUSHNATIVE(StackValNative(
               MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
 
           // 5. Push fake return address, set script, push baseline frame.
-          PUSH(StackVal(nullptr));
+          PUSHNATIVE(StackValNative(nullptr));
           script.set(calleeScript);
           BaselineFrame* newFrame =
               stack.pushFrame(sp, frameMgr.cxForLocalUseOnly(),
@@ -4288,7 +4312,7 @@ dispatch:
         // Pop exit frame as well.
         sp = stack.popFrame();
         // Pop fake return address and descriptor.
-        POPN(2);
+        POPNNATIVE(2);
         // Pop args -- this is always `argc + 2` because we only do
         // this optimization for ordinary calls, not constructing
         // calls or spread calls.
@@ -5004,8 +5028,8 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   for (size_t i = 0; i < argc; i++) {
     PUSH(StackVal(argv[argc - 1 - i]));
   }
-  PUSH(StackVal(calleeToken));
-  PUSH(StackVal(
+  PUSHNATIVE(StackValNative(calleeToken));
+  PUSHNATIVE(StackValNative(
       MakeFrameDescriptorForJitCall(FrameType::CppToJSJit, numActuals)));
 
   switch (PortableBaselineInterpret(cx, state, stack, sp, envChain, result)) {
