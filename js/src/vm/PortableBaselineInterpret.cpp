@@ -3927,15 +3927,22 @@ dispatch:
       END_OP(SuperFun);
     }
 
-    CASE(CheckThis)
+    CASE(CheckThis) {
+      if (sp[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
+        PUSH_EXIT_FRAME();
+        MOZ_ALWAYS_FALSE(ThrowUninitializedThis(cx));
+        goto error;
+      }
+      END_OP(CheckThis);
+    }
+
     CASE(CheckThisReinit) {
-      static_assert(JSOpLength_CheckThis == JSOpLength_CheckThisReinit);
       if (!sp[0].asValue().isMagic(JS_UNINITIALIZED_LEXICAL)) {
         PUSH_EXIT_FRAME();
         MOZ_ALWAYS_FALSE(ThrowInitializedThis(cx));
         goto error;
       }
-      END_OP(CheckThis);
+      END_OP(CheckThisReinit);
     }
 
     CASE(Generator) {
