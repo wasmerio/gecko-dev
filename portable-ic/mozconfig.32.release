@@ -1,0 +1,13 @@
+# Build only the SpiderMonkey JS test shell
+ac_add_options --enable-project=js
+ac_add_options --enable-application=js
+ac_add_options --without-system-zlib
+ac_add_options --enable-jitspew
+ac_add_options --enable-optimize
+#ac_add_options --disable-optimize
+#ac_add_options --enable-debug
+ac_add_options --disable-debug
+ac_add_options --enable-portable-baseline-interp
+ac_add_options --prefix=obj-release/dist
+ac_add_options --target=i686-unknown-linux-gnu
+mk_add_options MOZ_OBJDIR=obj-release32
