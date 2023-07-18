@@ -2691,7 +2691,8 @@ dispatch:
         int64_t lhs = sp[1].asValue().toInt32();
         int64_t rhs = sp[0].asValue().toInt32();
         int64_t product = lhs * rhs;
-        if (product >= int64_t(INT32_MIN) && product <= int64_t(INT32_MAX)) {
+        if (product >= int64_t(INT32_MIN) && product <= int64_t(INT32_MAX) &&
+            (product != 0 || !((lhs < 0) ^ (rhs < 0)))) {
           POP();
           sp[0] = StackVal(Int32Value(int32_t(product)));
           NEXT_IC();
