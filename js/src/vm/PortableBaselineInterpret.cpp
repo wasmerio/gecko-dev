@@ -3833,11 +3833,9 @@ dispatch:
             goto error;
           }
           TRACE_PRINTF("exit frame at %p\n", exitFP);
-          sp = exitFP - 1;
 
           // 2. Modify exit code to nullptr (this is where ICStubReg is
           // normally saved; the tracing code can skip if null).
-          POPNNATIVE(1);
           PUSHNATIVE(StackValNative(nullptr));
 
           // 3. Push args in proper order (they are reversed in our
