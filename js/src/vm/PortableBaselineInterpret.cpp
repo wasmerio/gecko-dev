@@ -2198,12 +2198,25 @@ DEFINE_IC(CloseIter, 1, {
 
 #define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(PBIResult::Error)
 
+#define DEBUG_CHECK()                                                   \
+  if (frame->isDebuggee()) {                                            \
+    TRACE_PRINTF(                                                       \
+        "Debug check: frame is debuggee, checking for debug script\n"); \
+    if (script->hasDebugScript()) {                                     \
+      goto debug;                                                       \
+    }                                                                   \
+  }
+
 #define LABEL(op) (&&label_##op)
 #define CASE(op) label_##op:
 #ifndef TRACE_INTERP
-#  define DISPATCH() goto* addresses[*pc]
+#  define DISPATCH() \
+    DEBUG_CHECK();   \
+    goto* addresses[*pc]
 #else
-#  define DISPATCH() goto dispatch
+#  define DISPATCH() \
+    DEBUG_CHECK();   \
+    goto dispatch
 #endif
 
 #define ADVANCE(delta) pc += (delta);
@@ -2290,15 +2303,24 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
   }
 
+  // Check if we are being debugged, and set a flag in the frame if
+  // so.
+  if (script->isDebuggee()) {
+    TRACE_PRINTF("Script is debuggee\n");
+    frame->setIsDebuggee();
+
+    PUSH_EXIT_FRAME();
+    if (!DebugPrologue(cx, frame)) {
+      goto error;
+    }
+  }
+
   TRACE_PRINTF("Entering: sp = %p fp = %p frame = %p, script = %p, pc = %p\n",
                sp, stack.fp, frame, script.get(), pc);
   TRACE_PRINTF("nslots = %d nfixed = %d\n", int(script->nslots()),
                int(script->nfixed()));
 
-#ifdef TRACE_INTERP
 dispatch:
-#endif
-
   while (true) {
 #ifdef TRACE_INTERP
     {
@@ -3837,6 +3859,16 @@ dispatch:
             PUSH_EXIT_FRAME();
             TRY(js::InitFunctionEnvironmentObjects(cx, frame));
           }
+          // 10. Set debug flag, if appropriate.
+          if (script->isDebuggee()) {
+            TRACE_PRINTF("Script is debuggee\n");
+            frame->setIsDebuggee();
+
+            PUSH_EXIT_FRAME();
+            if (!DebugPrologue(cx, frame)) {
+              goto error;
+            }
+          }
 
           // Everything is switched to callee context now -- dispatch!
           DISPATCH();
@@ -4134,6 +4166,13 @@ dispatch:
     CASE(AfterYield) {
       int32_t icIndex = GET_INT32(pc);
       frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+      if (frame->isDebuggee()) {
+        TRACE_PRINTF("doing DebugAfterYield\n");
+        PUSH_EXIT_FRAME();
+        if (!DebugAfterYield(cx, frame)) {
+          goto error;
+        }
+      }
       END_OP(AfterYield);
     }
 
@@ -4211,6 +4250,15 @@ dispatch:
   do_return:
     CASE(RetRval) {
       uint32_t argc = frame->numActualArgs();
+
+      if (frame->isDebuggee()) {
+        TRACE_PRINTF("doing DebugEpilogueOnBaselineReturn\n");
+        PUSH_EXIT_FRAME();
+        if (!DebugEpilogueOnBaselineReturn(cx, frame, pc)) {
+          goto error;
+        }
+      }
+
       sp = stack.popFrame();
 
       // If FP is higher than the entry frame now, return; otherwise,
@@ -4542,16 +4590,40 @@ dispatch:
       END_OP(PushLexicalEnv);
     }
     CASE(PopLexicalEnv) {
-      frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
+      if (frame->isDebuggee()) {
+        TRACE_PRINTF("doing DebugLeaveThenPopLexicalEnv\n");
+        PUSH_EXIT_FRAME();
+        if (!DebugLeaveThenPopLexicalEnv(cx, frame, pc)) {
+          goto error;
+        }
+      } else {
+        frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
+      }
       END_OP(PopLexicalEnv);
     }
-    CASE(DebugLeaveLexicalEnv) { END_OP(DebugLeaveLexicalEnv); }
+    CASE(DebugLeaveLexicalEnv) {
+      if (frame->isDebuggee()) {
+        TRACE_PRINTF("doing DebugLeaveLexicalEnv\n");
+        PUSH_EXIT_FRAME();
+        if (!DebugLeaveLexicalEnv(cx, frame, pc)) {
+          goto error;
+        }
+      }
+      END_OP(DebugLeaveLexicalEnv);
+    }
 
     CASE(RecreateLexicalEnv) {
       {
         PUSH_EXIT_FRAME();
-        if (!frame->recreateLexicalEnvironment(cx)) {
-          goto error;
+        if (frame->isDebuggee()) {
+          TRACE_PRINTF("doing DebugLeaveThenRecreateLexicalEnv\n");
+          if (!DebugLeaveThenRecreateLexicalEnv(cx, frame, pc)) {
+            goto error;
+          }
+        } else {
+          if (!frame->recreateLexicalEnvironment(cx)) {
+            goto error;
+          }
         }
       }
       END_OP(RecreateLexicalEnv);
@@ -4560,8 +4632,15 @@ dispatch:
     CASE(FreshenLexicalEnv) {
       {
         PUSH_EXIT_FRAME();
-        if (!frame->freshenLexicalEnvironment(cx)) {
-          goto error;
+        if (frame->isDebuggee()) {
+          TRACE_PRINTF("doing DebugLeaveThenFreshenLexicalEnv\n");
+          if (!DebugLeaveThenFreshenLexicalEnv(cx, frame, pc)) {
+            goto error;
+          }
+        } else {
+          if (!frame->freshenLexicalEnvironment(cx)) {
+            goto error;
+          }
         }
       }
       END_OP(FreshenLexicalEnv);
@@ -4714,7 +4793,16 @@ dispatch:
       sp[i] = tmp;
       END_OP(Unpick);
     }
-    CASE(DebugCheckSelfHosted) { END_OP(DebugCheckSelfHosted); }
+    CASE(DebugCheckSelfHosted) {
+      HandleValue val = Stack::handle(&sp[0]);
+      {
+        PUSH_EXIT_FRAME();
+        if (!Debug_CheckSelfHosted(cx, val)) {
+          goto error;
+        }
+      }
+      END_OP(DebugCheckSelfHosted);
+    }
     CASE(Lineno) { END_OP(Lineno); }
     CASE(NopDestructuring) { END_OP(NopDestructuring); }
     CASE(ForceInterpreter) { END_OP(ForceInterpreter); }
@@ -4811,8 +4899,23 @@ unwind_ret:
       reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
     return PBIResult::UnwindRet;
   }
+  if (frame->isDebuggee()) {
+    PUSH_EXIT_FRAME();
+    if (!DebugEpilogueOnBaselineReturn(cx, frame, pc)) {
+      goto error;
+    }
+  }
   *ret = frame->returnValue();
   return PBIResult::Ok;
+
+debug : {
+  TRACE_PRINTF("hit debug point\n");
+  PUSH_EXIT_FRAME();
+  if (!HandleDebugTrap(cx, frame, pc)) {
+    goto error;
+  }
+}
+  goto dispatch;
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
