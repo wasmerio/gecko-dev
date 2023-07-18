@@ -4030,7 +4030,7 @@ dispatch:
     CASE(Await)
     CASE(Yield) {
       // rval1, gen => rval2, gen, resumeKind
-      state.obj0 = &sp[0].asValue().toObject();
+      state.obj0 = &POP().asValue().toObject();
       uint32_t frameSize = stack.frameSize(sp, frame);
       {
         PUSH_EXIT_FRAME();
