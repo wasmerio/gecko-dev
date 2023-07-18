@@ -46,7 +46,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
+// #define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -3832,6 +3832,7 @@ dispatch:
           if (!exitFP) {
             goto error;
           }
+          sp = exitFP;
           TRACE_PRINTF("exit frame at %p\n", exitFP);
 
           // 2. Modify exit code to nullptr (this is where ICStubReg is
