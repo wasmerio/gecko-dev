@@ -2594,7 +2594,7 @@ dispatch:
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
         int64_t lhs = sp[1].asValue().toInt32();
         int64_t rhs = sp[0].asValue().toInt32();
-        if (lhs + rhs <= int64_t(INT32_MAX)) {
+        if (lhs - rhs >= int64_t(INT32_MIN) && lhs - rhs <= int64_t(INT32_MAX)) {
           POP();
           sp[0] = StackVal(Int32Value(int32_t(lhs + rhs)));
           NEXT_IC();
@@ -2630,7 +2630,7 @@ dispatch:
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
         int64_t lhs = sp[1].asValue().toInt32();
         int64_t rhs = sp[0].asValue().toInt32();
-        if (lhs - rhs >= int64_t(INT32_MIN)) {
+        if (lhs - rhs >= int64_t(INT32_MIN) && lhs - rhs <= int64_t(INT32_MAX)) {
           POP();
           sp[0] = StackVal(Int32Value(int32_t(lhs - rhs)));
           NEXT_IC();
