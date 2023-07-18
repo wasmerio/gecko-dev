@@ -33,8 +33,6 @@ const TEST_CASES = [
 
 let g = newGlobal({newCompartment: true});
 for (let [actual, expected] of TEST_CASES) {
-    print("actual = " + actual);
-    print("expected = " + expected);
     assertEq(valueToSource(eval(actual)), expected);
     assertEq(valueToSource(g.eval(actual)), expected);
 }
