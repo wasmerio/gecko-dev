@@ -46,7 +46,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -4321,6 +4321,7 @@ dispatch:
         // Set PC, frame, and current script.
         frame = reinterpret_cast<BaselineFrame*>(
             reinterpret_cast<uintptr_t>(stack.fp) - BaselineFrame::Size());
+        TRACE_PRINTF(" sp -> %p, fp -> %p, frame -> %p\n", sp, stack.fp, frame);
         frameMgr.switchToFrame(frame);
         pc = frame->interpreterPC();
         script.set(frame->script());
