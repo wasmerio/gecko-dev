@@ -2594,7 +2594,8 @@ dispatch:
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
         int64_t lhs = sp[1].asValue().toInt32();
         int64_t rhs = sp[0].asValue().toInt32();
-        if (lhs + rhs >= int64_t(INT32_MIN) && lhs + rhs <= int64_t(INT32_MAX)) {
+        if (lhs + rhs >= int64_t(INT32_MIN) &&
+            lhs + rhs <= int64_t(INT32_MAX)) {
           POP();
           sp[0] = StackVal(Int32Value(int32_t(lhs + rhs)));
           NEXT_IC();
@@ -2630,7 +2631,8 @@ dispatch:
       if (sp[0].asValue().isInt32() && sp[1].asValue().isInt32()) {
         int64_t lhs = sp[1].asValue().toInt32();
         int64_t rhs = sp[0].asValue().toInt32();
-        if (lhs - rhs >= int64_t(INT32_MIN) && lhs - rhs <= int64_t(INT32_MAX)) {
+        if (lhs - rhs >= int64_t(INT32_MIN) &&
+            lhs - rhs <= int64_t(INT32_MAX)) {
           POP();
           sp[0] = StackVal(Int32Value(int32_t(lhs - rhs)));
           NEXT_IC();
@@ -4118,6 +4120,12 @@ dispatch:
     CASE(LoopHead) {
       int32_t icIndex = GET_INT32(pc);
       frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+      if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
+        PUSH_EXIT_FRAME();
+        if (!InterruptCheck(cx)) {
+          goto error;
+        }
+      }
       END_OP(LoopHead);
     }
     CASE(AfterYield) {
@@ -4298,7 +4306,15 @@ dispatch:
       END_OP(Exception);
     }
 
-    CASE(Finally) { END_OP(Finally); }
+    CASE(Finally) {
+      if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
+        PUSH_EXIT_FRAME();
+        if (!InterruptCheck(cx)) {
+          goto error;
+        }
+      }
+      END_OP(Finally);
+    }
 
     CASE(Uninitialized) {
       PUSH(StackVal(MagicValue(JS_UNINITIALIZED_LEXICAL)));
@@ -4699,7 +4715,15 @@ dispatch:
     CASE(Lineno) { END_OP(Lineno); }
     CASE(NopDestructuring) { END_OP(NopDestructuring); }
     CASE(ForceInterpreter) { END_OP(ForceInterpreter); }
-    CASE(Debugger) { END_OP(Debugger); }
+    CASE(Debugger) {
+      {
+        PUSH_EXIT_FRAME();
+        if (!OnDebuggerStatement(cx, frame)) {
+          goto error;
+        }
+      }
+      END_OP(Debugger);
+    }
 
   label_default:
     MOZ_CRASH("Bad opcode");
