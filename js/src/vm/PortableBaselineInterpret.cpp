@@ -314,7 +314,10 @@ class VMFrame {
     cx->portableBaselineStack().top = reinterpret_cast<void*>(spBelowFrame());
   }
 
-  StackVal* spBelowFrame() { return exitFP - 1; }
+  StackVal* spBelowFrame() {
+    return reinterpret_cast<StackVal*>(reinterpret_cast<uintptr_t>(exitFP) -
+                                       sizeof(StackValNative));
+  }
 
   ~VMFrame() {
     stack.popExitFrame(exitFP);
