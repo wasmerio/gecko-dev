@@ -8,6 +8,9 @@
     - GetElem/SetElem? Or at least fastpaths
     - monomorphize the interpreter on a bool template param and select
       at entry which option to take
+  - implement a faster debug-check: separate dispatch table if
+    debuggee; branch to potentially "switch lanes" only when restoring
+    from exit frame?
   - implement PBL-native resume (don't downgrade to C++ interp)
   - implement CallScriptedFunction for ctors
   - implement as many CacheIR ops as needed to completely cover markdown renderer
