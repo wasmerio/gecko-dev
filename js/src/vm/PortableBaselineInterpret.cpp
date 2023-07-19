@@ -2223,6 +2223,7 @@ DEFINE_IC(CloseIter, 1, {
 
 #define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(PBIResult::Error)
 
+#ifndef __wasi__
 #define DEBUG_CHECK()                                                   \
   if (frame->isDebuggee()) {                                            \
     TRACE_PRINTF(                                                       \
@@ -2231,6 +2232,9 @@ DEFINE_IC(CloseIter, 1, {
       goto debug;                                                       \
     }                                                                   \
   }
+#else
+#define DEBUG_CHECK()
+#endif
 
 #define LABEL(op) (&&label_##op)
 #define CASE(op) label_##op:
@@ -2340,19 +2344,23 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
   }
 
+#ifndef __wasi__
   if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
     PUSH_EXIT_FRAME();
     if (!InterruptCheck(cx)) {
       goto error;
     }
   }
+#endif
 
   TRACE_PRINTF("Entering: sp = %p fp = %p frame = %p, script = %p, pc = %p\n",
                sp, stack.fp, frame, script.get(), pc);
   TRACE_PRINTF("nslots = %d nfixed = %d\n", int(script->nslots()),
                int(script->nfixed()));
 
+#ifndef __wasi__
 dispatch:
+#endif
   while (true) {
 #ifdef TRACE_INTERP
     {
@@ -3904,12 +3912,14 @@ dispatch:
             }
           }
           // 11. Check for interrupts.
+#ifndef __wasi__
           if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
             PUSH_EXIT_FRAME();
             if (!InterruptCheck(cx)) {
               goto error;
             }
           }
+#endif
 
           // Everything is switched to callee context now -- dispatch!
           DISPATCH();
@@ -4196,12 +4206,14 @@ dispatch:
     CASE(LoopHead) {
       int32_t icIndex = GET_INT32(pc);
       frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+#ifndef __wasi__
       if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
         PUSH_EXIT_FRAME();
         if (!InterruptCheck(cx)) {
           goto error;
         }
       }
+#endif
       END_OP(LoopHead);
     }
     CASE(AfterYield) {
@@ -4400,12 +4412,14 @@ dispatch:
     }
 
     CASE(Finally) {
+#ifndef __wasi__
       if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
         PUSH_EXIT_FRAME();
         if (!InterruptCheck(cx)) {
           goto error;
         }
       }
+#endif
       END_OP(Finally);
     }
 
@@ -4975,6 +4989,7 @@ unwind_ret:
   script.set(frame->script());
   goto do_return;
 
+#ifndef __wasi__
 debug : {
   TRACE_PRINTF("hit debug point\n");
   PUSH_EXIT_FRAME();
@@ -4983,6 +4998,7 @@ debug : {
   }
 }
   goto dispatch;
+#endif
 }
 
 bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
