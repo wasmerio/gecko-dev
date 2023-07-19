@@ -4901,10 +4901,11 @@ error:
       case ExceptionResumeKind::Finally:
         pc = frame->interpreterPC();
         stack.fp = reinterpret_cast<StackVal*>(rfe.framePointer);
-        stack.unwindingSP = reinterpret_cast<StackVal*>(rfe.stackPointer);
+        sp = reinterpret_cast<StackVal*>(rfe.stackPointer);
         TRACE_PRINTF(" -> finally to pc %p\n", pc);
         PUSH(StackVal(rfe.exception));
         PUSH(StackVal(BooleanValue(true)));
+        stack.unwindingSP = sp;
         goto unwind;
       case ExceptionResumeKind::ForcedReturnBaseline:
         pc = frame->interpreterPC();
