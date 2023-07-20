@@ -2224,16 +2224,16 @@ DEFINE_IC(CloseIter, 1, {
 #define PUSH_EXIT_FRAME() PUSH_EXIT_FRAME_OR_RET(PBIResult::Error)
 
 #ifndef __wasi__
-#define DEBUG_CHECK()                                                   \
-  if (frame->isDebuggee()) {                                            \
-    TRACE_PRINTF(                                                       \
-        "Debug check: frame is debuggee, checking for debug script\n"); \
-    if (script->hasDebugScript()) {                                     \
-      goto debug;                                                       \
-    }                                                                   \
-  }
+#  define DEBUG_CHECK()                                                   \
+    if (frame->isDebuggee()) {                                            \
+      TRACE_PRINTF(                                                       \
+          "Debug check: frame is debuggee, checking for debug script\n"); \
+      if (script->hasDebugScript()) {                                     \
+        goto debug;                                                       \
+      }                                                                   \
+    }
 #else
-#define DEBUG_CHECK()
+#  define DEBUG_CHECK()
 #endif
 
 #define LABEL(op) (&&label_##op)
@@ -4972,12 +4972,6 @@ unwind_ret:
   }
   if (reinterpret_cast<uintptr_t>(stack.fp) ==
       reinterpret_cast<uintptr_t>(entryFrame) + BaselineFrame::Size()) {
-    if (frame->isDebuggee()) {
-      PUSH_EXIT_FRAME();
-      if (!DebugEpilogueOnBaselineReturn(cx, frame, pc)) {
-        goto error;
-      }
-    }
     *ret = frame->returnValue();
     return PBIResult::Ok;
   }
