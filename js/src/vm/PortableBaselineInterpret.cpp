@@ -2386,7 +2386,7 @@ dispatch:
     {
       static int traceSeq = 1;
       JSOp op = JSOp(*pc);
-      Value tos = (sp < reinterpret_cast<StackVal*>(frame) - nfixed)
+      Value tos = (sp < reinterpret_cast<StackVal*>(frame) - script->nfixed())
                       ? sp[0].asValue()
                       : Value::fromRawBits(0);
       printf("TRACE(%d): script %" PRIx64 " relPC %d op %s ", traceSeq++,
