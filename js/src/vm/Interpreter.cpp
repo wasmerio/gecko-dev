@@ -80,6 +80,8 @@
 #include "vm/Probes-inl.h"
 #include "vm/Stack-inl.h"
 
+#define DETERMINISTIC_TRACE
+
 using namespace js;
 
 using mozilla::DebugOnly;
@@ -1614,7 +1616,7 @@ class ReservedRooted : public RootedOperations<T, ReservedRooted<T>> {
 
   void set(const T& p) const { *savedRoot = p; }
   operator Handle<T>() { return *savedRoot; }
-  operator Rooted<T>&() { return *savedRoot; }
+  operator Rooted<T> &() { return *savedRoot; }
   MutableHandle<T> operator&() { return &*savedRoot; }
 
   DECLARE_NONPOINTER_ACCESSOR_METHODS(savedRoot->get())
@@ -1691,6 +1693,27 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
 #undef TRAILING_LABEL
   };
 
+#ifdef DETERMINISTIC_TRACE
+#  define PRINT_TRACE()                                                    \
+    JS_BEGIN_MACRO                                                         \
+      {                                                                    \
+        JSOp op = JSOp(*REGS.pc);                                          \
+        Value tos =                                                        \
+            (REGS.stackDepth() > 0) ? REGS.sp[-1] : Value::fromRawBits(0); \
+        printf("TRACE: script %" PRIx64 " relPC %d op %s ",                \
+               reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,        \
+               int(REGS.pc - script->code()), CodeName(op));               \
+        if (tos.isNumber() || tos.isBoolean()) {                           \
+          printf("TOS %" PRIx64 "\n", tos.asRawBits());                    \
+        } else {                                                           \
+          printf("TOS tag %d\n", int(tos.asRawBits() >> 47));              \
+        }                                                                  \
+      }                                                                    \
+    JS_END_MACRO
+#else
+#  define PRINT_TRACE()
+#endif
+
   /*
    * Increment REGS.pc by N, load the opcode at that position,
    * and jump to the code to execute it.
@@ -1711,6 +1734,7 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
   JS_BEGIN_MACRO                                 \
     REGS.pc += (N);                              \
     SANITY_CHECKS();                             \
+    PRINT_TRACE();                               \
     DISPATCH_TO(*REGS.pc | activation.opMask()); \
   JS_END_MACRO
 
@@ -2128,20 +2152,24 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     if (!ToPropertyKey(cx, REGS.stackHandleAt(n), &(id))) goto error; \
   JS_END_MACRO
 
-#define TRY_BRANCH_AFTER_COND(cond, spdec)                          \
-  JS_BEGIN_MACRO                                                    \
-    MOZ_ASSERT(GetBytecodeLength(REGS.pc) == 1);                    \
-    unsigned diff_ =                                                \
-        (unsigned)GET_UINT8(REGS.pc) - (unsigned)JSOp::JumpIfFalse; \
-    if (diff_ <= 1) {                                               \
-      REGS.sp -= (spdec);                                           \
-      if ((cond) == (diff_ != 0)) {                                 \
-        ++REGS.pc;                                                  \
-        BRANCH(GET_JUMP_OFFSET(REGS.pc));                           \
-      }                                                             \
-      ADVANCE_AND_DISPATCH(1 + JSOpLength_JumpIfFalse);             \
-    }                                                               \
-  JS_END_MACRO
+#ifndef DETERMINISTIC_TRACE
+#  define TRY_BRANCH_AFTER_COND(cond, spdec)                          \
+    JS_BEGIN_MACRO                                                    \
+      MOZ_ASSERT(GetBytecodeLength(REGS.pc) == 1);                    \
+      unsigned diff_ =                                                \
+          (unsigned)GET_UINT8(REGS.pc) - (unsigned)JSOp::JumpIfFalse; \
+      if (diff_ <= 1) {                                               \
+        REGS.sp -= (spdec);                                           \
+        if ((cond) == (diff_ != 0)) {                                 \
+          ++REGS.pc;                                                  \
+          BRANCH(GET_JUMP_OFFSET(REGS.pc));                           \
+        }                                                             \
+        ADVANCE_AND_DISPATCH(1 + JSOpLength_JumpIfFalse);             \
+      }                                                               \
+    JS_END_MACRO
+#else
+#  define TRY_BRANCH_AFTER_COND(cond, spdec)
+#endif
 
     CASE(In) {
       HandleValue rref = REGS.stackHandleAt(-1);
