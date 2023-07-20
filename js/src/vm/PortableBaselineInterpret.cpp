@@ -47,6 +47,7 @@
 #include "vm/JSScript-inl.h"
 
 // #define TRACE_INTERP
+#define DETERMINISTIC_TRACE
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -2238,7 +2239,7 @@ DEFINE_IC(CloseIter, 1, {
 
 #define LABEL(op) (&&label_##op)
 #define CASE(op) label_##op:
-#ifndef TRACE_INTERP
+#if !defined(TRACE_INTERP) && !defined(DETERMINISTIC_TRACE)
 #  define DISPATCH() \
     DEBUG_CHECK();   \
     goto* addresses[*pc]
@@ -2263,8 +2264,12 @@ DEFINE_IC(CloseIter, 1, {
   icregs.icVals[(index)] = reinterpret_cast<uint64_t>(expr);
 #define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
 
-#define PREDICT_NEXT(op) \
-  if (JSOp(*pc) == JSOp::op) goto label_##op;
+#if !defined(TRACE_INTERP) && !defined(DETERMINISTIC_TRACE)
+#  define PREDICT_NEXT(op) \
+    if (JSOp(*pc) == JSOp::op) goto label_##op;
+#else
+#  define PREDICT_NEXT(op)
+#endif
 
 // Large enough for an exit frame.
 static const size_t kStackMargin = 1024;
@@ -2375,6 +2380,22 @@ dispatch:
       printf("sp = %p fp = %p\n", sp, stack.fp);
       printf("TOS tag: %d\n", int(sp[0].asValue().asRawBits() >> 47));
       fflush(stdout);
+    }
+#endif
+#ifdef DETERMINISTIC_TRACE
+    {
+      JSOp op = JSOp(*pc);
+      Value tos = (sp < reinterpret_cast<StackVal*>(frame) - nfixed)
+                      ? sp[0].asValue()
+                      : Value::fromRawBits(0);
+      printf("TRACE: script %" PRIx64 " relPC %d op %s ",
+             reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,
+             int(pc - script->code()), CodeName(op));
+      if (tos.isNumber() || tos.isBoolean()) {
+        printf("TOS %" PRIx64 "\n", tos.asRawBits());
+      } else {
+        printf("TOS tag %d\n", int(tos.asRawBits() >> 47));
+      }
     }
 #endif
 
