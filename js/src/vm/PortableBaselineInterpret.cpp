@@ -46,7 +46,7 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-// #define TRACE_INTERP
+#define TRACE_INTERP
 #define DETERMINISTIC_TRACE
 
 #ifdef TRACE_INTERP
@@ -2384,11 +2384,12 @@ dispatch:
 #endif
 #ifdef DETERMINISTIC_TRACE
     {
+      static int traceSeq = 1;
       JSOp op = JSOp(*pc);
       Value tos = (sp < reinterpret_cast<StackVal*>(frame) - nfixed)
                       ? sp[0].asValue()
                       : Value::fromRawBits(0);
-      printf("TRACE: script %" PRIx64 " relPC %d op %s ",
+      printf("TRACE(%d): script %" PRIx64 " relPC %d op %s ", traceSeq++,
              reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,
              int(pc - script->code()), CodeName(op));
       if (tos.isNumber() || tos.isBoolean()) {

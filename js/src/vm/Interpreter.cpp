@@ -1694,21 +1694,23 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
   };
 
 #ifdef DETERMINISTIC_TRACE
-#  define PRINT_TRACE()                                                    \
-    JS_BEGIN_MACRO                                                         \
-      {                                                                    \
-        JSOp op = JSOp(*REGS.pc);                                          \
-        Value tos =                                                        \
-            (REGS.stackDepth() > 0) ? REGS.sp[-1] : Value::fromRawBits(0); \
-        printf("TRACE: script %" PRIx64 " relPC %d op %s ",                \
-               reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,        \
-               int(REGS.pc - script->code()), CodeName(op));               \
-        if (tos.isNumber() || tos.isBoolean()) {                           \
-          printf("TOS %" PRIx64 "\n", tos.asRawBits());                    \
-        } else {                                                           \
-          printf("TOS tag %d\n", int(tos.asRawBits() >> 47));              \
-        }                                                                  \
-      }                                                                    \
+  static int traceSeq = 1;
+
+#  define PRINT_TRACE()                                                     \
+    JS_BEGIN_MACRO                                                          \
+      {                                                                     \
+        JSOp op = JSOp(*REGS.pc);                                           \
+        Value tos =                                                         \
+            (REGS.stackDepth() > 0) ? REGS.sp[-1] : Value::fromRawBits(0);  \
+        printf("TRACE(%d): script %" PRIx64 " relPC %d op %s ", traceSeq++, \
+               reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,         \
+               int(REGS.pc - script->code()), CodeName(op));                \
+        if (tos.isNumber() || tos.isBoolean()) {                            \
+          printf("TOS %" PRIx64 "\n", tos.asRawBits());                     \
+        } else {                                                            \
+          printf("TOS tag %d\n", int(tos.asRawBits() >> 47));               \
+        }                                                                   \
+      }                                                                     \
     JS_END_MACRO
 #else
 #  define PRINT_TRACE()
