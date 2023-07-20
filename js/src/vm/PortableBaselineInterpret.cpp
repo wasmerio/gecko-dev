@@ -46,8 +46,8 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
-#define TRACE_INTERP
-#define DETERMINISTIC_TRACE
+// #define TRACE_INTERP
+// #define DETERMINISTIC_TRACE
 
 #ifdef TRACE_INTERP
 #  define TRACE_PRINTF(...) \
@@ -2690,7 +2690,7 @@ dispatch:
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
-        sp[0] = StackVal(DoubleValue(lhs + rhs));
+        sp[0] = StackVal(NumberValue(lhs + rhs));
         NEXT_IC();
         END_OP(Add);
       }
@@ -2727,7 +2727,7 @@ dispatch:
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
-        sp[0] = StackVal(DoubleValue(lhs - rhs));
+        sp[0] = StackVal(NumberValue(lhs - rhs));
         NEXT_IC();
         END_OP(Add);
       }
@@ -2765,7 +2765,7 @@ dispatch:
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
-        sp[0] = StackVal(DoubleValue(lhs * rhs));
+        sp[0] = StackVal(NumberValue(lhs * rhs));
         NEXT_IC();
         END_OP(Mul);
       }
@@ -2790,7 +2790,7 @@ dispatch:
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
-        sp[0] = StackVal(DoubleValue(NumberDiv(lhs, rhs)));
+        sp[0] = StackVal(NumberValue(NumberDiv(lhs, rhs)));
         NEXT_IC();
         END_OP(Div);
       }
@@ -2851,7 +2851,7 @@ dispatch:
         double lhs = sp[1].asValue().toNumber();
         double rhs = sp[0].asValue().toNumber();
         POP();
-        sp[0] = StackVal(DoubleValue(ecmaPow(lhs, rhs)));
+        sp[0] = StackVal(NumberValue(ecmaPow(lhs, rhs)));
         NEXT_IC();
         END_OP(Pow);
       }
@@ -2940,7 +2940,7 @@ dispatch:
         if (result <= uint32_t(INT32_MAX)) {
           sp[0] = StackVal(Int32Value(int32_t(result)));
         } else {
-          sp[0] = StackVal(DoubleValue(double(result)));
+          sp[0] = StackVal(NumberValue(double(result)));
         }
         NEXT_IC();
         END_OP(Ursh);
