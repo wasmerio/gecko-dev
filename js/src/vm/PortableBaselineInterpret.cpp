@@ -977,13 +977,45 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
       return ICInterpretOpResult::NextIC;
     }
   });
-  INT32_OP(Pow, <<, {
-    if (rhs >= 32 || rhs < 0) {
-      return ICInterpretOpResult::NextIC;
-    }
-  });
   INT32_OP(BitAnd, &, {});
   INT32_OP(BitOr, |, {});
+
+  CACHEOP_CASE(Int32PowResult) {
+    Int32OperandId lhsId = icregs.cacheIRReader.int32OperandId();
+    Int32OperandId rhsId = icregs.cacheIRReader.int32OperandId();
+    int64_t lhs = int64_t(int32_t(icregs.icVals[lhsId.id()]));
+    int64_t rhs = int64_t(int32_t(icregs.icVals[rhsId.id()]));
+    int64_t result;
+
+    if (lhs == 1) {
+      result = 1;
+    } else if (rhs < 0) {
+      return ICInterpretOpResult::NextIC;
+    } else {
+      result = 1;
+      int64_t runningSquare = lhs;
+      while (rhs) {
+        if (rhs & 1) {
+          result *= runningSquare;
+          if (result > int64_t(INT32_MAX)) {
+            return ICInterpretOpResult::NextIC;
+          }
+        }
+        rhs >>= 1;
+        if (rhs == 0) {
+          break;
+        }
+        runningSquare *= runningSquare;
+        if (runningSquare > int64_t(INT32_MAX)) {
+          return ICInterpretOpResult::NextIC;
+        }
+      }
+    }
+
+    icregs.icResult = Int32Value(int32_t(result)).asRawBits();
+    PREDICT_NEXT(ReturnFromIC);
+    DISPATCH_CACHEOP();
+  }
 
   CACHEOP_CASE(Int32IncResult) {
     Int32OperandId intId = icregs.cacheIRReader.int32OperandId();
