@@ -5058,6 +5058,8 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   Stack stack(cx->portableBaselineStack());
   StackVal* sp = stack.top;
 
+  TRACE_PRINTF("Trampoline: calleeToken %p env %p\n", calleeToken, envChain);
+
   // Expected stack frame:
   // - argN
   // - ...
@@ -5131,6 +5133,10 @@ MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
   if (state.isInvoke()) {
     InvokeState& invoke = *state.asInvoke();
     if (TooManyActualArguments(invoke.args().length())) {
+      return MethodStatus::Method_CantCompile;
+    }
+  } else {
+    if (state.asExecute()->isDebuggerEval()) {
       return MethodStatus::Method_CantCompile;
     }
   }
