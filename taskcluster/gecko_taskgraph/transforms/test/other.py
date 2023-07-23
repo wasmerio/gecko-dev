@@ -287,7 +287,7 @@ def setup_browsertime(config, tasks):
         # files, the transition is straight-forward.
         extra_options = task.get("mozharness", {}).get("extra-options", [])
 
-        if task["suite"] != "raptor" or "--webext" in extra_options:
+        if task["suite"] != "raptor":
             yield task
             continue
 
@@ -328,11 +328,12 @@ def setup_browsertime(config, tasks):
                 "linux64-chromedriver-111",
                 "linux64-chromedriver-112",
                 "linux64-chromedriver-113",
+                "linux64-chromedriver-114",
             ],
             "linux.*": [
-                "linux64-chromedriver-111",
                 "linux64-chromedriver-112",
                 "linux64-chromedriver-113",
+                "linux64-chromedriver-114",
             ],
             "macosx.*": [
                 "mac64-chromedriver-109",
@@ -340,21 +341,22 @@ def setup_browsertime(config, tasks):
                 "mac64-chromedriver-111",
                 "mac64-chromedriver-112",
                 "mac64-chromedriver-113",
+                "mac64-chromedriver-114",
             ],
             "windows.*aarch64.*": [
-                "win32-chromedriver-111",
                 "win32-chromedriver-112",
                 "win32-chromedriver-113",
+                "win32-chromedriver-114",
             ],
             "windows.*-32.*": [
-                "win32-chromedriver-111",
                 "win32-chromedriver-112",
                 "win32-chromedriver-113",
+                "win32-chromedriver-114",
             ],
             "windows.*-64.*": [
-                "win32-chromedriver-111",
                 "win32-chromedriver-112",
                 "win32-chromedriver-113",
+                "win32-chromedriver-114",
             ],
         }
 
@@ -616,10 +618,6 @@ def handle_tier(config, tasks):
                 "linux1804-64-shippable-qr/opt",
                 "linux1804-64-asan-qr/opt",
                 "linux1804-64-tsan-qr/opt",
-                "windows7-32-qr/debug",
-                "windows7-32-qr/opt",
-                "windows7-32-devedition-qr/opt",
-                "windows7-32-shippable-qr/opt",
                 "windows10-32-qr/debug",
                 "windows10-32-qr/opt",
                 "windows10-32-shippable-qr/opt",
@@ -745,6 +743,7 @@ test_setting_description_schema = Schema(
                 Optional("build"): str,
             },
             Optional("device"): str,
+            Optional("display"): "wayland",
             Optional("machine"): Any("ref-hw-2017"),
         },
         "build": {
@@ -839,7 +838,7 @@ def set_test_setting(config, tasks):
         assert match
         os_name, os_version = match.groups()
 
-        device = machine = os_build = None
+        device = machine = os_build = display = None
         if os_name == "android":
             device = parts.pop(0)
             if device == "hw":
@@ -864,6 +863,9 @@ def set_test_setting(config, tasks):
             if parts[0] == "ref-hw-2017":
                 machine = parts.pop(0)
 
+            if parts[0] == "wayland":
+                display = parts.pop(0)
+
         # It's not always possible to glean the exact architecture used from
         # the task, so sometimes this will just be set to "32" or "64".
         setting["platform"]["arch"] = arch
@@ -880,6 +882,9 @@ def set_test_setting(config, tasks):
 
         if machine:
             setting["platform"]["machine"] = machine
+
+        if display:
+            setting["platform"]["display"] = display
 
         # parse remaining parts as build attributes
         setting["build"]["type"] = build_type
@@ -1059,14 +1064,5 @@ def enable_parallel_marking_in_tsan_tests(config, tasks):
                 extra_options.append(
                     "--setpref=javascript.options.mem.gc_parallel_marking=true"
                 )
-
-        yield task
-
-
-@transforms.add
-def apply_windows7_optimization(config, tasks):
-    for task in tasks:
-        if task["test-platform"].startswith("windows7"):
-            task["optimization"] = {"skip-unless-backstop": None}
 
         yield task

@@ -56,7 +56,8 @@
  * both require the content (= title) before actually creating it.
  */
 
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+import { NetUtil } from "resource://gre/modules/NetUtil.sys.mjs";
+
 import { FileUtils } from "resource://gre/modules/FileUtils.sys.mjs";
 import { PlacesUtils } from "resource://gre/modules/PlacesUtils.sys.mjs";
 
@@ -131,7 +132,8 @@ export var BookmarkHTMLUtils = Object.freeze({
    *        imported bookmarks. Defaults to `RESTORE` if `replace = true`, or
    *        `IMPORT` otherwise.
    *
-   * @return {Promise}
+   * @returns {Promise<number>} The number of imported bookmarks, not including
+   *                           folders and separators.
    * @resolves When the new bookmarks have been created.
    * @rejects JavaScript exception.
    */
@@ -144,23 +146,25 @@ export var BookmarkHTMLUtils = Object.freeze({
         : PlacesUtils.bookmarks.SOURCES.IMPORT,
     } = {}
   ) {
+    let bookmarkCount;
     notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_BEGIN, aInitialImport);
     try {
       let importer = new BookmarkImporter(aInitialImport, aSource);
-      await importer.importFromURL(aSpec);
+      bookmarkCount = await importer.importFromURL(aSpec);
 
       notifyObservers(
         PlacesUtils.TOPIC_BOOKMARKS_RESTORE_SUCCESS,
         aInitialImport
       );
     } catch (ex) {
-      console.error("Failed to import bookmarks from " + aSpec + ": " + ex);
+      console.error(`Failed to import bookmarks from ${aSpec}:`, ex);
       notifyObservers(
         PlacesUtils.TOPIC_BOOKMARKS_RESTORE_FAILED,
         aInitialImport
       );
       throw ex;
     }
+    return bookmarkCount;
   },
 
   /**
@@ -176,7 +180,8 @@ export var BookmarkHTMLUtils = Object.freeze({
    *        imported bookmarks. Defaults to `RESTORE` if `replace = true`, or
    *        `IMPORT` otherwise.
    *
-   * @return {Promise}
+   * @returns {Promise<number>} The number of imported bookmarks, not including
+   *                            folders and separators
    * @resolves When the new bookmarks have been created.
    * @rejects JavaScript exception.
    */
@@ -189,6 +194,7 @@ export var BookmarkHTMLUtils = Object.freeze({
         : PlacesUtils.bookmarks.SOURCES.IMPORT,
     } = {}
   ) {
+    let bookmarkCount;
     notifyObservers(PlacesUtils.TOPIC_BOOKMARKS_RESTORE_BEGIN, aInitialImport);
     try {
       if (!(await IOUtils.exists(aFilePath))) {
@@ -197,20 +203,23 @@ export var BookmarkHTMLUtils = Object.freeze({
         );
       }
       let importer = new BookmarkImporter(aInitialImport, aSource);
-      await importer.importFromURL(PathUtils.toFileURI(aFilePath));
+      bookmarkCount = await importer.importFromURL(
+        PathUtils.toFileURI(aFilePath)
+      );
 
       notifyObservers(
         PlacesUtils.TOPIC_BOOKMARKS_RESTORE_SUCCESS,
         aInitialImport
       );
     } catch (ex) {
-      console.error("Failed to import bookmarks from " + aFilePath + ": " + ex);
+      console.error(`Failed to import bookmarks from ${aFilePath}:`, ex);
       notifyObservers(
         PlacesUtils.TOPIC_BOOKMARKS_RESTORE_FAILED,
         aInitialImport
       );
       throw ex;
     }
+    return bookmarkCount;
   },
 
   /**
@@ -487,15 +496,13 @@ BookmarkImporter.prototype = {
     } else {
       let addDate = aElt.getAttribute("add_date");
       if (addDate) {
-        frame.previousDateAdded = this._convertImportedDateToInternalDate(
-          addDate
-        );
+        frame.previousDateAdded =
+          this._convertImportedDateToInternalDate(addDate);
       }
       let modDate = aElt.getAttribute("last_modified");
       if (modDate) {
-        frame.previousLastModifiedDate = this._convertImportedDateToInternalDate(
-          modDate
-        );
+        frame.previousLastModifiedDate =
+          this._convertImportedDateToInternalDate(modDate);
       }
     }
     this._curFrame.previousText = "";
@@ -543,9 +550,8 @@ BookmarkImporter.prototype = {
     }
     // Save bookmark's last modified date.
     if (lastModified) {
-      bookmark.lastModified = this._convertImportedDateToInternalDate(
-        lastModified
-      );
+      bookmark.lastModified =
+        this._convertImportedDateToInternalDate(lastModified);
     }
 
     if (!dateAdded && lastModified) {
@@ -708,18 +714,17 @@ BookmarkImporter.prototype = {
   /**
    * Converts a string date in seconds to a date object
    */
-  _convertImportedDateToInternalDate: function convertImportedDateToInternalDate(
-    aDate
-  ) {
-    try {
-      if (aDate && !isNaN(aDate)) {
-        return new Date(parseInt(aDate) * 1000); // in bookmarks.html this value is in seconds
+  _convertImportedDateToInternalDate:
+    function convertImportedDateToInternalDate(aDate) {
+      try {
+        if (aDate && !isNaN(aDate)) {
+          return new Date(parseInt(aDate) * 1000); // in bookmarks.html this value is in seconds
+        }
+      } catch (ex) {
+        // Do nothing.
       }
-    } catch (ex) {
-      // Do nothing.
-    }
-    return new Date();
-  },
+      return new Date();
+    },
 
   _walkTreeForImport(aDoc) {
     if (!aDoc) {
@@ -797,6 +802,8 @@ BookmarkImporter.prototype = {
    *
    * @param {BookmarkImporter} importer The importer from which to get the
    *                                    bookmark information.
+   * @returns {number} The number of imported bookmarks, not including
+   *                   folders and separators
    */
   async _importBookmarks() {
     if (this._isImportDefaults) {
@@ -804,6 +811,7 @@ BookmarkImporter.prototype = {
     }
 
     let bookmarksTrees = this._getBookmarkTrees();
+    let bookmarkCount = 0;
     for (let tree of bookmarksTrees) {
       if (!tree.children.length) {
         continue;
@@ -811,17 +819,24 @@ BookmarkImporter.prototype = {
 
       // Give the tree the source.
       tree.source = this._source;
-      await PlacesUtils.bookmarks.insertTree(tree, {
+      let bookmarks = await PlacesUtils.bookmarks.insertTree(tree, {
         fixupOrSkipInvalidEntries: true,
       });
+      // We want to count only bookmarks, not folders or separators
+      bookmarkCount += bookmarks.filter(
+        bookmark => bookmark.type == PlacesUtils.bookmarks.TYPE_BOOKMARK
+      ).length;
       insertFaviconsForTree(tree);
     }
+    return bookmarkCount;
   },
 
   /**
    * Imports data into the places database from the supplied url.
    *
    * @param {String} href The url to import data from.
+   * @returns {number} The number of imported bookmarks, not including
+   *                   folders and separators.
    */
   async importFromURL(href) {
     let data = await fetchData(href);
@@ -845,7 +860,7 @@ BookmarkImporter.prototype = {
     }
 
     this._walkTreeForImport(data);
-    await this._importBookmarks();
+    return this._importBookmarks();
   },
 };
 
@@ -1084,7 +1099,7 @@ function insertFaviconForNode(node) {
         Services.scriptSecurityManager.getSystemPrincipal()
       );
     } catch (ex) {
-      console.error("Failed to import favicon data:" + ex);
+      console.error("Failed to import favicon data:", ex);
     }
   }
 
@@ -1138,9 +1153,12 @@ function fetchData(href) {
     xhr.onload = () => {
       resolve(xhr.responseXML);
     };
-    xhr.onabort = xhr.onerror = xhr.ontimeout = () => {
-      reject(new Error("xmlhttprequest failed"));
-    };
+    xhr.onabort =
+      xhr.onerror =
+      xhr.ontimeout =
+        () => {
+          reject(new Error("xmlhttprequest failed"));
+        };
     xhr.open("GET", href);
     xhr.responseType = "document";
     xhr.overrideMimeType("text/html");

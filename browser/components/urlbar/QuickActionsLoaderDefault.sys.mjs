@@ -7,6 +7,7 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   ClientEnvironment: "resource://normandy/lib/ClientEnvironment.sys.mjs",
   DevToolsShim: "chrome://devtools-startup/content/DevToolsShim.sys.mjs",
   ResetProfile: "resource://gre/modules/ResetProfile.sys.mjs",
@@ -17,10 +18,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-});
-
 if (AppConstants.MOZ_UPDATER) {
   XPCOMUtils.defineLazyServiceGetter(
     lazy,
@@ -29,6 +26,13 @@ if (AppConstants.MOZ_UPDATER) {
     "nsIApplicationUpdateService"
   );
 }
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "SCREENSHOT_BROWSER_COMPONENT",
+  "screenshots.browser.component.enabled",
+  false
+);
 
 let openUrlFun = url => () => openUrl(url);
 let openUrl = url => {
@@ -59,7 +63,7 @@ let currentBrowser = () =>
 let currentTab = () =>
   lazy.BrowserWindowTracker.getTopWindow()?.gBrowser.selectedTab;
 
-XPCOMUtils.defineLazyGetter(lazy, "gFluentStrings", function() {
+XPCOMUtils.defineLazyGetter(lazy, "gFluentStrings", function () {
   return new Localization(["branding/brand.ftl", "browser/browser.ftl"], true);
 });
 
@@ -180,11 +184,19 @@ const DEFAULT_ACTIONS = {
       return !lazy.BrowserWindowTracker.getTopWindow().gScreenshots.shouldScreenshotsButtonBeDisabled();
     },
     onPick: () => {
-      Services.obs.notifyObservers(
-        lazy.BrowserWindowTracker.getTopWindow(),
-        "menuitem-screenshot",
-        "quick_actions"
-      );
+      if (lazy.SCREENSHOT_BROWSER_COMPONENT) {
+        Services.obs.notifyObservers(
+          lazy.BrowserWindowTracker.getTopWindow(),
+          "menuitem-screenshot",
+          "quick_actions"
+        );
+      } else {
+        Services.obs.notifyObservers(
+          null,
+          "menuitem-screenshot-extension",
+          "quickaction"
+        );
+      }
       return { focusContent: true };
     },
   },

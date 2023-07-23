@@ -70,6 +70,7 @@ import org.mozilla.gecko.util.InputDeviceUtils;
 import org.mozilla.gecko.util.ProxySelector;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.geckoview.BuildConfig;
+import org.mozilla.geckoview.CrashHandler;
 import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.R;
 
@@ -101,7 +102,7 @@ public class GeckoAppShell {
     }
 
     @Override
-    protected String getAppPackageName() {
+    public String getAppPackageName() {
       final Context appContext = getAppContext();
       if (appContext == null) {
         return "<unknown>";
@@ -110,7 +111,7 @@ public class GeckoAppShell {
     }
 
     @Override
-    protected Context getAppContext() {
+    public Context getAppContext() {
       return getApplicationContext();
     }
 
@@ -167,7 +168,7 @@ public class GeckoAppShell {
   }
 
   @WrapForJNI(exceptionMode = "ignore")
-  /* package */ static synchronized String getAppNotes() {
+  public static synchronized String getAppNotes() {
     return sAppNotes;
   }
 
@@ -536,10 +537,13 @@ public class GeckoAppShell {
 
   /** Wake-lock for the CPU. */
   static final String WAKE_LOCK_CPU = "cpu";
+
   /** Wake-lock for the screen. */
   static final String WAKE_LOCK_SCREEN = "screen";
+
   /** Wake-lock for the audio-playing, eqaul to LOCK_CPU. */
   static final String WAKE_LOCK_AUDIO_PLAYING = "audio-playing";
+
   /** Wake-lock for the video-playing, eqaul to LOCK_SCREEN.. */
   static final String WAKE_LOCK_VIDEO_PLAYING = "video-playing";
 
@@ -547,8 +551,10 @@ public class GeckoAppShell {
 
   /** No one holds the wake-lock. */
   static final int WAKE_LOCK_STATE_UNLOCKED = 0;
+
   /** The wake-lock is held by a foreground window. */
   static final int WAKE_LOCK_STATE_LOCKED_FOREGROUND = 1;
+
   /** The wake-lock is held by a background window. */
   static final int WAKE_LOCK_STATE_LOCKED_BACKGROUND = 2;
 
@@ -1047,7 +1053,7 @@ public class GeckoAppShell {
     }
   }
 
-  @WrapForJNI(calledFrom = "gecko")
+  @WrapForJNI(calledFrom = "gecko", exceptionMode = "nsresult")
   private static String getDNSDomains() {
     if (Build.VERSION.SDK_INT < 23) {
       return "";

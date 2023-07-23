@@ -62,26 +62,26 @@ function MockFxAccountsClient(activeTokens) {
   this._email = "nobody@example.com";
   this._verified = false;
 
-  this.accountStatus = function(uid) {
+  this.accountStatus = function (uid) {
     return Promise.resolve(!!uid && !this._deletedOnServer);
   };
 
-  this.signOut = function() {
+  this.signOut = function () {
     return Promise.resolve();
   };
-  this.registerDevice = function() {
+  this.registerDevice = function () {
     return Promise.resolve();
   };
-  this.updateDevice = function() {
+  this.updateDevice = function () {
     return Promise.resolve();
   };
-  this.signOutAndDestroyDevice = function() {
+  this.signOutAndDestroyDevice = function () {
     return Promise.resolve();
   };
-  this.getDeviceList = function() {
+  this.getDeviceList = function () {
     return Promise.resolve();
   };
-  this.accessTokenWithSessionToken = function(
+  this.accessTokenWithSessionToken = function (
     sessionTokenHex,
     clientId,
     scope,
@@ -147,10 +147,13 @@ async function createMockFxA() {
     email: "foo@example.com",
     uid: "1234@lcip.org",
     sessionToken: "dead",
-    kSync: "beef",
-    kXCS: "cafe",
-    kExtSync: "bacon",
-    kExtKbHash: "cheese",
+    scopedKeys: {
+      [SCOPE_OLD_SYNC]: {
+        kid: "key id for sync key",
+        k: "key material for sync key",
+        kty: "oct",
+      },
+    },
     verified: true,
   };
 

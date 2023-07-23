@@ -42,6 +42,9 @@ UNCOMMON_TRY_TASK_LABELS = [
     r"web-platform-tests.*backlog",  # hide wpt jobs that are not implemented yet - bug 1572820
     r"-ccov",
     r"-profiling-",  # talos/raptor profiling jobs are run too often
+    r"-32-.*-webgpu",  # webgpu gets little benefit from these tests.
+    r"-asan-.*-webgpu",
+    r"-tsan-.*-webgpu",
     # Hide shippable versions of tests we have opt versions of because the non-shippable
     # versions are faster to run. This is mostly perf tests.
     r"-shippable(?!.*(awsy|browsertime|marionette-headless|mochitest-devtools-chrome-fis|raptor|talos|web-platform-tests-wdspec-headless|mochitest-plain-headless))",  # noqa - too long
@@ -555,6 +558,30 @@ def target_tasks_mozilla_esr102(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.items() if filter(t)]
 
 
+@_target_task("mozilla_esr115_tasks")
+def target_tasks_mozilla_esr115(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required for a promotable beta or release build
+    of desktop, without android CI. The candidates build process involves a pipeline
+    of builds and signing, but does not include beetmover or balrog jobs."""
+
+    def filter(task):
+        if not filter_release_tasks(task, parameters):
+            return False
+
+        if not standard_filter(task, parameters):
+            return False
+
+        platform = task.attributes.get("build_platform")
+
+        # Android is not built on esr115.
+        if platform and "android" in platform:
+            return False
+
+        return True
+
+    return [l for l, t in full_task_graph.tasks.items() if filter(t)]
+
+
 @_target_task("promote_desktop")
 def target_tasks_promote_desktop(full_task_graph, parameters, graph_config):
     """Select the superset of tasks required to promote a beta or release build
@@ -738,7 +765,7 @@ def target_tasks_custom_car_perf_testing(full_task_graph, parameters, graph_conf
             return False
 
         # ignore all windows 7 perf jobs scheduled automatically
-        if "windows7" in platform or "windows10-32" in platform:
+        if "windows10-32" in platform:
             return False
 
         # Desktop selection only for CaR
@@ -1047,6 +1074,7 @@ def target_tasks_chromium_update(full_task_graph, parameters, graph_config):
         "fetch-mac-chromium",
         "toolchain-linux64-custom-car",
         "toolchain-win64-custom-car",
+        "toolchain-macosx64-custom-car",
     ]
 
 
@@ -1141,6 +1169,7 @@ def target_tasks_release_simulation(full_task_graph, parameters, graph_config):
         "beta": "mozilla-beta",
         "release": "mozilla-release",
         "esr102": "mozilla-esr102",
+        "esr115": "mozilla-esr115",
     }
     target_project = project_by_release.get(parameters["release_type"])
     if target_project is None:

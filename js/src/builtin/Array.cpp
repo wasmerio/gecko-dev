@@ -10,7 +10,6 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/SIMD.h"
 #include "mozilla/TextUtils.h"
 
 #include <algorithm>
@@ -42,6 +41,7 @@
 #include "vm/PlainObject.h"  // js::PlainObject
 #include "vm/SelfHosting.h"
 #include "vm/Shape.h"
+#include "vm/StringType.h"
 #include "vm/ToSource.h"  // js::ValueToSource
 #include "vm/TypedArrayObject.h"
 #include "vm/WellKnownAtom.h"  // js_*_str
@@ -65,7 +65,6 @@ using mozilla::CheckedInt;
 using mozilla::DebugOnly;
 using mozilla::IsAsciiDigit;
 using mozilla::Maybe;
-using mozilla::SIMD;
 
 using JS::AutoCheckCannotGC;
 using JS::IsArrayAnswer;
@@ -3130,8 +3129,6 @@ static bool array_splice_noRetVal(JSContext* cx, unsigned argc, Value* vp) {
   return array_splice_impl(cx, argc, vp, false);
 }
 
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
-
 static void CopyDenseElementsFillHoles(ArrayObject* arr, NativeObject* nobj,
                                        uint32_t length) {
   // Ensure |arr| is an empty array with sufficient capacity.
@@ -3546,7 +3543,6 @@ static bool array_with(JSContext* cx, unsigned argc, Value* vp) {
   args.rval().setObject(*arr);
   return true;
 }
-#endif
 
 struct SortComparatorIndexes {
   bool operator()(uint32_t a, uint32_t b, bool* lessOrEqualp) {
@@ -4236,19 +4232,6 @@ bool js::array_indexOf(JSContext* cx, unsigned argc, Value* vp) {
         std::min(nobj->getDenseInitializedLength(), uint32_t(len));
     const Value* elements = nobj->getDenseElements();
 
-    if (CanUseBitwiseCompareForStrictlyEqual(searchElement) && length > start) {
-      const uint64_t* elementsAsBits =
-          reinterpret_cast<const uint64_t*>(elements);
-      const uint64_t* res = SIMD::memchr64(
-          elementsAsBits + start, searchElement.asRawBits(), length - start);
-      if (res) {
-        args.rval().setInt32(static_cast<int32_t>(res - elementsAsBits));
-      } else {
-        args.rval().setInt32(-1);
-      }
-      return true;
-    }
-
     auto iterator = [elements, start, length](JSContext* cx, auto cmp,
                                               MutableHandleValue rval) {
       static_assert(NativeObject::MAX_DENSE_ELEMENTS_COUNT <= INT32_MAX,
@@ -4480,19 +4463,6 @@ bool js::array_includes(JSContext* cx, unsigned argc, Value* vp) {
     if (uint32_t(len) > length && searchElement.isUndefined()) {
       // |undefined| is strictly equal only to |undefined|.
       args.rval().setBoolean(true);
-      return true;
-    }
-
-    // For |includes| we need to treat hole values as |undefined| so we use a
-    // different path if searching for |undefined|.
-    if (CanUseBitwiseCompareForStrictlyEqual(searchElement) &&
-        !searchElement.isUndefined() && length > start) {
-      if (SIMD::memchr64(reinterpret_cast<const uint64_t*>(elements) + start,
-                         searchElement.asRawBits(), length - start)) {
-        args.rval().setBoolean(true);
-      } else {
-        args.rval().setBoolean(false);
-      }
       return true;
     }
 
@@ -4899,20 +4869,16 @@ static const JSFunctionSpec array_methods[] = {
     JS_SELF_HOSTED_FN("findLast", "ArrayFindLast", 1, 0),
     JS_SELF_HOSTED_FN("findLastIndex", "ArrayFindLastIndex", 1, 0),
 
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
     JS_SELF_HOSTED_FN("toReversed", "ArrayToReversed", 0, 0),
     JS_SELF_HOSTED_FN("toSorted", "ArrayToSorted", 1, 0),
     JS_FN("toSpliced", array_toSpliced, 2, 0), JS_FN("with", array_with, 2, 0),
-#endif
 
     JS_FS_END};
 
 static const JSFunctionSpec array_static_methods[] = {
     JS_INLINABLE_FN("isArray", array_isArray, 1, 0, ArrayIsArray),
     JS_SELF_HOSTED_FN("from", "ArrayFrom", 3, 0),
-#ifdef NIGHTLY_BUILD
     JS_SELF_HOSTED_FN("fromAsync", "ArrayFromAsync", 3, 0),
-#endif
     JS_FN("of", array_of, 0, 0),
 
     JS_FS_END};
@@ -5169,7 +5135,8 @@ static bool array_proto_finish(JSContext* cx, JS::HandleObject ctor,
   }
 #endif
 
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
+  // FIXME: Once bug 1826643 is fixed, the names should be moved into the first
+  // "or" clause in this method so that they will be alphabetized.
   if (cx->realm()->creationOptions().getChangeArrayByCopyEnabled()) {
     /* The reason that "with" is not included in the unscopableList is
      * because it is already a reserved word.
@@ -5180,7 +5147,6 @@ static bool array_proto_finish(JSContext* cx, JS::HandleObject ctor,
       return false;
     }
   }
-#endif
 
   RootedId id(cx, PropertyKey::Symbol(cx->wellKnownSymbols().unscopables));
   value.setObject(*unscopables);
@@ -5261,6 +5227,19 @@ ArrayObject* js::NewDenseCopiedArray(
   return arr;
 }
 
+// values must point at already-rooted Value objects
+ArrayObject* js::NewDenseCopiedArray(
+    JSContext* cx, uint32_t length, JSLinearString** values,
+    NewObjectKind newKind /* = GenericObject */) {
+  ArrayObject* arr = NewArray<UINT32_MAX>(cx, length, newKind);
+  if (!arr) {
+    return nullptr;
+  }
+
+  arr->initDenseElements(values, length);
+  return arr;
+}
+
 ArrayObject* js::NewDenseCopiedArrayWithProto(JSContext* cx, uint32_t length,
                                               const Value* values,
                                               HandleObject proto) {
@@ -5283,7 +5262,7 @@ ArrayObject* js::NewDenseFullyAllocatedArrayWithTemplate(
 
   Rooted<SharedShape*> shape(cx, templateObject->sharedShape());
 
-  gc::InitialHeap heap = GetInitialHeap(GenericObject, &ArrayObject::class_);
+  gc::Heap heap = GetInitialHeap(GenericObject, &ArrayObject::class_);
   ArrayObject* arr = ArrayObject::create(cx, allocKind, heap, shape, length,
                                          shape->slotSpan(), metadata);
   if (!arr) {

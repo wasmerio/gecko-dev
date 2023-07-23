@@ -11,9 +11,12 @@
 #include "jit/CacheIRCloner.h"
 #include "jit/CacheIRWriter.h"
 #include "jit/JitFrames.h"
+#include "jit/JitRealm.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
 #include "jit/Linker.h"
+#include "jit/MoveEmitter.h"
+#include "jit/RegExpStubConstants.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/VMFunctions.h"
 #include "js/experimental/JitInfo.h"  // JSJitInfo
@@ -40,25 +43,47 @@ using JS::ExpandoAndGeneration;
 namespace js {
 namespace jit {
 
+static uint32_t GetICStackValueOffset() {
+  uint32_t offset = ICStackValueOffset;
+  if (JitOptions.enableICFramePointers) {
+#ifdef JS_USE_LINK_REGISTER
+    // The frame pointer and return address are also on the stack.
+    offset += 2 * sizeof(uintptr_t);
+#else
+    // The frame pointer is also on the stack.
+    offset += sizeof(uintptr_t);
+#endif
+  }
+  return offset;
+}
+
+static void PushICFrameRegs(MacroAssembler& masm) {
+  MOZ_ASSERT(JitOptions.enableICFramePointers);
+#ifdef JS_USE_LINK_REGISTER
+  masm.pushReturnAddress();
+#endif
+  masm.push(FramePointer);
+}
+
+static void PopICFrameRegs(MacroAssembler& masm) {
+  MOZ_ASSERT(JitOptions.enableICFramePointers);
+  masm.pop(FramePointer);
+#ifdef JS_USE_LINK_REGISTER
+  masm.popReturnAddress();
+#endif
+}
+
 Address CacheRegisterAllocator::addressOf(MacroAssembler& masm,
                                           BaselineFrameSlot slot) const {
   uint32_t offset =
-      stackPushed_ + ICStackValueOffset + slot.slot() * sizeof(JS::Value);
-  if (JitOptions.enableICFramePointers) {
-    // The frame pointer is also on the stack.
-    offset += sizeof(uintptr_t);
-  }
+      stackPushed_ + GetICStackValueOffset() + slot.slot() * sizeof(JS::Value);
   return Address(masm.getStackPointer(), offset);
 }
 BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
                                                  Register argcReg,
                                                  BaselineFrameSlot slot) const {
   uint32_t offset =
-      stackPushed_ + ICStackValueOffset + slot.slot() * sizeof(JS::Value);
-  if (JitOptions.enableICFramePointers) {
-    // The frame pointer is also on the stack.
-    offset += sizeof(uintptr_t);
-  }
+      stackPushed_ + GetICStackValueOffset() + slot.slot() * sizeof(JS::Value);
   return BaseValueIndex(masm.getStackPointer(), argcReg, offset);
 }
 
@@ -87,7 +112,7 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch,
   if (JitOptions.enableICFramePointers) {
     // If we have already pushed the frame pointer, pop it
     // before creating the stub frame.
-    masm.pop(FramePointer);
+    PopICFrameRegs(masm);
   }
   EmitBaselineEnterStubFrame(masm, scratch);
 
@@ -113,7 +138,7 @@ void AutoStubFrame::leave(MacroAssembler& masm) {
   if (JitOptions.enableICFramePointers) {
     // We will pop the frame pointer when we return,
     // so we have to push it again now.
-    masm.push(FramePointer);
+    PushICFrameRegs(masm);
   }
 }
 
@@ -165,7 +190,7 @@ JitCode* BaselineCacheIRCompiler::compile() {
      *  the caller's frame. To support this, we allocate a separate
      *  baselineFrame register when IC frame pointers are enabled.
      */
-    masm.push(FramePointer);
+    PushICFrameRegs(masm);
     masm.moveStackPtrTo(FramePointer);
 
     MOZ_ASSERT(baselineFrameReg() != FramePointer);
@@ -204,7 +229,7 @@ JitCode* BaselineCacheIRCompiler::compile() {
       return nullptr;
     }
     if (JitOptions.enableICFramePointers) {
-      masm.pop(FramePointer);
+      PopICFrameRegs(masm);
     }
     EmitStubGuardFailure(masm);
   }
@@ -1851,7 +1876,7 @@ bool BaselineCacheIRCompiler::emitReturnFromIC() {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   allocator.discardStack(masm);
   if (JitOptions.enableICFramePointers) {
-    masm.pop(FramePointer);
+    PopICFrameRegs(masm);
   }
   EmitReturnFromIC(masm);
   return true;
@@ -2094,6 +2119,7 @@ bool js::jit::TryFoldingStubs(JSContext* cx, ICFallbackStub* fallback,
   //   b) all of the stubs have the same stub field data, except
   //      for a single GuardShape where they differ.
   //   c) at least one stub after the first has a non-zero entry count.
+  //   d) All shapes in the GuardShape have the same realm.
   //
   // If all of these conditions hold, then we generate a single stub
   // that covers all the existing cases by replacing GuardShape with
@@ -2106,9 +2132,11 @@ bool js::jit::TryFoldingStubs(JSContext* cx, ICFallbackStub* fallback,
 
   auto addShape = [&shapeList, cx](uintptr_t rawShape) -> bool {
     Shape* shape = reinterpret_cast<Shape*>(rawShape);
-    if (cx->compartment() != shape->compartment()) {
+    // Only add same realm shapes.
+    if (shape->realm() != cx->realm()) {
       return false;
     }
+
     if (!shapeList.append(PrivateGCThingValue(shape))) {
       cx->recoverFromOutOfMemory();
       return false;
@@ -2215,6 +2243,10 @@ bool js::jit::TryFoldingStubs(JSContext* cx, ICFallbackStub* fallback,
               cx->recoverFromOutOfMemory();
               return false;
             }
+
+            MOZ_ASSERT(
+                reinterpret_cast<Shape*>(shapeList[i].toGCThing())->realm() ==
+                shapeObj->realm());
           }
 
           writer.guardMultipleShapes(objId, shapeObj);
@@ -2309,6 +2341,23 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
             stubInfo->getStubField<JSObject*>(stub, stubShapesOffset);
         foldedShapes = &shapeList->as<ListObject>();
         MOZ_ASSERT(foldedShapes->compartment() == shape->compartment());
+
+        // Don't add a shape if it's from a different realm than the first
+        // shape.
+        //
+        // Since the list was created in the realm which guarded all the shapes
+        // added to it, we can use its realm to check and ensure we're not
+        // adding a cross-realm shape.
+        //
+        // The assert verifies this property by checking the first element has
+        // the same realm (and since everything in the list has the same realm,
+        // checking the first element suffices)
+        MOZ_ASSERT(reinterpret_cast<Shape*>(foldedShapes->get(0).toGCThing())
+                       ->realm() == foldedShapes->realm());
+        if (foldedShapes->realm() != shape->realm()) {
+          return false;
+        }
+
         break;
       }
       default: {
@@ -3622,7 +3671,7 @@ bool BaselineCacheIRCompiler::emitNewArrayObjectResult(uint32_t arrayLength,
   Label fail;
 
   masm.createArrayWithFixedElements(result, shape, scratch, arrayLength,
-                                    arrayCapacity, allocKind, gc::DefaultHeap,
+                                    arrayCapacity, allocKind, gc::Heap::Default,
                                     &fail, AllocSiteInput(site));
   masm.jump(&done);
 
@@ -3678,7 +3727,7 @@ bool BaselineCacheIRCompiler::emitNewPlainObjectResult(uint32_t numFixedSlots,
   Label fail;
 
   masm.createPlainGCObject(obj, shape, scratch, shape, numFixedSlots,
-                           numDynamicSlots, allocKind, gc::DefaultHeap, &fail,
+                           numDynamicSlots, allocKind, gc::Heap::Default, &fail,
                            AllocSiteInput(site));
   masm.jump(&done);
 
@@ -3829,6 +3878,274 @@ bool BaselineCacheIRCompiler::emitCloseIterScriptedResult(
 
     masm.bind(&success);
   }
+
+  stubFrame.leave(masm);
+  return true;
+}
+
+static void CallRegExpStub(MacroAssembler& masm, size_t jitRealmStubOffset,
+                           Register temp, Label* vmCall) {
+  // Call cx->realm()->jitRealm()->regExpStub. We store a pointer to the RegExp
+  // stub in the IC stub to keep it alive, but we shouldn't use it if the stub
+  // has been discarded in the meantime (because we might have changed GC string
+  // pretenuring heuristics that affect behavior of the stub). This is uncommon
+  // but can happen if we discarded all JIT code but had some active (Baseline)
+  // scripts on the stack.
+  masm.loadJSContext(temp);
+  masm.loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
+  masm.loadPtr(Address(temp, Realm::offsetOfJitRealm()), temp);
+  masm.loadPtr(Address(temp, jitRealmStubOffset), temp);
+  masm.branchTestPtr(Assembler::Zero, temp, temp, vmCall);
+  masm.call(Address(temp, JitCode::offsetOfCode()));
+}
+
+// Used to move inputs to the registers expected by the RegExp stub.
+static void SetRegExpStubInputRegisters(MacroAssembler& masm,
+                                        Register* regexpSrc,
+                                        Register regexpDest, Register* inputSrc,
+                                        Register inputDest,
+                                        Register* lastIndexSrc,
+                                        Register lastIndexDest) {
+  MoveResolver& moves = masm.moveResolver();
+  if (*regexpSrc != regexpDest) {
+    masm.propagateOOM(moves.addMove(MoveOperand(*regexpSrc),
+                                    MoveOperand(regexpDest), MoveOp::GENERAL));
+    *regexpSrc = regexpDest;
+  }
+  if (*inputSrc != inputDest) {
+    masm.propagateOOM(moves.addMove(MoveOperand(*inputSrc),
+                                    MoveOperand(inputDest), MoveOp::GENERAL));
+    *inputSrc = inputDest;
+  }
+  if (lastIndexSrc && *lastIndexSrc != lastIndexDest) {
+    masm.propagateOOM(moves.addMove(MoveOperand(*lastIndexSrc),
+                                    MoveOperand(lastIndexDest), MoveOp::INT32));
+    *lastIndexSrc = lastIndexDest;
+  }
+
+  masm.propagateOOM(moves.resolve());
+
+  MoveEmitter emitter(masm);
+  emitter.emit(moves);
+  emitter.finish();
+}
+
+bool BaselineCacheIRCompiler::emitCallRegExpMatcherResult(
+    ObjOperandId regexpId, StringOperandId inputId, Int32OperandId lastIndexId,
+    uint32_t stubOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register regexp = allocator.useRegister(masm, regexpId);
+  Register input = allocator.useRegister(masm, inputId);
+  Register lastIndex = allocator.useRegister(masm, lastIndexId);
+  Register scratch = output.valueReg().scratchReg();
+
+  allocator.discardStack(masm);
+
+  AutoStubFrame stubFrame(*this);
+  stubFrame.enter(masm, scratch);
+
+  SetRegExpStubInputRegisters(masm, &regexp, RegExpMatcherRegExpReg, &input,
+                              RegExpMatcherStringReg, &lastIndex,
+                              RegExpMatcherLastIndexReg);
+
+  masm.reserveStack(RegExpReservedStack);
+
+  Label done, vmCall, vmCallNoMatches;
+  CallRegExpStub(masm, JitRealm::offsetOfRegExpMatcherStub(), scratch,
+                 &vmCallNoMatches);
+  masm.branchTestUndefined(Assembler::Equal, JSReturnOperand, &vmCall);
+
+  masm.jump(&done);
+
+  {
+    Label pushedMatches;
+    masm.bind(&vmCallNoMatches);
+    masm.push(ImmWord(0));
+    masm.jump(&pushedMatches);
+
+    masm.bind(&vmCall);
+    masm.computeEffectiveAddress(
+        Address(masm.getStackPointer(), InputOutputDataSize), scratch);
+    masm.Push(scratch);
+
+    masm.bind(&pushedMatches);
+    masm.Push(lastIndex);
+    masm.Push(input);
+    masm.Push(regexp);
+
+    using Fn = bool (*)(JSContext*, HandleObject regexp, HandleString input,
+                        int32_t lastIndex, MatchPairs* pairs,
+                        MutableHandleValue output);
+    callVM<Fn, RegExpMatcherRaw>(masm);
+  }
+
+  masm.bind(&done);
+
+  static_assert(R0 == JSReturnOperand);
+
+  stubFrame.leave(masm);
+  return true;
+}
+
+bool BaselineCacheIRCompiler::emitCallRegExpSearcherResult(
+    ObjOperandId regexpId, StringOperandId inputId, Int32OperandId lastIndexId,
+    uint32_t stubOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register regexp = allocator.useRegister(masm, regexpId);
+  Register input = allocator.useRegister(masm, inputId);
+  Register lastIndex = allocator.useRegister(masm, lastIndexId);
+  Register scratch = output.valueReg().scratchReg();
+
+  allocator.discardStack(masm);
+
+  AutoStubFrame stubFrame(*this);
+  stubFrame.enter(masm, scratch);
+
+  SetRegExpStubInputRegisters(masm, &regexp, RegExpSearcherRegExpReg, &input,
+                              RegExpSearcherStringReg, &lastIndex,
+                              RegExpSearcherLastIndexReg);
+  // Ensure `scratch` doesn't conflict with the stub's input registers.
+  scratch = ReturnReg;
+
+  masm.reserveStack(RegExpReservedStack);
+
+  Label done, vmCall, vmCallNoMatches;
+  CallRegExpStub(masm, JitRealm::offsetOfRegExpSearcherStub(), scratch,
+                 &vmCallNoMatches);
+  masm.branch32(Assembler::Equal, scratch, Imm32(RegExpSearcherResultFailed),
+                &vmCall);
+
+  masm.jump(&done);
+
+  {
+    Label pushedMatches;
+    masm.bind(&vmCallNoMatches);
+    masm.push(ImmWord(0));
+    masm.jump(&pushedMatches);
+
+    masm.bind(&vmCall);
+    masm.computeEffectiveAddress(
+        Address(masm.getStackPointer(), InputOutputDataSize), scratch);
+    masm.Push(scratch);
+
+    masm.bind(&pushedMatches);
+    masm.Push(lastIndex);
+    masm.Push(input);
+    masm.Push(regexp);
+
+    using Fn = bool (*)(JSContext*, HandleObject regexp, HandleString input,
+                        int32_t lastIndex, MatchPairs* pairs, int32_t* result);
+    callVM<Fn, RegExpSearcherRaw>(masm);
+  }
+
+  masm.bind(&done);
+
+  masm.tagValue(JSVAL_TYPE_INT32, ReturnReg, output.valueReg());
+
+  stubFrame.leave(masm);
+  return true;
+}
+
+bool BaselineCacheIRCompiler::emitRegExpBuiltinExecMatchResult(
+    ObjOperandId regexpId, StringOperandId inputId, uint32_t stubOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register regexp = allocator.useRegister(masm, regexpId);
+  Register input = allocator.useRegister(masm, inputId);
+  Register scratch = output.valueReg().scratchReg();
+
+  allocator.discardStack(masm);
+
+  AutoStubFrame stubFrame(*this);
+  stubFrame.enter(masm, scratch);
+
+  SetRegExpStubInputRegisters(masm, &regexp, RegExpMatcherRegExpReg, &input,
+                              RegExpMatcherStringReg, nullptr, InvalidReg);
+
+  masm.reserveStack(RegExpReservedStack);
+
+  Label done, vmCall, vmCallNoMatches;
+  CallRegExpStub(masm, JitRealm::offsetOfRegExpExecMatchStub(), scratch,
+                 &vmCallNoMatches);
+  masm.branchTestUndefined(Assembler::Equal, JSReturnOperand, &vmCall);
+
+  masm.jump(&done);
+
+  {
+    Label pushedMatches;
+    masm.bind(&vmCallNoMatches);
+    masm.push(ImmWord(0));
+    masm.jump(&pushedMatches);
+
+    masm.bind(&vmCall);
+    masm.computeEffectiveAddress(
+        Address(masm.getStackPointer(), InputOutputDataSize), scratch);
+    masm.Push(scratch);
+
+    masm.bind(&pushedMatches);
+    masm.Push(input);
+    masm.Push(regexp);
+
+    using Fn =
+        bool (*)(JSContext*, Handle<RegExpObject*> regexp, HandleString input,
+                 MatchPairs* pairs, MutableHandleValue output);
+    callVM<Fn, RegExpBuiltinExecMatchFromJit>(masm);
+  }
+
+  masm.bind(&done);
+
+  static_assert(R0 == JSReturnOperand);
+
+  stubFrame.leave(masm);
+  return true;
+}
+
+bool BaselineCacheIRCompiler::emitRegExpBuiltinExecTestResult(
+    ObjOperandId regexpId, StringOperandId inputId, uint32_t stubOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register regexp = allocator.useRegister(masm, regexpId);
+  Register input = allocator.useRegister(masm, inputId);
+  Register scratch = output.valueReg().scratchReg();
+
+  allocator.discardStack(masm);
+
+  AutoStubFrame stubFrame(*this);
+  stubFrame.enter(masm, scratch);
+
+  SetRegExpStubInputRegisters(masm, &regexp, RegExpExecTestRegExpReg, &input,
+                              RegExpExecTestStringReg, nullptr, InvalidReg);
+  // Ensure `scratch` doesn't conflict with the stub's input registers.
+  scratch = ReturnReg;
+
+  Label done, vmCall;
+  CallRegExpStub(masm, JitRealm::offsetOfRegExpExecTestStub(), scratch,
+                 &vmCall);
+  masm.branch32(Assembler::Equal, scratch, Imm32(RegExpExecTestResultFailed),
+                &vmCall);
+
+  masm.jump(&done);
+
+  {
+    masm.bind(&vmCall);
+
+    masm.Push(input);
+    masm.Push(regexp);
+
+    using Fn = bool (*)(JSContext*, Handle<RegExpObject*> regexp,
+                        HandleString input, bool* result);
+    callVM<Fn, RegExpBuiltinExecTestFromJit>(masm);
+  }
+
+  masm.bind(&done);
+
+  masm.tagValue(JSVAL_TYPE_BOOLEAN, ReturnReg, output.valueReg());
 
   stubFrame.leave(masm);
   return true;

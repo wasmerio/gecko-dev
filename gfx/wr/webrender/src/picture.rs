@@ -2888,7 +2888,7 @@ impl TileCacheInstance {
         let prim_clip_chain = &prim_instance.vis.clip_chain;
 
         // Accumulate the exact (clipped) local rect in to the parent surface
-        let mut surface = &mut surfaces[prim_surface_index.0];
+        let surface = &mut surfaces[prim_surface_index.0];
         surface.clipped_local_rect = surface.clipped_local_rect.union(&prim_clip_chain.pic_coverage_rect);
 
         // If the primitive is directly drawn onto this picture cache surface, then
@@ -3268,10 +3268,6 @@ impl TileCacheInstance {
 
                     // If this is a sub-graph, register the bounds on any affected tiles
                     // so we know how much to expand the content tile by.
-
-                    // Implicitly, we know that any slice with a sub-graph disables compositor
-                    // surface promotion, so sub_slice_index will always be 0.
-                    debug_assert_eq!(sub_slice_index, 0);
                     let sub_slice = &mut self.sub_slices[sub_slice_index];
 
                     let mut surface_info = Vec::new();

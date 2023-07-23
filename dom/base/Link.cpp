@@ -81,12 +81,10 @@ void Link::VisitedQueryFinished(bool aVisited) {
   // Tell the element to update its visited state.
   mElement->UpdateState(true);
 
-  if (StaticPrefs::layout_css_always_repaint_on_unvisited()) {
-    // Even if the state didn't actually change, we need to repaint in order for
-    // the visited state not to be observable.
-    nsLayoutUtils::PostRestyleEvent(GetElement(), RestyleHint::RestyleSubtree(),
-                                    nsChangeHint_RepaintFrame);
-  }
+  // Even if the state didn't actually change, we need to repaint in order for
+  // the visited state not to be observable.
+  nsLayoutUtils::PostRestyleEvent(GetElement(), RestyleHint::RestyleSubtree(),
+                                  nsChangeHint_RepaintFrame);
 }
 
 ElementState Link::LinkState() const {
@@ -154,19 +152,10 @@ void Link::SetProtocol(const nsAString& aProtocol) {
     // Ignore failures to be compatible with NS4.
     return;
   }
-
-  nsAString::const_iterator start, end;
-  aProtocol.BeginReading(start);
-  aProtocol.EndReading(end);
-  nsAString::const_iterator iter(start);
-  (void)FindCharInReadable(':', iter, end);
-  nsresult rv = NS_MutateURI(uri)
-                    .SetScheme(NS_ConvertUTF16toUTF8(Substring(start, iter)))
-                    .Finalize(uri);
-  if (NS_FAILED(rv)) {
+  uri = net::TryChangeProtocol(uri, aProtocol);
+  if (!uri) {
     return;
   }
-
   SetHrefAttribute(uri);
 }
 
@@ -315,7 +304,7 @@ void Link::GetOrigin(nsAString& aOrigin) {
   }
 
   nsString origin;
-  nsContentUtils::GetUTFOrigin(uri, origin);
+  nsContentUtils::GetWebExposedOriginSerialization(uri, origin);
   aOrigin.Assign(origin);
 }
 

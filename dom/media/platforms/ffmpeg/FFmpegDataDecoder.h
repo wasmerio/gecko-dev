@@ -41,7 +41,7 @@ class FFmpegDataDecoder<LIBAV_VER>
   RefPtr<ShutdownPromise> Shutdown() override;
 
   static AVCodec* FindAVCodec(FFmpegLibWrapper* aLib, AVCodecID aCodec);
-#ifdef MOZ_WAYLAND
+#ifdef MOZ_WIDGET_GTK
   static AVCodec* FindHardwareAVCodec(FFmpegLibWrapper* aLib, AVCodecID aCodec);
 #endif
 
@@ -54,7 +54,7 @@ class FFmpegDataDecoder<LIBAV_VER>
   MediaResult InitDecoder();
   MediaResult AllocateExtraData();
   MediaResult DoDecode(MediaRawData* aSample, bool* aGotFrame,
-                       DecodedData& aOutResults);
+                       DecodedData& aResults);
 
   FFmpegLibWrapper* mLib;  // set in constructor
 

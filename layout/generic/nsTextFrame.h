@@ -367,8 +367,8 @@ class nsTextFrame : public nsIFrame {
   bool IsEmpty() final;
   bool IsSelfEmpty() final { return IsEmpty(); }
   Maybe<nscoord> GetNaturalBaselineBOffset(
-      mozilla::WritingMode aWM,
-      BaselineSharingGroup aBaselineGroup) const override;
+      mozilla::WritingMode aWM, BaselineSharingGroup aBaselineGroup,
+      BaselineExportContext) const override;
 
   bool HasSignificantTerminalNewline() const final;
 
@@ -587,10 +587,11 @@ class nsTextFrame : public nsIFrame {
   struct PaintShadowParams;
   struct PaintDecorationLineParams;
 
-  struct SelectionRange {
-    const SelectionDetails* mDetails;
-    gfxTextRun::Range mRange;
-    uint32_t mPriority;
+  struct PriorityOrderedSelectionsForRange {
+    /// List of Selection Details active for the given range.
+    /// Ordered by priority, i.e. the last element has the highest priority.
+    nsTArray<const SelectionDetails*> mSelectionRanges;
+    Range mRange;
   };
 
   // Primary frame paint method called from nsDisplayText.  Can also be used
@@ -620,11 +621,10 @@ class nsTextFrame : public nsIFrame {
       const mozilla::UniquePtr<SelectionDetails>& aDetails,
       SelectionType aSelectionType);
 
-  SelectionTypeMask ResolveSelections(const PaintTextSelectionParams& aParams,
-                                      const SelectionDetails* aDetails,
-                                      nsTArray<SelectionRange>& aResult,
-                                      SelectionType aSelectionType,
-                                      bool* aAnyBackgrounds = nullptr) const;
+  SelectionTypeMask ResolveSelections(
+      const PaintTextSelectionParams& aParams, const SelectionDetails* aDetails,
+      nsTArray<PriorityOrderedSelectionsForRange>& aResult,
+      SelectionType aSelectionType, bool* aAnyBackgrounds = nullptr) const;
 
   void DrawEmphasisMarks(gfxContext* aContext, mozilla::WritingMode aWM,
                          const mozilla::gfx::Point& aTextBaselinePt,
@@ -773,6 +773,11 @@ class nsTextFrame : public nsIFrame {
 
   void SetHangableISize(nscoord aISize);
   nscoord GetHangableISize() const;
+  void ClearHangableISize();
+
+  void SetTrimmableWS(gfxTextRun::TrimmableWS aTrimmableWS);
+  gfxTextRun::TrimmableWS GetTrimmableWS() const;
+  void ClearTrimmableWS();
 
  protected:
   virtual ~nsTextFrame();
@@ -808,13 +813,20 @@ class nsTextFrame : public nsIFrame {
   };
   mutable SelectionState mIsSelected;
 
-  // Whether a cached continuations array is present.
-  bool mHasContinuationsProperty = false;
+  // Flags used to track whether certain properties are present.
+  // (Public to keep MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS happy.)
+ public:
+  enum class PropertyFlags : uint8_t {
+    // Whether a cached continuations array is present.
+    Continuations = 1 << 0,
+    // Whether a HangableWhitespace property is present.
+    HangableWS = 1 << 1,
+    // Whether a TrimmableWhitespace property is present.
+    TrimmableWS = 2 << 1,
+  };
 
-  // Whether a HangableWhitespace property is present. This could have been a
-  // frame state bit, but they are currently full. Because we have a uint8_t
-  // and a bool just above, there's a hole here that we can use.
-  bool mHasHangableWS = false;
+ protected:
+  PropertyFlags mPropertyFlags = PropertyFlags(0);
 
   /**
    * Return true if the frame is part of a Selection.
@@ -985,6 +997,53 @@ class nsTextFrame : public nsIFrame {
       nsPresContext* aPresContext, const gfxFont::Metrics& aFontMetrics,
       SelectionType aSelectionType);
 
+  /**
+   * @brief Helper struct which contains selection data such as its details,
+   * range and priority.
+   */
+  struct SelectionRange {
+    const SelectionDetails* mDetails{nullptr};
+    gfxTextRun::Range mRange;
+    /// used to determine the order of overlapping selections of the same type.
+    uint32_t mPriority{0};
+  };
+  /**
+   * @brief Helper: Extracts a list of `SelectionRange` structs from given
+   * `SelectionDetails` and computes a priority for overlapping selection
+   * ranges.
+   */
+  static SelectionTypeMask CreateSelectionRangeList(
+      const SelectionDetails* aDetails, SelectionType aSelectionType,
+      const PaintTextSelectionParams& aParams,
+      nsTArray<SelectionRange>& aSelectionRanges, bool* aAnyBackgrounds);
+
+  /**
+   * @brief Creates an array of `CombinedSelectionRange`s from given list
+   * of `SelectionRange`s.
+   * Each instance of `CombinedSelectionRange` represents a piece of text with
+   * constant Selections.
+   *
+   * Example:
+   *
+   * Consider this text fragment, [] and () marking selection ranges:
+   *   ab[cd(e]f)g
+   * This results in the following array of combined ranges:
+   *  - [0]: range: (2, 4), selections: "[]"
+   *  - [1]: range: (4, 5), selections: "[]", "()"
+   *  - [2]: range: (5, 6), selections: "()"
+   * Depending on the priorities of the ranges, [1] may have a different order
+   * of its ranges. The given example indicates that "()" has a higher priority
+   * than "[]".
+   *
+   * @param aSelectionRanges         Array of `SelectionRange` objects. Must be
+   *                                 sorted by the start offset.
+   * @param aCombinedSelectionRanges Out parameter. Returns the constructed
+   *                                 array of combined selection ranges.
+   */
+  static void CombineSelectionRanges(
+      const nsTArray<SelectionRange>& aSelectionRanges,
+      nsTArray<PriorityOrderedSelectionsForRange>& aCombinedSelectionRanges);
+
   ContentOffsets GetCharacterOffsetAtFramePointInternal(
       const nsPoint& aPoint, bool aForInsertionPoint);
 
@@ -1000,13 +1059,7 @@ class nsTextFrame : public nsIFrame {
 
   // Clear any cached continuations array; this should be called whenever the
   // chain is modified.
-  void ClearCachedContinuations() {
-    MOZ_ASSERT(NS_IsMainThread());
-    if (mHasContinuationsProperty) {
-      RemoveProperty(ContinuationsProperty());
-      mHasContinuationsProperty = false;
-    }
-  }
+  inline void ClearCachedContinuations();
 
   /**
    * UpdateIteratorFromOffset() updates the iterator from a given offset.
@@ -1022,5 +1075,14 @@ class nsTextFrame : public nsIFrame {
 };
 
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(nsTextFrame::TrimmedOffsetFlags)
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(nsTextFrame::PropertyFlags)
+
+inline void nsTextFrame::ClearCachedContinuations() {
+  MOZ_ASSERT(NS_IsMainThread());
+  if (mPropertyFlags & PropertyFlags::Continuations) {
+    RemoveProperty(ContinuationsProperty());
+    mPropertyFlags &= ~PropertyFlags::Continuations;
+  }
+}
 
 #endif

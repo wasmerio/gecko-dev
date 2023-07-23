@@ -119,18 +119,6 @@ export class ContextMenuChild extends JSWindowActorChild {
                     "contextmenu",
                     1
                   );
-                  let args = {
-                    firstTimeToggle: (!Services.prefs.getBoolPref(
-                      "media.videocontrols.picture-in-picture.video-toggle.has-used"
-                    )).toString(),
-                  };
-                  Services.telemetry.recordEvent(
-                    "pictureinpicture",
-                    "opened_method",
-                    "contextMenu",
-                    null,
-                    args
-                  );
                 }
                 let event = new this.contentWindow.CustomEvent(
                   "MozTogglePictureInPicture",
@@ -217,7 +205,7 @@ export class ContextMenuChild extends JSWindowActorChild {
             return escape(aName + "=" + aValue);
           }
 
-          return escape(aName) + "=" + escape(aValue);
+          return encodeURIComponent(aName) + "=" + encodeURIComponent(aValue);
         }
         let formData = new this.contentWindow.FormData(node.form);
         formData.delete(node.name);
@@ -469,7 +457,7 @@ export class ContextMenuChild extends JSWindowActorChild {
 
   _isMediaURLReusable(aURL) {
     if (aURL.startsWith("blob:")) {
-      return URL.isValidURL(aURL);
+      return URL.isValidObjectURL(aURL);
     }
 
     return true;
@@ -686,9 +674,8 @@ export class ContextMenuChild extends JSWindowActorChild {
     }
 
     if (linkReferrerInfo) {
-      data.linkReferrerInfo = lazy.E10SUtils.serializeReferrerInfo(
-        linkReferrerInfo
-      );
+      data.linkReferrerInfo =
+        lazy.E10SUtils.serializeReferrerInfo(linkReferrerInfo);
     }
 
     // Notify observers (currently only webextensions) of the context menu being

@@ -129,7 +129,7 @@ let TESTS = {
   },
 };
 
-add_task(async function() {
+add_task(async function () {
   UrlbarPrefs.set("quicksuggest.enabled", true);
   UrlbarPrefs.set("suggest.quicksuggest.sponsored", true);
   UrlbarPrefs.set("suggest.quicksuggest.nonsponsored", true);
@@ -191,6 +191,9 @@ add_task(async function() {
         sponsoredAdvertiser: qsResult.advertiser,
         sponsoredIabCategory: qsResult.iab_category,
         icon: null,
+        descriptionL10n: isSponsored
+          ? { id: "urlbar-result-action-sponsored" }
+          : undefined,
         helpUrl: QuickSuggest.HELP_URL,
         helpL10n: {
           id: UrlbarPrefs.get("resultMenu")
@@ -204,12 +207,18 @@ add_task(async function() {
             : "firefox-suggest-urlbar-block",
         },
         source: "remote-settings",
+        provider: "AdmWikipedia",
       },
     });
   }
 
   await QuickSuggestTestUtils.ensureQuickSuggestInit({
-    remoteSettingsResults: qsResults,
+    remoteSettingsResults: [
+      {
+        type: "data",
+        attachment: qsResults,
+      },
+    ],
   });
 
   // Run a test for each keyword.

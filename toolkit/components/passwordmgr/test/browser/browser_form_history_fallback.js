@@ -10,13 +10,18 @@ async function cleanup() {
   await FormHistoryTestUtils.clear(usernameFieldName);
 }
 
-add_setup(async function() {
+add_setup(async function () {
   await cleanup();
 });
 
 add_task(
   async function test_username_not_saved_in_form_history_when_password_manager_enabled() {
     Services.prefs.setBoolPref("signon.rememberSignons", true);
+
+    const storageChangedPromise = TestUtils.topicObserved(
+      "passwordmgr-storage-changed",
+      (_, data) => data == "addLogin"
+    );
 
     await testSubmittingLoginFormHTTP(
       "subtst_notifications_1.html",
@@ -25,6 +30,8 @@ add_task(
         await clickDoorhangerButton(notif, REMEMBER_BUTTON);
       }
     );
+
+    await storageChangedPromise;
 
     const loginEntries = Services.logins.getAllLogins().length;
     const historyEntries = await FormHistoryTestUtils.count(usernameFieldName);

@@ -9,7 +9,6 @@ const URL = "data:text/html;charset=utf8,test page";
 
 var { Toolbox } = require("resource://devtools/client/framework/toolbox.js");
 
-const { LocalizationHelper } = require("resource://devtools/shared/l10n.js");
 const L10N = new LocalizationHelper(
   "devtools/client/locales/toolbox.properties"
 );
@@ -18,7 +17,7 @@ function getZoomValue() {
   return parseFloat(Services.prefs.getCharPref("devtools.toolbox.zoomValue"));
 }
 
-add_task(async function() {
+add_task(async function () {
   info("Create a test tab and open the toolbox");
   const tab = await addTab(URL);
   const toolbox = await gDevTools.showToolboxForTab(tab, "webconsole");

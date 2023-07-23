@@ -7,7 +7,7 @@
 const kButton = "test_dynamically_created_button";
 var initialLocation = gBrowser.currentURI.spec;
 
-add_task(async function() {
+add_task(async function () {
   info("Check dynamically created button functionality");
 
   // Let's create a simple button that will open about:addons.
@@ -81,7 +81,9 @@ function resetTabs() {
 
 async function checkButtonFunctionality(aButton) {
   aButton.click();
-  await TestUtils.waitForCondition(
-    () => gBrowser.currentURI && gBrowser.currentURI.spec == "about:addons"
+  await BrowserTestUtils.browserLoaded(
+    gBrowser.selectedBrowser,
+    false,
+    "about:addons"
   );
 }

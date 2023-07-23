@@ -137,7 +137,7 @@ export class ConditionalPanel extends PureComponent {
     }
     const { location, editor } = props;
 
-    const editorLine = toEditorLine(location.sourceId, location.line || 0);
+    const editorLine = toEditorLine(location.source.id, location.line || 0);
     this.cbPanel = editor.codeMirror.addLineWidget(
       editorLine,
       this.renderConditionalPanel(props),
@@ -262,11 +262,8 @@ const mapStateToProps = state => {
   };
 };
 
-const {
-  setBreakpointOptions,
-  openConditionalPanel,
-  closeConditionalPanel,
-} = actions;
+const { setBreakpointOptions, openConditionalPanel, closeConditionalPanel } =
+  actions;
 
 const mapDispatchToProps = {
   setBreakpointOptions,

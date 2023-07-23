@@ -1,7 +1,7 @@
 "use strict";
 
-const { AboutNewTab } = ChromeUtils.import(
-  "resource:///modules/AboutNewTab.jsm"
+const { AboutNewTab } = ChromeUtils.importESModule(
+  "resource:///modules/AboutNewTab.sys.mjs"
 );
 
 registerCleanupFunction(() => {
@@ -9,13 +9,13 @@ registerCleanupFunction(() => {
 });
 
 function nextChangeNotificationPromise(aNewURL, testMessage) {
-  return TestUtils.topicObserved("newtab-url-changed", function observer(
-    aSubject,
-    aData
-  ) {
-    Assert.equal(aData, aNewURL, testMessage);
-    return true;
-  });
+  return TestUtils.topicObserved(
+    "newtab-url-changed",
+    function observer(aSubject, aData) {
+      Assert.equal(aData, aNewURL, testMessage);
+      return true;
+    }
+  );
 }
 
 /*

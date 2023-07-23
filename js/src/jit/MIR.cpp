@@ -4895,7 +4895,7 @@ MArrayState* MArrayState::Copy(TempAllocator& alloc, MArrayState* state) {
 }
 
 MNewArray::MNewArray(uint32_t length, MConstant* templateConst,
-                     gc::InitialHeap initialHeap, bool vmCall)
+                     gc::Heap initialHeap, bool vmCall)
     : MUnaryInstruction(classOpcode, templateConst),
       length_(length),
       initialHeap_(initialHeap),
@@ -7095,7 +7095,7 @@ MDefinition* MGetInlinedArgumentHole::foldsTo(TempAllocator& alloc) {
 MInlineArgumentsSlice* MInlineArgumentsSlice::New(
     TempAllocator& alloc, MDefinition* begin, MDefinition* count,
     MCreateInlinedArgumentsObject* args, JSObject* templateObj,
-    gc::InitialHeap initialHeap) {
+    gc::Heap initialHeap) {
   auto* ins = new (alloc) MInlineArgumentsSlice(templateObj, initialHeap);
 
   uint32_t argc = args->numActuals();
@@ -7188,16 +7188,25 @@ MDefinition* MNormalizeSliceTerm::foldsTo(TempAllocator& alloc) {
 }
 
 bool MWasmShiftSimd128::congruentTo(const MDefinition* ins) const {
+  if (!ins->isWasmShiftSimd128()) {
+    return false;
+  }
   return ins->toWasmShiftSimd128()->simdOp() == simdOp_ &&
          congruentIfOperandsEqual(ins);
 }
 
 bool MWasmShuffleSimd128::congruentTo(const MDefinition* ins) const {
+  if (!ins->isWasmShuffleSimd128()) {
+    return false;
+  }
   return ins->toWasmShuffleSimd128()->shuffle().equals(&shuffle_) &&
          congruentIfOperandsEqual(ins);
 }
 
 bool MWasmUnarySimd128::congruentTo(const MDefinition* ins) const {
+  if (!ins->isWasmUnarySimd128()) {
+    return false;
+  }
   return ins->toWasmUnarySimd128()->simdOp() == simdOp_ &&
          congruentIfOperandsEqual(ins);
 }
@@ -7226,3 +7235,36 @@ MWasmShuffleSimd128* jit::BuildWasmShuffleSimd128(TempAllocator& alloc,
   return MWasmShuffleSimd128::New(alloc, lhs, rhs, s);
 }
 #endif  // ENABLE_WASM_SIMD
+
+static MDefinition* FoldTrivialWasmCasts(TempAllocator& alloc,
+                                         wasm::RefType sourceType,
+                                         wasm::RefType destType) {
+  // Upcasts are trivially valid.
+  if (wasm::RefType::isSubTypeOf(sourceType, destType)) {
+    return MConstant::New(alloc, Int32Value(1), MIRType::Int32);
+  }
+
+  // If two types are completely disjoint, then all casts between them are
+  // impossible.
+  if (!wasm::RefType::castPossible(destType, sourceType)) {
+    return MConstant::New(alloc, Int32Value(0), MIRType::Int32);
+  }
+
+  return nullptr;
+}
+
+MDefinition* MWasmGcObjectIsSubtypeOfAbstract::foldsTo(TempAllocator& alloc) {
+  MDefinition* folded = FoldTrivialWasmCasts(alloc, sourceType(), destType());
+  if (folded) {
+    return folded;
+  }
+  return this;
+}
+
+MDefinition* MWasmGcObjectIsSubtypeOfConcrete::foldsTo(TempAllocator& alloc) {
+  MDefinition* folded = FoldTrivialWasmCasts(alloc, sourceType(), destType());
+  if (folded) {
+    return folded;
+  }
+  return this;
+}

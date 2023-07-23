@@ -6,7 +6,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
-  WrapPrivileged: "resource://specialpowers/WrapPrivileged.sys.mjs",
+  WrapPrivileged: "resource://testing-common/WrapPrivileged.sys.mjs",
 });
 
 const Cm = Components.manager;
@@ -20,7 +20,7 @@ if (import.meta.url.includes("specialpowers")) {
 var registrar = Cm.QueryInterface(Ci.nsIComponentRegistrar);
 var oldClassID;
 var newClassID = Services.uuid.generateUUID();
-var newFactory = function(window) {
+var newFactory = function (window) {
   return {
     createInstance(aIID) {
       return new MockFilePickerInstance(window).QueryInterface(aIID);
@@ -93,7 +93,7 @@ export var MockFilePicker = {
   },
 
   useAnyFile() {
-    var file = lazy.FileUtils.getDir("TmpD", [], false);
+    var file = lazy.FileUtils.getDir("TmpD", []);
     file.append("testfile");
     file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, 0o644);
     let promise = this.window.File.createFromNsIFile(file)

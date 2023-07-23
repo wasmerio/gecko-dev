@@ -3,7 +3,7 @@
 
 const allowCreate = { create: true };
 
-exported_symbols.test0 = async function() {
+exported_symbols.test0 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(!!root, "Can we access the root directory?");
 
@@ -35,9 +35,9 @@ exported_symbols.test0 = async function() {
   Assert.ok(fileSize == writeBuffer.byteLength);
 };
 
-exported_symbols.quotaTest = async function() {
+exported_symbols.quotaTest = async function () {
   const shrinkedStorageSizeKB = 5 * 1024;
-  const defaultDatabaseSize = 294912;
+  const defaultDatabaseSize = 458779;
 
   // Shrink storage size to 5MB.
   await Utils.shrinkStorageSize(shrinkedStorageSizeKB);
@@ -83,6 +83,66 @@ exported_symbols.quotaTest = async function() {
   // writable2 is already closed because of the failed write above
 
   await Utils.restoreStorageSize();
+};
+
+exported_symbols.bug1823445 = async function () {
+  const root = await navigator.storage.getDirectory();
+  const testFileName = "test1823445.txt";
+  let handle = await root.getFileHandle(testFileName, allowCreate);
+  let writable = await handle.createWritable();
+  await writable.write("abcdefghijklmnop");
+  await writable.close();
+
+  handle = await root.getFileHandle(testFileName);
+  writable = await handle.createWritable({ keepExistingData: false });
+  await writable.write("12345");
+  await writable.close();
+
+  handle = await root.getFileHandle(testFileName);
+  const file = await handle.getFile();
+  const text = await file.text();
+  Assert.equal(text, "12345");
+};
+
+exported_symbols.bug1824993 = async function () {
+  const root = await navigator.storage.getDirectory();
+  const testFileName = "test1824993.txt";
+  const handle = await root.getFileHandle(testFileName, allowCreate);
+  {
+    const writable = await handle.createWritable();
+    await writable.write("test");
+
+    {
+      const file = await handle.getFile();
+      const contents = await file.text();
+      Assert.equal(contents, "");
+    }
+
+    await writable.abort();
+  }
+
+  const file = await handle.getFile();
+  const contents = await file.text();
+  Assert.equal(contents, "");
+};
+
+exported_symbols.bug1825018 = async function () {
+  const root = await navigator.storage.getDirectory();
+  const testFileName = "test1825018.txt";
+  const handle = await root.getFileHandle(testFileName, allowCreate);
+  const writable = await handle.createWritable();
+  try {
+    await writable.write({ type: "truncate" });
+  } catch (e) {
+    // Called write without size throws an error as expected
+  }
+
+  try {
+    await writable.abort();
+    await root.removeEntry(testFileName);
+  } catch (e) {
+    Assert.ok(false, e.message);
+  }
 };
 
 for (const [key, value] of Object.entries(exported_symbols)) {

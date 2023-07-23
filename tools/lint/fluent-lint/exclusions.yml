@@ -82,6 +82,9 @@ ID01:
         # policies-descriptions.ftl: These IDs are generated programmatically
         # from policy names.
         - browser/locales/en-US/browser/policies/policies-descriptions.ftl
+        # The webext-perms-description-* IDs are generated programmatically
+        # from permission names
+        - toolkit/locales/en-US/toolkit/global/extensionPermissions.ftl
 ID02:
     messages:
         # browser/components/ion/content/ion.ftl
@@ -103,12 +106,6 @@ ID02:
         - find
         - new-tab
         - share
-        # toolkit/locales/en-US/toolkit/about/aboutPerformance.ftl
-        - type-tab
-        - size-KB
-        - size-MB
-        - size-GB
-        - item
         # toolkit/locales/en-US/toolkit/about/aboutPlugins.ftl
         - file-dd
         - path-dd
@@ -160,8 +157,6 @@ CO01:
         # browser/locales/en-US/browser/preferences/preferences.ftl
         - sync-engine-addons
         - sync-mobile-promo
-        # browser/locales/en-US/browser/protectionsPanel.ftl
-        - protections-panel-content-blocking-breakage-report-view-description
         # devtools/client/locales/en-US/aboutdebugging.ftl
         - about-debugging-setup-usb-step-enable-debug-firefox2
         - about-debugging-browser-version-too-old-fennec
@@ -185,6 +180,8 @@ CO01:
         - about-telemetry-firefox-data-doc
         - about-telemetry-telemetry-client-doc
         - about-telemetry-telemetry-dashboard
+        # toolkit/locales/en-US/toolkit/global/extensionPermissions.ftl
+        - webext-perms-description-management
         # toolkit/locales/en-US/toolkit/global/processTypes.ftl
         - process-type-privilegedmozilla
     files:

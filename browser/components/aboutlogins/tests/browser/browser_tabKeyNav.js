@@ -14,7 +14,7 @@ EXPECTED_BREACH = {
   schema: "1541615609018",
 };
 
-add_setup(async function() {
+add_setup(async function () {
   TEST_LOGIN1 = await addLogin(TEST_LOGIN1);
   await BrowserTestUtils.openNewForegroundTab({
     gBrowser,
@@ -212,7 +212,8 @@ add_task(async function test_tab_to_edit_button() {
       const loginSort = loginList.shadowRoot.getElementById("login-sort");
       const loginListbox = loginList.shadowRoot.querySelector("ol");
       const editButton = loginItem.shadowRoot.querySelector(".edit-button");
-      const breachAlert = loginItem.shadowRoot.querySelector(".breach-alert");
+      const breachAlert =
+        loginItem.shadowRoot.querySelector("login-breach-alert");
       const getFocusedElement = () => {
         if (content.document.activeElement == loginList) {
           return loginList.shadowRoot.activeElement;

@@ -5,7 +5,8 @@
 // This test verifies that hidden add-ons cannot be user disabled.
 
 // for system add-ons
-const distroDir = FileUtils.getDir("ProfD", ["sysfeatures"], true);
+const distroDir = FileUtils.getDir("ProfD", ["sysfeatures"]);
+distroDir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
 registerDirectory("XREAppFeat", distroDir);
 
 const NORMAL_ID = "normal@tests.mozilla.org";
@@ -14,7 +15,7 @@ const SYSTEM_ID = "system@tests.mozilla.org";
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
 
 // normal add-ons can be user disabled.
-add_task(async function() {
+add_task(async function () {
   await promiseStartupManager();
 
   await promiseInstallWebExtension({
@@ -59,7 +60,7 @@ add_task(async function() {
 });
 
 // system add-ons can never be user disabled.
-add_task(async function() {
+add_task(async function () {
   let xpi = createTempWebExtensionFile({
     manifest: {
       name: "Test disabling hidden add-ons, hidden system add-on case.",

@@ -53,9 +53,7 @@ class RemoteAccessible;
 class Relation;
 class RootAccessible;
 class TableAccessible;
-class TableAccessibleBase;
 class TableCellAccessible;
-class TableCellAccessibleBase;
 class TextLeafAccessible;
 class XULLabelAccessible;
 class XULTreeAccessible;
@@ -149,11 +147,6 @@ class LocalAccessible : public nsISupports, public Accessible {
    * Get the value of this accessible.
    */
   virtual void Value(nsString& aValue) const override;
-
-  /**
-   * Get help string for the accessible.
-   */
-  void Help(nsString& aHelp) const { aHelp.Truncate(); }
 
   /**
    * Get the name of this accessible.
@@ -355,7 +348,7 @@ class LocalAccessible : public nsISupports, public Accessible {
   /**
    * Return embedded accessible child at the given index.
    */
-  virtual LocalAccessible* EmbeddedChildAt(uint32_t aIndex) override;
+  virtual Accessible* EmbeddedChildAt(uint32_t aIndex) override;
 
   virtual int32_t IndexOfEmbeddedChild(Accessible* aChild) override;
 
@@ -429,10 +422,8 @@ class LocalAccessible : public nsISupports, public Accessible {
   MOZ_CAN_RUN_SCRIPT
   virtual void ScrollTo(uint32_t aHow) const override;
 
-  /**
-   * Scroll the accessible to the given point.
-   */
-  void ScrollToPoint(uint32_t aCoordinateType, int32_t aX, int32_t aY);
+  virtual void ScrollToPoint(uint32_t aCoordinateType, int32_t aX,
+                             int32_t aY) override;
 
   /**
    * Get a pointer to accessibility interface for this node, which is specific
@@ -469,15 +460,8 @@ class LocalAccessible : public nsISupports, public Accessible {
 
   a11y::RootAccessible* AsRoot();
 
-  virtual TableAccessible* AsTable() { return nullptr; }
-
-  virtual TableCellAccessible* AsTableCell() { return nullptr; }
-  const TableCellAccessible* AsTableCell() const {
-    return const_cast<LocalAccessible*>(this)->AsTableCell();
-  }
-
-  virtual TableAccessibleBase* AsTableBase() override;
-  virtual TableCellAccessibleBase* AsTableCellBase() override;
+  virtual TableAccessible* AsTable() override;
+  virtual TableCellAccessible* AsTableCell() override;
 
   TextLeafAccessible* AsTextLeaf();
 

@@ -6,6 +6,7 @@
 
 #include "FetchStreamReader.h"
 #include "InternalResponse.h"
+#include "js/Stream.h"
 #include "mozilla/ConsoleReportCollector.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/StaticAnalysisFunctions.h"
@@ -75,11 +76,18 @@ nsresult FetchStreamReader::Create(JSContext* aCx, nsIGlobalObject* aGlobal,
     RefPtr<StrongWorkerRef> workerRef = StrongWorkerRef::Create(
         workerPrivate, "FetchStreamReader", [streamReader]() {
           MOZ_ASSERT(streamReader);
-          MOZ_ASSERT(streamReader->mWorkerRef);
 
-          streamReader->CloseAndRelease(
-              streamReader->mWorkerRef->Private()->GetJSContext(),
-              NS_ERROR_DOM_INVALID_STATE_ERR);
+          // mAsyncWaitWorkerRef may keep the (same) StrongWorkerRef alive even
+          // when mWorkerRef has already been nulled out by a previous call to
+          // CloseAndRelease, we can just safely ignore this callback then
+          // (as would the CloseAndRelease do on a second call).
+          if (streamReader->mWorkerRef) {
+            streamReader->CloseAndRelease(
+                streamReader->mWorkerRef->Private()->GetJSContext(),
+                NS_ERROR_DOM_INVALID_STATE_ERR);
+          } else {
+            MOZ_DIAGNOSTIC_ASSERT(streamReader->mAsyncWaitWorkerRef);
+          }
         });
 
     if (NS_WARN_IF(!workerRef)) {

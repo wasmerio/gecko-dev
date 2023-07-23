@@ -4,13 +4,15 @@
 
 ## The main browser window's title
 
-# These are the default window titles everywhere except macOS. The first two
-# attributes are used when the web content opened has no title:
+# These are the default window titles everywhere except macOS.
+# .data-title-default and .data-title-private are used when the web content
+# opened has no title:
 #
 # default - "Mozilla Firefox"
 # private - "Mozilla Firefox (Private Browsing)"
 #
-# The last two are for use when there *is* a content title.
+# .data-content-title-default and .data-content-title-private are for use when
+# there *is* a content title.
 # Variables:
 #  $content-title (String): the title of the web content.
 browser-main-window-window-titles =
@@ -19,14 +21,17 @@ browser-main-window-window-titles =
   .data-content-title-default = { $content-title } — { -brand-full-name }
   .data-content-title-private = { $content-title } — { -brand-full-name } Private Browsing
 
-# These are the default window titles on macOS. The first two are for use when
-# there is no content title:
+# These are the default window titles on macOS.
+# .data-title-default and .data-title-private are used when the web content
+# opened has no title:
+#
 #
 # "default" - "Mozilla Firefox"
 # "private" - "Mozilla Firefox — (Private Browsing)"
 #
-# The last two are for use when there *is* a content title.
-# Do not use the brand name in the last two attributes, as we do on non-macOS.
+# .data-content-title-default and .data-content-title-private are for use when
+# there *is* a content title.
+# Do not use the brand name in these, as we do on non-macOS.
 #
 # Also note the other subtle difference here: we use a `-` to separate the
 # brand name from `(Private Browsing)`, which does not happen on other OSes.
@@ -505,10 +510,6 @@ sharing-warning-proceed-to-tab =
 sharing-warning-disable-for-session =
   .label = Disable sharing protection for this session
 
-## DevTools F12 popup
-
-enable-devtools-popup-description2 = To use the F12 shortcut, first open DevTools via the Browser Tools menu.
-
 ## URL Bar
 
 # This placeholder is used when not in search mode and the user's default search
@@ -670,6 +671,12 @@ picture-in-picture-urlbar-button-open =
 
 picture-in-picture-urlbar-button-close =
  .tooltiptext = Close Picture-in-Picture ({ $shortcut })
+
+picture-in-picture-panel-header = Picture-in-Picture
+picture-in-picture-panel-headline = This website does not recommend Picture-in-Picture
+picture-in-picture-panel-body = Videos might not display as the developer intended while Picture-in-Picture is enabled.
+picture-in-picture-enable-toggle =
+  .label = Enable anyway
 
 ## Full Screen and Pointer Lock UI
 
@@ -835,13 +842,6 @@ eme-notifications-drm-content-playing-dismiss-accesskey = D
 panel-save-update-username = Username
 panel-save-update-password = Password
 
-## Add-on removal warning
-
-# Variables:
-#  $name (String): The name of the addon that will be removed.
-addon-removal-title = Remove { $name }?
-addon-removal-abuse-report-checkbox = Report this extension to { -vendor-short-name }
-
 ##
 
 # "More" item in macOS share menu
@@ -963,6 +963,15 @@ unified-extensions-button-permissions-needed =
         Extensions
         Permissions needed
 
+## Unified extensions button when some extensions are quarantined.
+## Note that the new line is intentionally part of the tooltip.
+
+unified-extensions-button-quarantined =
+    .label = Extensions
+    .tooltiptext =
+        Extensions
+        Some extensions are not allowed
+
 ## Autorefresh blocker
 
 refresh-blocked-refresh-label = { -brand-short-name } prevented this page from automatically reloading.
@@ -982,8 +991,10 @@ firefox-relay-offer-what-relay-provides = All emails sent to your email masks wi
 
 firefox-relay-offer-legal-notice = By clicking “Use email mask”, you agree to the <label data-l10n-name="tos-url">Terms of Service</label> and <label data-l10n-name="privacy-url">Privacy Notice</label>.
 
-## Pop-up Notification
+## Add-on Pop-up Notifications
 
+popup-notification-addon-install-unsigned =
+    .value = (Unverified)
 popup-notification-xpinstall-prompt-learn-more = Learn more about installing add-ons safely
 
 ## Pop-up warning

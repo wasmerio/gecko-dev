@@ -5,12 +5,9 @@
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   DownloadSpamProtection: "resource:///modules/DownloadSpamProtection.sys.mjs",
   PermissionTestUtils: "resource://testing-common/PermissionTestUtils.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(this, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
 });
 
 const TEST_URI = "https://example.com";
@@ -20,7 +17,7 @@ const TEST_PATH = getRootDirectory(gTestPath).replace(
   TEST_URI
 );
 
-add_setup(async function() {
+add_setup(async function () {
   // Create temp directory
   let time = new Date().getTime();
   let tempDir = Services.dirsvc.get("TmpD", Ci.nsIFile);
@@ -36,7 +33,6 @@ add_setup(async function() {
   await SpecialPowers.pushPrefEnv({
     set: [["browser.download.enable_spam_prevention", true]],
     clear: [
-      ["browser.download.improvements_to_download_panel"],
       ["browser.download.alwaysOpenPanel"],
       ["browser.download.always_ask_before_handling_new_types"],
     ],

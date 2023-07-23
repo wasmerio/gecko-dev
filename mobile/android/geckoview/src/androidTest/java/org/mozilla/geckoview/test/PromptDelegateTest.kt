@@ -44,7 +44,7 @@ class PromptDelegateTest : BaseSessionTest() {
             @AssertCalled(count = 2)
             override fun onLoadRequest(
                 session: GeckoSession,
-                request: LoadRequest
+                request: LoadRequest,
             ): GeckoResult<AllowOrDeny>? {
                 assertThat("Session should not be null", session, notNullValue())
                 assertThat("URL should not be null", request.uri, notNullValue())
@@ -80,7 +80,7 @@ class PromptDelegateTest : BaseSessionTest() {
             @AssertCalled(count = 1)
             override fun onLoadRequest(
                 session: GeckoSession,
-                request: LoadRequest
+                request: LoadRequest,
             ): GeckoResult<AllowOrDeny>? {
                 assertThat("Session should not be null", session, notNullValue())
                 assertThat("URL should not be null", request.uri, notNullValue())
@@ -129,8 +129,8 @@ class PromptDelegateTest : BaseSessionTest() {
                             .password("test-password")
                             .formActionOrigin(null)
                             .guid("test-guid")
-                            .build()
-                    )
+                            .build(),
+                    ),
                 )
             }
         })
@@ -140,12 +140,12 @@ class PromptDelegateTest : BaseSessionTest() {
                 assertThat(
                     "Saved login should appear here",
                     prompt.authOptions.username,
-                    equalTo("test-username")
+                    equalTo("test-username"),
                 )
                 assertThat(
                     "Saved login should appear here",
                     prompt.authOptions.password,
-                    equalTo("test-password")
+                    equalTo("test-password"),
                 )
                 return null
             }
@@ -158,8 +158,8 @@ class PromptDelegateTest : BaseSessionTest() {
     @Test fun loginStorageHttpAuth() {
         sessionRule.setPrefsUntilTestEnd(
             mapOf(
-                "signon.rememberSignons" to true
-            )
+                "signon.rememberSignons" to true,
+            ),
         )
         val result = GeckoResult<PromptDelegate.BasePrompt>()
         val promptInstanceDelegate = object : PromptDelegate.PromptInstanceDelegate {
@@ -183,7 +183,7 @@ class PromptDelegateTest : BaseSessionTest() {
             @AssertCalled
             override fun onLoginSave(
                 session: GeckoSession,
-                request: PromptDelegate.AutocompleteRequest<Autocomplete.LoginSaveOption>
+                request: PromptDelegate.AutocompleteRequest<Autocomplete.LoginSaveOption>,
             ): GeckoResult<PromptResponse>? {
                 val authInfo = request.options[0].value
                 assertThat("auth matches", authInfo.formActionOrigin, isEmptyOrNullString())
@@ -237,7 +237,7 @@ class PromptDelegateTest : BaseSessionTest() {
         assertThat(
             "Result should match",
             mainSession.waitForJS("confirm('Confirm?')") as Boolean,
-            equalTo(true)
+            equalTo(true),
         )
 
         sessionRule.delegateDuringNextWait(object : PromptDelegate {
@@ -251,7 +251,7 @@ class PromptDelegateTest : BaseSessionTest() {
         assertThat(
             "Result should match",
             mainSession.waitForJS("confirm('Confirm?')") as Boolean,
-            equalTo(false)
+            equalTo(false),
         )
     }
 
@@ -262,7 +262,7 @@ class PromptDelegateTest : BaseSessionTest() {
 
         mainSession.evaluateJS(
             "document.querySelector('#text').value = 'Some text';" +
-                "document.querySelector('#submit').click();"
+                "document.querySelector('#submit').click();",
         )
 
         // Submitting the form causes a navigation
@@ -346,7 +346,7 @@ class PromptDelegateTest : BaseSessionTest() {
                     }
                 });
             }
-        })"""
+        })""",
         )
 
         mainSession.synthesizeTap(10, 10)
@@ -354,7 +354,7 @@ class PromptDelegateTest : BaseSessionTest() {
         assertThat(
             "Events should be as expected",
             promise.value as String,
-            equalTo("input(composed=true) change(composed=false)")
+            equalTo("input(composed=true) change(composed=false)"),
         )
     }
 
@@ -440,7 +440,7 @@ class PromptDelegateTest : BaseSessionTest() {
                         "<option>foo</option><option>bar</option><option>baz</option>";
                 }, 100);
             }, { once: true })
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         val promise = mainSession.evaluatePromiseJS(
@@ -450,7 +450,7 @@ class PromptDelegateTest : BaseSessionTest() {
                     resolve(e.target.value);
                 });
             })
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         mainSession.synthesizeTap(10, 10)
@@ -458,7 +458,7 @@ class PromptDelegateTest : BaseSessionTest() {
         assertThat(
             "Selected item should be as expected",
             promise.value as String,
-            equalTo("baz")
+            equalTo("baz"),
         )
     }
 
@@ -493,8 +493,8 @@ class PromptDelegateTest : BaseSessionTest() {
     fun onBeforeUnloadTest() {
         sessionRule.setPrefsUntilTestEnd(
             mapOf(
-                "dom.require_user_interaction_for_beforeunload" to false
-            )
+                "dom.require_user_interaction_for_beforeunload" to false,
+            ),
         )
         mainSession.loadTestPath(BEFORE_UNLOAD)
         sessionRule.waitForPageStop()
@@ -568,11 +568,66 @@ class PromptDelegateTest : BaseSessionTest() {
         assertThat(
             "Result should match",
             mainSession.waitForJS("prompt('Prompt:', 'default')") as String,
-            equalTo("foo")
+            equalTo("foo"),
         )
     }
 
-    @Test fun colorTest() {
+    @Test
+    fun fedCMProviderPromptTest() {
+        sessionRule.setPrefsUntilTestEnd(
+            mapOf(
+                "dom.security.credentialmanagement.identity.enabled" to true,
+            ),
+        )
+        mainSession.loadTestPath(FEDCM_RP_HTML_PATH)
+
+        sessionRule.delegateDuringNextWait(object : PromptDelegate {
+            @AssertCalled(count = 1)
+            override fun onSelectIdentityCredentialProvider(
+                session: GeckoSession,
+                prompt: PromptDelegate.IdentityCredential.ProviderSelectorPrompt,
+            ): GeckoResult<PromptResponse> {
+                prompt.providers.mapIndexed { index, item ->
+                    assertThat("ID should match", index, equalTo(item.id))
+                    assertThat(
+                        "Name should be the URL of the current page",
+                        item.name,
+                        containsString("$TEST_HOST:$TEST_PORT"),
+                    )
+                    assertThat("Icon should be null", item.icon, isEmptyOrNullString())
+                }
+                return GeckoResult.fromValue(prompt.confirm(0))
+            }
+        })
+
+        try {
+            mainSession.waitForJS(
+                """  
+            navigator.credentials.get({
+            identity: {
+              providers: [{
+                configURL: "${createTestUrl(FEDCM_IDP_MANIFEST_PATH)}",
+                clientId: "CLIENT_ID",
+                nonce: "nonce",
+              }]
+            }
+          });
+                """.trimIndent(),
+            )
+        } catch (e: GeckoSessionTestRule.RejectedPromiseException) {
+            // As the FedCM flow is not currently completely implemented, it is expected to fail with this exception.
+            // This test will be updated and test the rest of the flow, so after the PolicyPrompt is correctly implemented
+            // and tested we can remove this code. (see bug 1840082)
+            assertThat(
+                "Error should be correct",
+                e.reason as String,
+                containsString("UnknownError: The operation failed for an unknown transient reason"),
+            )
+        }
+    }
+
+    @Test
+    fun colorTest() {
         sessionRule.setPrefsUntilTestEnd(mapOf("dom.disable_open_during_load" to false))
 
         mainSession.loadTestPath(PROMPT_HTML_PATH)
@@ -590,7 +645,7 @@ class PromptDelegateTest : BaseSessionTest() {
         mainSession.evaluateJS(
             """
             this.c = document.getElementById('colorexample');
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         val promise = mainSession.evaluatePromiseJS(
@@ -602,7 +657,7 @@ class PromptDelegateTest : BaseSessionTest() {
                     false
                 );
             })
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         mainSession.evaluateJS("this.c.click();")
@@ -610,7 +665,7 @@ class PromptDelegateTest : BaseSessionTest() {
         assertThat(
             "Value should match",
             promise.value as String,
-            equalTo("#123456")
+            equalTo("#123456"),
         )
     }
 
@@ -635,7 +690,7 @@ class PromptDelegateTest : BaseSessionTest() {
             """
             this.c = document.getElementById('colorexample');
             this.c.setAttribute('list', 'colorlist');
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         val promise = mainSession.evaluatePromiseJS(
@@ -646,14 +701,14 @@ class PromptDelegateTest : BaseSessionTest() {
                     event => resolve(event.target.value),
                 );
             })
-            """.trimIndent()
+            """.trimIndent(),
         )
         mainSession.evaluateJS("this.c.click();")
 
         assertThat(
             "Value should match",
             promise.value as String,
-            equalTo("#123456")
+            equalTo("#123456"),
         )
     }
 
@@ -668,7 +723,7 @@ class PromptDelegateTest : BaseSessionTest() {
             document.body.addEventListener("click", () => {
                 document.getElementById('dateexample').showPicker();
             });
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         mainSession.synthesizeTap(1, 1) // Provides user activation.
@@ -695,7 +750,7 @@ class PromptDelegateTest : BaseSessionTest() {
             """
             document.getElementById('selectexample').remove();
             document.getElementById('dateexample').getBoundingClientRect();
-            """.trimIndent()
+            """.trimIndent(),
         )
         mainSession.synthesizeTap(10, 10)
 
@@ -723,7 +778,7 @@ class PromptDelegateTest : BaseSessionTest() {
             document.getElementById('selectexample').remove();
             document.getElementById('dateexample').remove();
             document.getElementById('weekexample').getBoundingClientRect();
-            """.trimIndent()
+            """.trimIndent(),
         )
         mainSession.synthesizeTap(10, 10)
 
@@ -751,7 +806,7 @@ class PromptDelegateTest : BaseSessionTest() {
             document.getElementById('dateexample').max = "2022-12-31";
             document.getElementById('dateexample').step = "10";
             document.getElementById('dateexample').getBoundingClientRect();
-            """.trimIndent()
+            """.trimIndent(),
         )
         mainSession.synthesizeTap(10, 10)
 
@@ -826,7 +881,7 @@ class PromptDelegateTest : BaseSessionTest() {
             """
             document.getElementById('selectexample').remove();
             document.getElementById('dateexample').remove();
-            """.trimIndent()
+            """.trimIndent(),
         )
         mainSession.synthesizeTap(10, 10)
         sessionRule.waitForResult(result)
@@ -948,7 +1003,7 @@ class PromptDelegateTest : BaseSessionTest() {
             assertThat(
                 "Error should be correct",
                 e.reason as String,
-                containsString("DataError")
+                containsString("DataError"),
             )
         }
     }
@@ -974,7 +1029,7 @@ class PromptDelegateTest : BaseSessionTest() {
             assertThat(
                 "Error should be correct",
                 e.reason as String,
-                containsString("AbortError")
+                containsString("AbortError"),
             )
         }
     }
@@ -1000,7 +1055,7 @@ class PromptDelegateTest : BaseSessionTest() {
             assertThat(
                 "Error should be correct",
                 e.reason as String,
-                containsString("AbortError")
+                containsString("AbortError"),
             )
         }
     }
@@ -1024,7 +1079,7 @@ class PromptDelegateTest : BaseSessionTest() {
             assertThat(
                 "Error should be correct",
                 e.reason as String,
-                containsString("TypeError")
+                containsString("TypeError"),
             )
         }
     }
@@ -1051,7 +1106,7 @@ class PromptDelegateTest : BaseSessionTest() {
             assertThat(
                 "Error should be correct",
                 e.reason as String,
-                containsString("TypeError")
+                containsString("TypeError"),
             )
         }
     }
@@ -1077,7 +1132,7 @@ class PromptDelegateTest : BaseSessionTest() {
             assertThat(
                 "Error should be correct",
                 e.reason as String,
-                containsString("NotAllowedError")
+                containsString("NotAllowedError"),
             )
         }
     }

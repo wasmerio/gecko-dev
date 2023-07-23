@@ -24,6 +24,7 @@
 #include "mozilla/XREAppData.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/GUniquePtr.h"
+#include "mozilla/StaticPrefs_media.h"
 #include "nsCRTGlue.h"
 #include "nsExceptionHandler.h"
 #include "nsPrintfCString.h"
@@ -39,9 +40,11 @@
 // How long we wait for data from glxtest/vaapi test process in milliseconds.
 #define GFX_TEST_TIMEOUT 4000
 #define VAAPI_TEST_TIMEOUT 2000
+#define V4L2_TEST_TIMEOUT 2000
 
 #define GLX_PROBE_BINARY u"glxtest"_ns
 #define VAAPI_PROBE_BINARY u"vaapitest"_ns
+#define V4L2_PROBE_BINARY u"v4l2test"_ns
 
 namespace mozilla::widget {
 
@@ -375,6 +378,10 @@ void GfxInfo::GetData() {
       CopyUTF16toUTF8(GfxDriverInfo::GetDriverVendor(DriverVendor::MesaSWRast),
                       mDriverVendor);
       mIsAccelerated = false;
+    } else if (strcasestr(driDriver.get(), "vmwgfx")) {
+      CopyUTF16toUTF8(GfxDriverInfo::GetDriverVendor(DriverVendor::MesaVM),
+                      mDriverVendor);
+      mIsAccelerated = false;
     } else if (!mIsAccelerated) {
       CopyUTF16toUTF8(
           GfxDriverInfo::GetDriverVendor(DriverVendor::MesaSWUnknown),
@@ -645,7 +652,7 @@ void GfxInfo::GetDataVAAPI() {
   }
   mIsVAAPISupported = Some(false);
 
-#ifdef MOZ_WAYLAND
+#ifdef MOZ_ENABLE_VAAPI
   char* vaapiData = nullptr;
   auto free = mozilla::MakeScopeExit([&] { g_free((void*)vaapiData); });
 
@@ -707,6 +714,121 @@ void GfxInfo::GetDataVAAPI() {
     }
   }
 #endif
+}
+
+// Probe all V4L2 devices and check their capabilities
+void GfxInfo::GetDataV4L2() {
+  if (mIsV4L2Supported.isSome()) {
+    // We have already probed v4l2 support, no need to do it again.
+    return;
+  }
+  mIsV4L2Supported = Some(false);
+
+#ifdef MOZ_ENABLE_V4L2
+  DIR* dir = opendir("/dev");
+  if (!dir) {
+    gfxCriticalNote << "Could not list /dev\n";
+    return;
+  }
+  struct dirent* dir_entry;
+  while ((dir_entry = readdir(dir))) {
+    if (!strncmp(dir_entry->d_name, "video", 5)) {
+      nsCString path = "/dev/"_ns;
+      path += nsDependentCString(dir_entry->d_name);
+      V4L2ProbeDevice(path);
+    }
+  }
+  closedir(dir);
+#endif  // MOZ_ENABLE_V4L2
+}
+
+// Check the capabilities of a single V4L2 device.  If the device doesn't work
+// or doesn't support any codecs we recognise, then we just ignore it.  If it
+// does support recognised codecs then add these codecs to the supported list
+// and mark V4L2 as supported: We only need a single working device to enable
+// V4L2, when we come to decode FFmpeg will probe all the devices and choose
+// the appropriate one.
+void GfxInfo::V4L2ProbeDevice(nsCString& dev) {
+  char* v4l2Data = nullptr;
+  auto free = mozilla::MakeScopeExit([&] { g_free((void*)v4l2Data); });
+
+  int v4l2Pipe = -1;
+  int v4l2PID = 0;
+  const char* args[] = {"-d", dev.get(), nullptr};
+  v4l2PID = FireTestProcess(V4L2_PROBE_BINARY, &v4l2Pipe, args);
+  if (!v4l2PID) {
+    gfxCriticalNote << "Failed to start v4l2test process\n";
+    return;
+  }
+
+  if (!ManageChildProcess("v4l2test", &v4l2PID, &v4l2Pipe, V4L2_TEST_TIMEOUT,
+                          &v4l2Data)) {
+    gfxCriticalNote << "v4l2test: ManageChildProcess failed\n";
+    return;
+  }
+
+  char* bufptr = v4l2Data;
+  char* line;
+  nsTArray<nsCString> capFormats;
+  nsTArray<nsCString> outFormats;
+  bool supported = false;
+  // Use gfxWarning rather than gfxCriticalNote from here on because the
+  // errors/warnings output by v4l2test are generally just caused by devices
+  // which aren't M2M decoders. Set gfx.logging.level=5 to see these messages.
+
+  while ((line = NS_strtok("\n", &bufptr))) {
+    if (!strcmp(line, "V4L2_SUPPORTED")) {
+      line = NS_strtok("\n", &bufptr);
+      if (!line) {
+        gfxWarning() << "v4l2test: Failed to get V4L2 support\n";
+        return;
+      }
+      supported = !strcmp(line, "TRUE");
+    } else if (!strcmp(line, "V4L2_CAPTURE_FMTS")) {
+      line = NS_strtok("\n", &bufptr);
+      if (!line) {
+        gfxWarning() << "v4l2test: Failed to get V4L2 CAPTURE formats\n";
+        return;
+      }
+      char* capture_fmt;
+      while ((capture_fmt = NS_strtok(" ", &line))) {
+        capFormats.AppendElement(capture_fmt);
+      }
+    } else if (!strcmp(line, "V4L2_OUTPUT_FMTS")) {
+      line = NS_strtok("\n", &bufptr);
+      if (!line) {
+        gfxWarning() << "v4l2test: Failed to get V4L2 OUTPUT formats\n";
+        return;
+      }
+      char* output_fmt;
+      while ((output_fmt = NS_strtok(" ", &line))) {
+        outFormats.AppendElement(output_fmt);
+      }
+    } else if (!strcmp(line, "WARNING") || !strcmp(line, "ERROR")) {
+      line = NS_strtok("\n", &bufptr);
+      if (line) {
+        gfxWarning() << "v4l2test: " << line << "\n";
+      }
+      return;
+    }
+  }
+
+  // If overall SUPPORTED flag is not TRUE then stop now
+  if (!supported) {
+    return;
+  }
+
+  // Currently the V4L2 decode platform only supports YUV420 and NV12
+  if (!capFormats.Contains("YV12") && !capFormats.Contains("NV12")) {
+    return;
+  }
+
+  // Supported codecs
+  if (outFormats.Contains("H264")) {
+    mIsV4L2Supported = Some(true);
+    media::MCSInfo::AddSupport(media::MediaCodecsSupport::H264HardwareDecode);
+    mV4L2SupportedCodecs |= CODEC_HW_H264;
+  }
 }
 
 const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
@@ -822,12 +944,13 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         DRIVER_COMPARISON_IGNORED, V(0, 0, 0, 0),
         "FEATURE_FAILURE_WEBRENDER_NO_LINUX_ATI", "");
 
+    // Disable R600 GPUs with Mesa drivers.
     // Bug 1673939 - Garbled text on RS880 GPUs with Mesa drivers.
     APPEND_TO_DRIVER_BLOCKLIST_EXT(
         OperatingSystem::Linux, ScreenSizeStatus::All, BatteryStatus::All,
         WindowProtocol::All, DriverVendor::MesaAll, DeviceFamily::AmdR600,
         nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
-        DRIVER_LESS_THAN, V(22, 2, 0, 0),
+        DRIVER_COMPARISON_IGNORED, V(0, 0, 0, 0),
         "FEATURE_FAILURE_WEBRENDER_BUG_1673939",
         "https://gitlab.freedesktop.org/mesa/mesa/-/issues/3720");
 
@@ -842,6 +965,14 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_LESS_THAN,
         V(21, 0, 0, 0), "FEATURE_FAILURE_WEBRENDER_BUG_1635186",
         "Mesa 21.0.0.0");
+
+    // Bug 1815481 - Disable mesa drivers in virtual machines.
+    APPEND_TO_DRIVER_BLOCKLIST_EXT(
+        OperatingSystem::Linux, ScreenSizeStatus::All, BatteryStatus::All,
+        WindowProtocol::All, DriverVendor::MesaVM, DeviceFamily::All,
+        nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+        DRIVER_COMPARISON_IGNORED, V(0, 0, 0, 0),
+        "FEATURE_FAILURE_WEBRENDER_MESA_VM", "");
 
     ////////////////////////////////////
     // FEATURE_WEBRENDER_COMPOSITOR
@@ -956,9 +1087,9 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
         V(0, 0, 0, 0), "FEATURE_HARDWARE_VIDEO_DECODING_NO_R600", "");
 
-    // Disable on Release/late Beta
+    // Disable on Release/late Beta on AMD
 #if !defined(EARLY_BETA_OR_EARLIER)
-    APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::Linux, DeviceFamily::All,
+    APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::Linux, DeviceFamily::AtiAll,
                                nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING,
                                nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
                                DRIVER_COMPARISON_IGNORED, V(0, 0, 0, 0),
@@ -972,14 +1103,13 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
                                 DRIVER_COMPARISON_IGNORED, V(0, 0, 0, 0),
                                 "FEATURE_ROLLOUT_ALL");
 
-    // Disable on all AMD devices using Mesa (Bug 1802844).
+    // Disable on AMD devices using broken Mesa (Bug 1837138).
     APPEND_TO_DRIVER_BLOCKLIST_EXT(
         OperatingSystem::Linux, ScreenSizeStatus::All, BatteryStatus::All,
         WindowProtocol::All, DriverVendor::MesaAll, DeviceFamily::AtiAll,
         nsIGfxInfo::FEATURE_HW_DECODED_VIDEO_ZERO_COPY,
-        nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
-        V(0, 0, 0, 0), "FEATURE_HARDWARE_VIDEO_ZERO_COPY_LINUX_AMD_DISABLE",
-        "");
+        nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_LESS_THAN, V(23, 1, 1, 0),
+        "FEATURE_HARDWARE_VIDEO_ZERO_COPY_LINUX_AMD_DISABLE", "Mesa 23.1.1.0");
 
     ////////////////////////////////////
     // FEATURE_WEBRENDER_PARTIAL_PRESENT
@@ -1141,7 +1271,8 @@ nsresult GfxInfo::GetFeatureStatusImpl(
     if (aFeature != pair.mFeature) {
       continue;
     }
-    if (mVAAPISupportedCodecs & pair.mCodec) {
+    if ((mVAAPISupportedCodecs & pair.mCodec) ||
+        (mV4L2SupportedCodecs & pair.mCodec)) {
       *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
     } else {
       *aStatus = nsIGfxInfo::FEATURE_BLOCKED_PLATFORM_TEST;
@@ -1153,11 +1284,27 @@ nsresult GfxInfo::GetFeatureStatusImpl(
   auto ret = GfxInfoBase::GetFeatureStatusImpl(
       aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, aFailureId, &os);
 
-  // Probe VA-API on supported devices only
-  if (aFeature == nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING &&
-      *aStatus == nsIGfxInfo::FEATURE_STATUS_OK) {
-    GetDataVAAPI();
-    if (!mIsVAAPISupported.value()) {
+  // Probe VA-API/V4L2 on supported devices only
+  if (aFeature == nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING) {
+    if (!StaticPrefs::media_hardware_video_decoding_enabled_AtStartup()) {
+      return ret;
+    }
+    bool probeHWDecode = false;
+#ifdef MOZ_WAYLAND
+    probeHWDecode =
+        mIsAccelerated &&
+        (*aStatus == nsIGfxInfo::FEATURE_STATUS_OK ||
+         StaticPrefs::media_hardware_video_decoding_force_enabled_AtStartup() ||
+         StaticPrefs::media_ffmpeg_vaapi_enabled_AtStartup());
+#endif
+    if (probeHWDecode) {
+      GetDataVAAPI();
+      GetDataV4L2();
+    } else {
+      mIsVAAPISupported = Some(false);
+      mIsV4L2Supported = Some(false);
+    }
+    if (!mIsVAAPISupported.value() && !mIsV4L2Supported.value()) {
       *aStatus = nsIGfxInfo::FEATURE_BLOCKED_PLATFORM_TEST;
       aFailureId = "FEATURE_FAILURE_VIDEO_DECODING_TEST_FAILED";
     }

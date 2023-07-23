@@ -26,7 +26,6 @@ use euclid::{Scale, SideOffsets2D};
 use servo_arc::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::{cmp, fmt};
-use style_traits::viewport::ViewportConstraints;
 use style_traits::{CSSPixel, DevicePixel};
 
 /// The `Device` in Gecko wraps a pres context, has a default values computed,
@@ -73,10 +72,7 @@ impl fmt::Debug for Device {
 
         let mut doc_uri = nsCString::new();
         unsafe {
-            bindings::Gecko_nsIURI_Debug(
-                (*self.document()).mDocumentURI.raw::<structs::nsIURI>(),
-                &mut doc_uri,
-            )
+            bindings::Gecko_nsIURI_Debug((*self.document()).mDocumentURI.raw(), &mut doc_uri)
         };
 
         f.debug_struct("Device")
@@ -132,17 +128,10 @@ impl Device {
                 pres_context.map_or(std::ptr::null(), |pc| pc),
                 vertical,
                 &**font,
-                element.map_or(std::ptr::null(), |e| e.0)
+                element.map_or(std::ptr::null(), |e| e.0),
             )
         });
         NonNegativeLength::new(au.to_f32_px())
-    }
-
-
-    /// Tells the device that a new viewport rule has been found, and stores the
-    /// relevant viewport constraints.
-    pub fn account_for_viewport_rule(&mut self, _constraints: &ViewportConstraints) {
-        unreachable!("Gecko doesn't support @viewport");
     }
 
     /// Whether any animation name may be referenced from the style of any
@@ -208,9 +197,7 @@ impl Device {
             // XXX: we could have a more reasonable default perhaps.
             None => return Length::new(0.0),
         };
-        Length::new(unsafe {
-            bindings::Gecko_GetScrollbarInlineSize(pc)
-        })
+        Length::new(unsafe { bindings::Gecko_GetScrollbarInlineSize(pc) })
     }
 
     /// Queries font metrics
@@ -455,6 +442,14 @@ impl Device {
     /// Returns whether visited styles are enabled.
     pub fn visited_styles_enabled(&self) -> bool {
         unsafe { bindings::Gecko_VisitedStylesEnabled(self.document()) }
+    }
+
+    /// Returns the number of app units per device pixel we're using currently.
+    pub fn app_units_per_device_pixel(&self) -> i32 {
+        match self.pres_context() {
+            Some(pc) => pc.mCurAppUnitsPerDevPixel,
+            None => AU_PER_PX,
+        }
     }
 
     /// Returns the device pixel ratio.

@@ -16,11 +16,8 @@ ChromeUtils.defineESModuleGetters(this, {
   DownloadPaths: "resource://gre/modules/DownloadPaths.sys.mjs",
   Downloads: "resource://gre/modules/Downloads.sys.mjs",
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+  NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(this, {
-  NetUtil: "resource://gre/modules/NetUtil.jsm",
 });
 
 var ContentAreaUtils = {
@@ -152,7 +149,7 @@ function saveBrowser(aBrowser, aSkipPrompt, aBrowsingContext = null) {
 
 function DownloadListener(win, transfer) {
   function makeClosure(name) {
-    return function() {
+    return function () {
       transfer[name].apply(transfer, arguments);
     };
   }
@@ -479,10 +476,10 @@ function internalPersist(persistArgs) {
       filesFolder = persistArgs.targetFile.clone();
 
       var nameWithoutExtension = getFileBaseName(filesFolder.leafName);
-      var filesFolderLeafName = ContentAreaUtils.stringBundle.formatStringFromName(
-        "filesFolder",
-        [nameWithoutExtension]
-      );
+      var filesFolderLeafName =
+        ContentAreaUtils.stringBundle.formatStringFromName("filesFolder", [
+          nameWithoutExtension,
+        ]);
 
       filesFolder.leafName = filesFolderLeafName;
     }
@@ -651,7 +648,7 @@ function promiseTargetFile(
   /* optional */ aSkipPrompt,
   /* optional */ aRelatedURI
 ) {
-  return (async function() {
+  return (async function () {
     let downloadLastDir = new DownloadLastDir(window);
     let prefBranch = Services.prefs.getBranch("browser.download.");
     let useDownloadDir = prefBranch.getBoolPref("useDownloadDir");
@@ -716,7 +713,7 @@ function promiseTargetFile(
     }
 
     let result = await new Promise(resolve => {
-      fp.open(function(aResult) {
+      fp.open(function (aResult) {
         resolve(aResult);
       });
     });
@@ -802,7 +799,7 @@ function DownloadURL(aURL, aFileName, aInitiatingDocument) {
     saveMode: SAVEMODE_FILEONLY,
   };
 
-  (async function() {
+  (async function () {
     let accepted = await promiseTargetFile(
       filepickerParams,
       true,

@@ -25,14 +25,6 @@ namespace a11y {
 class TextRange;
 class xpcAccessibleGeneric;
 
-#if !defined(XP_WIN)
-class DocAccessiblePlatformExtParent;
-#endif
-
-#ifdef ANDROID
-class SessionAccessibility;
-#endif
-
 /*
  * These objects live in the main process and comunicate with and represent
  * an accessible document in a content process.
@@ -115,10 +107,7 @@ class DocAccessibleParent : public RemoteAccessible,
                                                const bool& aEnabled) final;
 
   mozilla::ipc::IPCResult RecvCaretMoveEvent(
-      const uint64_t& aID,
-#if defined(XP_WIN)
-      const LayoutDeviceIntRect& aCaretRect,
-#endif
+      const uint64_t& aID, const LayoutDeviceIntRect& aCaretRect,
       const int32_t& aOffset, const bool& aIsSelectionCollapsed,
       const bool& aIsAtEndOfLine, const int32_t& aGranularity) final;
 
@@ -127,15 +116,8 @@ class DocAccessibleParent : public RemoteAccessible,
       const uint32_t& aLen, const bool& aIsInsert,
       const bool& aFromUser) override;
 
-#if defined(XP_WIN)
-  virtual mozilla::ipc::IPCResult RecvSyncTextChangeEvent(
-      const uint64_t& aID, const nsAString& aStr, const int32_t& aStart,
-      const uint32_t& aLen, const bool& aIsInsert,
-      const bool& aFromUser) override;
-
   virtual mozilla::ipc::IPCResult RecvFocusEvent(
       const uint64_t& aID, const LayoutDeviceIntRect& aCaretRect) override;
-#endif  // defined(XP_WIN)
 
   virtual mozilla::ipc::IPCResult RecvSelectionEvent(
       const uint64_t& aID, const uint64_t& aWidgetID,
@@ -143,10 +125,8 @@ class DocAccessibleParent : public RemoteAccessible,
 
   virtual mozilla::ipc::IPCResult RecvVirtualCursorChangeEvent(
       const uint64_t& aID, const uint64_t& aOldPositionID,
-      const int32_t& aOldStartOffset, const int32_t& aOldEndOffset,
-      const uint64_t& aNewPositionID, const int32_t& aNewStartOffset,
-      const int32_t& aNewEndOffset, const int16_t& aReason,
-      const int16_t& aBoundaryType, const bool& aFromUser) override;
+      const uint64_t& aNewPositionID, const int16_t& aReason,
+      const bool& aFromUser) override;
 
   virtual mozilla::ipc::IPCResult RecvScrollingEvent(
       const uint64_t& aID, const uint64_t& aType, const uint32_t& aScrollX,
@@ -264,30 +244,11 @@ class DocAccessibleParent : public RemoteAccessible,
   void MaybeInitWindowEmulation();
 
   /**
-   * Note that an OuterDocAccessible can be created before the
-   * DocAccessibleParent or vice versa. Therefore, this must be conditionally
-   * called when either of these is created.
-   * @param aOuterDoc The OuterDocAccessible to be returned as the parent of
-   *        this document.
-   */
-  void SendParentCOMProxy(Accessible* aOuterDoc);
-
-  /**
    * Set emulated native window handle for a document.
    * @param aWindowHandle emulated native window handle
    */
   void SetEmulatedWindowHandle(HWND aWindowHandle);
   HWND GetEmulatedWindowHandle() const { return mEmulatedWindowHandle; }
-#endif
-
-#if !defined(XP_WIN)
-  virtual bool DeallocPDocAccessiblePlatformExtParent(
-      PDocAccessiblePlatformExtParent* aActor) override;
-
-  virtual PDocAccessiblePlatformExtParent*
-  AllocPDocAccessiblePlatformExtParent() override;
-
-  DocAccessiblePlatformExtParent* GetPlatformExtension();
 #endif
 
   // Accessible
@@ -339,6 +300,8 @@ class DocAccessibleParent : public RemoteAccessible,
   void URL(nsAString& aURL) const;
   void URL(nsACString& aURL) const;
 
+  void MimeType(nsAString& aURL) const;
+
   virtual Relation RelationByType(RelationType aType) const override;
 
   // Tracks cached reverse relations (ie. those not set explicitly by an
@@ -354,10 +317,6 @@ class DocAccessibleParent : public RemoteAccessible,
   static DocAccessibleParent* GetFrom(dom::BrowsingContext* aBrowsingContext);
 
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) override;
-
-#ifdef ANDROID
-  RefPtr<SessionAccessibility> mSessionAccessibility;
-#endif
 
  private:
   ~DocAccessibleParent();
@@ -406,13 +365,7 @@ class DocAccessibleParent : public RemoteAccessible,
 #if defined(XP_WIN)
   // The handle associated with the emulated window that contains this document
   HWND mEmulatedWindowHandle;
-
-#  if defined(MOZ_SANDBOX)
-  mscom::PreservedStreamPtr mParentProxyStream;
-  mscom::PreservedStreamPtr mDocProxyStream;
-  mscom::PreservedStreamPtr mTopLevelDocProxyStream;
-#  endif  // defined(MOZ_SANDBOX)
-#endif    // defined(XP_WIN)
+#endif  // defined(XP_WIN)
 
   /*
    * Conceptually this is a map from IDs to proxies, but we store the ID in the

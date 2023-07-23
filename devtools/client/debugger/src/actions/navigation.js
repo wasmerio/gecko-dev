@@ -6,8 +6,8 @@ import { clearDocuments } from "../utils/editor";
 import sourceQueue from "../utils/source-queue";
 
 import { clearWasmStates } from "../utils/wasm";
-import { getMainThread, getThreadContext } from "../selectors";
-import { evaluateExpressions } from "../actions/expressions";
+import { getMainThread } from "../selectors";
+import { evaluateExpressionsForCurrentContext } from "../actions/expressions";
 
 /**
  * Redux actions for the navigation state
@@ -19,7 +19,7 @@ import { evaluateExpressions } from "../actions/expressions";
  * @static
  */
 export function willNavigate(event) {
-  return async function({
+  return async function ({
     dispatch,
     getState,
     client,
@@ -30,7 +30,6 @@ export function willNavigate(event) {
     sourceMapLoader.clearSourceMaps();
     clearWasmStates();
     clearDocuments();
-    parserWorker.clear();
     const thread = getMainThread(getState());
 
     dispatch({
@@ -45,11 +44,10 @@ export function willNavigate(event) {
  * @static
  */
 export function navigated() {
-  return async function({ getState, dispatch, panel }) {
+  return async function ({ getState, dispatch, panel }) {
     try {
       // Update the watched expressions once the page is fully loaded
-      const threadcx = getThreadContext(getState());
-      await dispatch(evaluateExpressions(threadcx));
+      await dispatch(evaluateExpressionsForCurrentContext());
     } catch (e) {
       // This may throw if we resume during the page load.
       // browser_dbg-debugger-buttons.js highlights this, especially on MacOS or when ran many times

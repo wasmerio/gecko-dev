@@ -123,12 +123,40 @@ void URL::RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aURL,
   }
 }
 
-bool URL::IsValidURL(const GlobalObject& aGlobal, const nsAString& aURL,
-                     ErrorResult& aRv) {
+bool URL::IsValidObjectURL(const GlobalObject& aGlobal, const nsAString& aURL,
+                           ErrorResult& aRv) {
   if (NS_IsMainThread()) {
-    return URLMainThread::IsValidURL(aGlobal, aURL, aRv);
+    return URLMainThread::IsValidObjectURL(aGlobal, aURL, aRv);
   }
-  return URLWorker::IsValidURL(aGlobal, aURL, aRv);
+  return URLWorker::IsValidObjectURL(aGlobal, aURL, aRv);
+}
+
+bool URL::CanParse(const GlobalObject& aGlobal, const nsAString& aURL,
+                   const Optional<nsAString>& aBase) {
+  nsCOMPtr<nsIURI> baseUri;
+  if (aBase.WasPassed()) {
+    // Don't use NS_ConvertUTF16toUTF8 because that doesn't let us handle OOM.
+    nsAutoCString base;
+    if (!AppendUTF16toUTF8(aBase.Value(), base, fallible)) {
+      // Just return false with OOM errors as no ErrorResult.
+      return false;
+    }
+
+    nsresult rv = NS_NewURI(getter_AddRefs(baseUri), base);
+    if (NS_FAILED(rv)) {
+      // Invalid base URL, return false.
+      return false;
+    }
+  }
+
+  nsAutoCString urlStr;
+  if (!AppendUTF16toUTF8(aURL, urlStr, fallible)) {
+    // Just return false with OOM errors as no ErrorResult.
+    return false;
+  }
+
+  nsCOMPtr<nsIURI> uri;
+  return NS_SUCCEEDED(NS_NewURI(getter_AddRefs(uri), urlStr, nullptr, baseUri));
 }
 
 URLSearchParams* URL::SearchParams() {
@@ -191,7 +219,8 @@ void URL::SetHref(const nsAString& aHref, ErrorResult& aRv) {
 }
 
 void URL::GetOrigin(nsAString& aOrigin) const {
-  nsresult rv = nsContentUtils::GetUTFOrigin(URI(), aOrigin);
+  nsresult rv =
+      nsContentUtils::GetWebExposedOriginSerialization(URI(), aOrigin);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aOrigin.Truncate();
   }
@@ -203,38 +232,14 @@ void URL::GetProtocol(nsAString& aProtocol) const {
 }
 
 void URL::SetProtocol(const nsAString& aProtocol) {
-  nsAString::const_iterator start;
-  aProtocol.BeginReading(start);
-
-  nsAString::const_iterator end;
-  aProtocol.EndReading(end);
-
-  nsAString::const_iterator iter(start);
-  FindCharInReadable(':', iter, end);
-
-  // Changing the protocol of a URL, changes the "nature" of the URI
-  // implementation. In order to do this properly, we have to serialize the
-  // existing URL and reparse it in a new object.
-  nsCOMPtr<nsIURI> clone;
-  nsresult rv = NS_MutateURI(URI())
-                    .SetScheme(NS_ConvertUTF16toUTF8(Substring(start, iter)))
-                    .Finalize(clone);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  nsCOMPtr<nsIURI> uri(URI());
+  if (!uri) {
     return;
   }
-
-  nsAutoCString href;
-  rv = clone->GetSpec(href);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  uri = net::TryChangeProtocol(uri, aProtocol);
+  if (!uri) {
     return;
   }
-
-  nsCOMPtr<nsIURI> uri;
-  rv = NS_NewURI(getter_AddRefs(uri), href);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
-  }
-
   mURI = std::move(uri);
 }
 

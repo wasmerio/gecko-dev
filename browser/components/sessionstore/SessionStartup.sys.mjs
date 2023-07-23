@@ -30,7 +30,9 @@
 /* :::::::: Constants and Helpers ::::::::::::::: */
 
 const lazy = {};
-
+const { AppConstants } = ChromeUtils.import(
+  "resource://gre/modules/AppConstants.jsm"
+);
 ChromeUtils.defineESModuleGetters(lazy, {
   CrashMonitor: "resource://gre/modules/CrashMonitor.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
@@ -65,7 +67,7 @@ function warning(msg, exception) {
   Services.console.logMessage(consoleMsg);
 }
 
-var gOnceInitializedDeferred = (function() {
+var gOnceInitializedDeferred = (function () {
   let deferred = {};
 
   deferred.promise = new Promise((resolve, reject) => {
@@ -101,7 +103,10 @@ export var SessionStartup = {
    */
   init() {
     Services.obs.notifyObservers(null, "sessionstore-init-started");
-    lazy.StartupPerformance.init();
+
+    if (!AppConstants.DEBUG) {
+      lazy.StartupPerformance.init();
+    }
 
     // do not need to initialize anything in auto-started private browsing sessions
     if (lazy.PrivateBrowsingUtils.permanentPrivateBrowsing) {
@@ -210,9 +215,8 @@ export var SessionStartup = {
       if (checkpoints) {
         // If the previous session finished writing the final state, we'll
         // assume there was no crash.
-        this._previousSessionCrashed = !checkpoints[
-          "sessionstore-final-state-write-complete"
-        ];
+        this._previousSessionCrashed =
+          !checkpoints["sessionstore-final-state-write-complete"];
       } else if (noFilesFound) {
         // If the Crash Monitor could not load a checkpoints file it will
         // provide null. This could occur on the first run after updating to

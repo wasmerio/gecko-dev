@@ -52,6 +52,7 @@ const EXPECTED_SPONSORED_URLBAR_RESULT = {
     sponsoredBlockId: 1,
     sponsoredAdvertiser: "TestAdvertiser",
     sponsoredIabCategory: "22 - Shopping",
+    descriptionL10n: { id: "urlbar-result-action-sponsored" },
     helpUrl: QuickSuggest.HELP_URL,
     helpL10n: {
       id: UrlbarPrefs.get("resultMenu")
@@ -65,6 +66,7 @@ const EXPECTED_SPONSORED_URLBAR_RESULT = {
         : "firefox-suggest-urlbar-block",
     },
     source: "remote-settings",
+    provider: "AdmWikipedia",
   },
 };
 
@@ -99,6 +101,7 @@ const EXPECTED_NONSPONSORED_URLBAR_RESULT = {
         : "firefox-suggest-urlbar-block",
     },
     source: "remote-settings",
+    provider: "AdmWikipedia",
   },
 };
 
@@ -118,7 +121,12 @@ add_task(async function init() {
   Services.prefs.setBoolPref("browser.search.suggest.enabled", false);
 
   await QuickSuggestTestUtils.ensureQuickSuggestInit({
-    remoteSettingsResults: REMOTE_SETTINGS_RESULTS,
+    remoteSettingsResults: [
+      {
+        type: "data",
+        attachment: REMOTE_SETTINGS_RESULTS,
+      },
+    ],
   });
 
   // Set up a sinon stub for the `Date.now()` implementation inside of
@@ -2020,7 +2028,7 @@ add_task(async function configChange_sameIntervalLowerCap_1() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 custom: [{ interval_s: 3, max_count: 1 }],
@@ -2103,7 +2111,7 @@ add_task(async function configChange_sameIntervalLowerCap_2() {
             });
           }
           await checkTelemetryEvents([]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 custom: [{ interval_s: 3, max_count: 1 }],
@@ -2203,7 +2211,7 @@ add_task(async function configChange_sameIntervalHigherCap() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 custom: [{ interval_s: 3, max_count: 5 }],
@@ -2324,7 +2332,7 @@ add_task(async function configChange_1IntervalTo2NewIntervalsHigher() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 custom: [
@@ -2488,7 +2496,7 @@ add_task(async function configChange_2IntervalsTo1NewIntervalHigher() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 custom: [{ interval_s: 6, max_count: 5 }],
@@ -2615,7 +2623,7 @@ add_task(async function configChange_1IntervalTo1NewIntervalLower() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 custom: [{ interval_s: 3, max_count: 3 }],
@@ -2694,7 +2702,7 @@ add_task(async function configChange_1IntervalToLifetime() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 lifetime: 3,
@@ -2755,7 +2763,7 @@ add_task(async function configChange_lifetimeCapHigher() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 lifetime: 5,
@@ -2837,7 +2845,7 @@ add_task(async function configChange_lifetimeCapLower() {
               },
             },
           ]);
-          QuickSuggestTestUtils.setConfig({
+          await QuickSuggestTestUtils.setConfig({
             impression_caps: {
               sponsored: {
                 lifetime: 1,

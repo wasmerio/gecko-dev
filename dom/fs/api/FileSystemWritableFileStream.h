@@ -48,6 +48,10 @@ class FileSystemWritableFileStream final : public WritableStream {
   using CreatePromise =
       MozPromise<already_AddRefed<FileSystemWritableFileStream>, nsresult,
                  /* IsExclusive */ true>;
+
+  using WriteDataPromise =
+      MozPromise<Maybe<int64_t>, CopyableErrorResult, /* IsExclusive */ true>;
+
   static RefPtr<CreatePromise> Create(
       const nsCOMPtr<nsIGlobalObject>& aGlobal,
       RefPtr<FileSystemManager>& aManager,
@@ -63,11 +67,22 @@ class FileSystemWritableFileStream final : public WritableStream {
 
   void ClearActor();
 
+  class Command;
+  RefPtr<Command> CreateCommand();
+
+  bool IsCommandActive() const;
+
   bool IsOpen() const;
 
-  bool IsClosed() const;
+  bool IsFinishing() const;
+
+  bool IsDone() const;
+
+  [[nodiscard]] RefPtr<BoolPromise> BeginAbort();
 
   [[nodiscard]] RefPtr<BoolPromise> BeginClose();
+
+  [[nodiscard]] RefPtr<BoolPromise> OnDone();
 
   void SetWorkerRef(RefPtr<StrongWorkerRef>&& aWorkerRef);
 
@@ -101,13 +116,21 @@ class FileSystemWritableFileStream final : public WritableStream {
 
   virtual ~FileSystemWritableFileStream();
 
+  [[nodiscard]] RefPtr<BoolPromise> BeginFinishing(bool aShouldAbort);
+
+  RefPtr<WriteDataPromise> Write(
+      ArrayBufferViewOrArrayBufferOrBlobOrUTF8StringOrWriteParams& aData);
+
   template <typename T>
-  void Write(const T& aData, const Maybe<uint64_t> aPosition,
-             const RefPtr<Promise>& aPromise);
+  RefPtr<Int64Promise> Write(const T& aData, const Maybe<uint64_t> aPosition);
 
-  void Seek(uint64_t aPosition, const RefPtr<Promise>& aPromise);
+  RefPtr<BoolPromise> Seek(uint64_t aPosition);
 
-  void Truncate(uint64_t aSize, const RefPtr<Promise>& aPromise);
+  RefPtr<BoolPromise> Truncate(uint64_t aSize);
+
+  void NoteFinishedCommand();
+
+  [[nodiscard]] RefPtr<BoolPromise> Finish();
 
   RefPtr<FileSystemManager> mManager;
 
@@ -122,6 +145,10 @@ class FileSystemWritableFileStream final : public WritableStream {
   fs::FileSystemEntryMetadata mMetadata;
 
   RefPtr<CloseHandler> mCloseHandler;
+
+  MozPromiseHolder<BoolPromise> mFinishPromiseHolder;
+
+  bool mCommandActive;
 };
 
 }  // namespace dom

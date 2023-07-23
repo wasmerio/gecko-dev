@@ -231,7 +231,7 @@ LoginManagerAuthPromptFactory.prototype = {
         // Prompts throw NS_ERROR_NOT_AVAILABLE if they're aborted.
         promptAborted = true;
       } else {
-        console.error("LoginManagerAuthPrompter: _doAsyncPrompt " + e + "\n");
+        console.error("LoginManagerAuthPrompter: _doAsyncPrompt", e);
       }
     }
 
@@ -274,6 +274,11 @@ XPCOMUtils.defineLazyGetter(
  * Implements interfaces for prompting the user to enter/save/change auth info.
  *
  * nsIAuthPrompt: Used by SeaMonkey, Thunderbird, but not Firefox.
+ *
+ * Note this implementation no longer provides `nsIAuthPrompt.promptPassword()`
+ * and `nsIAuthPrompt.promptUsernameAndPassword()`. Use their async
+ * counterparts `asyncPromptPassword` and `asyncPromptUsernameAndPassword`
+ * instead.
  *
  * nsIAuthPrompt2: Is invoked by a channel for protocol-based authentication
  * (eg HTTP Authenticate, FTP login).
@@ -383,7 +388,7 @@ LoginManagerAuthPrompter.prototype = {
    * Looks up a username and password in the database. Will prompt the user
    * with a dialog, even if a username and password are found.
    */
-  promptUsernameAndPassword(
+  async asyncPromptUsernameAndPassword(
     aDialogTitle,
     aText,
     aPasswordRealm,
@@ -393,7 +398,7 @@ LoginManagerAuthPrompter.prototype = {
   ) {
     if (aSavePassword == Ci.nsIAuthPrompt.SAVE_PASSWORD_FOR_SESSION) {
       throw new Components.Exception(
-        "promptUsernameAndPassword doesn't support SAVE_PASSWORD_FOR_SESSION",
+        "asyncPromptUsernameAndPassword doesn't support SAVE_PASSWORD_FOR_SESSION",
         Cr.NS_ERROR_NOT_IMPLEMENTED
       );
     }
@@ -474,7 +479,7 @@ LoginManagerAuthPrompter.prototype = {
     if (!selectedLogin) {
       // add as new
       this.log(`New login seen for: ${realm}.`);
-      Services.logins.addLogin(newLogin);
+      await Services.logins.addLoginAsync(newLogin);
     } else if (aPassword.value != selectedLogin.password) {
       // update password
       this.log(`Updating password for ${realm}.`);
@@ -500,7 +505,7 @@ LoginManagerAuthPrompter.prototype = {
    * with a dialog with a text field and ok/cancel buttons. If the user
    * allows it, then the password will be saved in the database.
    */
-  promptPassword(
+  async asyncPromptPassword(
     aDialogTitle,
     aText,
     aPasswordRealm,
@@ -560,7 +565,7 @@ LoginManagerAuthPrompter.prototype = {
 
       this.log(`New login seen for ${realm}.`);
 
-      Services.logins.addLogin(newLogin);
+      await Services.logins.addLoginAsync(newLogin);
     }
 
     return ok;
@@ -658,9 +663,7 @@ LoginManagerAuthPrompter.prototype = {
     } catch (e) {
       // Ignore any errors and display the prompt anyway.
       epicfail = true;
-      console.error(
-        "LoginManagerAuthPrompter: Epic fail in promptAuth: " + e + "\n"
-      );
+      console.error("LoginManagerAuthPrompter: Epic fail in promptAuth:", e);
     }
 
     var ok = canAutologin;
@@ -760,7 +763,7 @@ LoginManagerAuthPrompter.prototype = {
         );
       }
     } catch (e) {
-      console.error("LoginManagerAuthPrompter: Fail2 in promptAuth: " + e);
+      console.error("LoginManagerAuthPrompter: Fail2 in promptAuth:", e);
     }
 
     return ok;
@@ -825,12 +828,8 @@ LoginManagerAuthPrompter.prototype = {
 
       this._factory._doAsyncPrompt(asyncPrompt, hashKey);
     } catch (e) {
-      console.error(
-        "LoginManagerAuthPrompter: " +
-          "asyncPromptAuth: " +
-          e +
-          "\nFalling back to promptAuth\n"
-      );
+      console.error("LoginManagerAuthPrompter: asyncPromptAuth:", e);
+      console.error("Falling back to promptAuth");
       // Fail the prompt operation to let the consumer fall back
       // to synchronous promptAuth method
       throw e;

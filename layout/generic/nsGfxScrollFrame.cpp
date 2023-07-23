@@ -8,6 +8,7 @@
 
 #include "nsGfxScrollFrame.h"
 
+#include "ScrollPositionUpdate.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "nsIXULRuntime.h"
 #include "base/compiler_specific.h"
@@ -1421,7 +1422,8 @@ nscoord nsHTMLScrollFrame::SynthesizeFallbackBaseline(
 }
 
 Maybe<nscoord> nsHTMLScrollFrame::GetNaturalBaselineBOffset(
-    WritingMode aWM, BaselineSharingGroup aBaselineGroup) const {
+    WritingMode aWM, BaselineSharingGroup aBaselineGroup,
+    BaselineExportContext aExportContext) const {
   // Block containers that are scrollable always have a last baseline
   // that are synthesized from block-end margin edge.
   // Note(dshin): This behaviour is really only relevant to `inline-block`
@@ -1429,7 +1431,8 @@ Maybe<nscoord> nsHTMLScrollFrame::GetNaturalBaselineBOffset(
   // baselines are calculated through `GetFirstLineBaseline`, which does
   // calculations of its own.
   // https://drafts.csswg.org/css-align/#baseline-export
-  if (aBaselineGroup == BaselineSharingGroup::Last &&
+  if (aExportContext == BaselineExportContext::LineLayout &&
+      aBaselineGroup == BaselineSharingGroup::Last &&
       mScrolledFrame->IsBlockFrameOrSubclass()) {
     return Some(SynthesizeFallbackBaseline(aWM, aBaselineGroup));
   }
@@ -1439,7 +1442,8 @@ Maybe<nscoord> nsHTMLScrollFrame::GetNaturalBaselineBOffset(
   }
 
   // OK, here's where we defer to our scrolled frame.
-  return mScrolledFrame->GetNaturalBaselineBOffset(aWM, aBaselineGroup)
+  return mScrolledFrame
+      ->GetNaturalBaselineBOffset(aWM, aBaselineGroup, aExportContext)
       .map([this, aWM](nscoord aBaseline) {
         // We have to add our border BStart thickness to whatever it returns, to
         // produce an offset in our frame-rect's coordinate system. (We don't
@@ -2506,6 +2510,11 @@ void nsHTMLScrollFrame::ScrollToWithOrigin(nsPoint aScrollPosition,
 
   nsSize currentVelocity(0, 0);
 
+  const bool canHandoffToApz =
+      nsLayoutUtils::AsyncPanZoomEnabled(this) && WantAsyncScroll() &&
+      CanApzScrollInTheseDirections(
+          DirectionsInDelta(mDestination - GetScrollPosition()));
+
   if (aParams.IsSmoothMsd()) {
     mIgnoreMomentumScroll = true;
     if (!mAsyncSmoothMSDScroll) {
@@ -2519,10 +2528,8 @@ void nsHTMLScrollFrame::ScrollToWithOrigin(nsPoint aScrollPosition,
         mAsyncScroll = nullptr;
       }
 
-      if (nsLayoutUtils::AsyncPanZoomEnabled(this) && WantAsyncScroll() &&
-          CanApzScrollInTheseDirections(
-              DirectionsInDelta(mDestination - GetScrollPosition()))) {
-        ApzSmoothScrollTo(mDestination, aParams.mOrigin,
+      if (canHandoffToApz) {
+        ApzSmoothScrollTo(mDestination, ScrollMode::SmoothMsd, aParams.mOrigin,
                           aParams.mTriggeredByScript, std::move(snapTargetIds));
         return;
       }
@@ -2549,14 +2556,20 @@ void nsHTMLScrollFrame::ScrollToWithOrigin(nsPoint aScrollPosition,
     mAsyncSmoothMSDScroll = nullptr;
   }
 
+  const bool isSmoothScroll =
+      aParams.IsSmooth() && nsLayoutUtils::IsSmoothScrollingEnabled();
   if (!mAsyncScroll) {
+    if (isSmoothScroll && canHandoffToApz) {
+      ApzSmoothScrollTo(mDestination, ScrollMode::Smooth, aParams.mOrigin,
+                        aParams.mTriggeredByScript, std::move(snapTargetIds));
+      return;
+    }
+
     mAsyncScroll =
         new AsyncScroll(std::move(snapTargetIds), aParams.mTriggeredByScript);
     mAsyncScroll->SetRefreshObserver(this);
   }
 
-  const bool isSmoothScroll =
-      aParams.IsSmooth() && nsLayoutUtils::IsSmoothScrollingEnabled();
   if (isSmoothScroll) {
     mAsyncScroll->InitSmoothScroll(now, GetScrollPosition(), mDestination,
                                    aParams.mOrigin, range, currentVelocity);
@@ -3388,8 +3401,7 @@ static void AppendToTop(nsDisplayListBuilder* aBuilder,
 struct HoveredStateComparator {
   static bool Hovered(const nsIFrame* aFrame) {
     return aFrame->GetContent()->IsElement() &&
-           aFrame->GetContent()->AsElement()->HasAttr(kNameSpaceID_None,
-                                                      nsGkAtoms::hover);
+           aFrame->GetContent()->AsElement()->HasAttr(nsGkAtoms::hover);
   }
 
   bool Equals(nsIFrame* A, nsIFrame* B) const {
@@ -5393,8 +5405,7 @@ void nsHTMLScrollFrame::ReloadChildFrames() {
     } else {
       nsAutoString value;
       if (content->IsElement()) {
-        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::orient,
-                                      value);
+        content->AsElement()->GetAttr(nsGkAtoms::orient, value);
       }
       if (!value.IsEmpty()) {
         // probably a scrollbar then
@@ -6950,7 +6961,7 @@ nscoord nsHTMLScrollFrame::GetCoordAttribute(nsIFrame* aBox, nsAtom* aAtom,
 
     nsAutoString value;
     if (content->IsElement()) {
-      content->AsElement()->GetAttr(kNameSpaceID_None, aAtom, value);
+      content->AsElement()->GetAttr(aAtom, value);
     }
     if (!value.IsEmpty()) {
       nsresult error;
@@ -7797,7 +7808,7 @@ void nsHTMLScrollFrame::AsyncScrollbarDragRejected() {
 }
 
 void nsHTMLScrollFrame::ApzSmoothScrollTo(
-    const nsPoint& aDestination, ScrollOrigin aOrigin,
+    const nsPoint& aDestination, ScrollMode aMode, ScrollOrigin aOrigin,
     ScrollTriggeredByScript aTriggeredByScript,
     UniquePtr<ScrollSnapTargetIds> aSnapTargetIds) {
   if (mApzSmoothScrollDestination == Some(aDestination)) {
@@ -7821,7 +7832,8 @@ void nsHTMLScrollFrame::ApzSmoothScrollTo(
   MOZ_ASSERT(aOrigin != ScrollOrigin::None);
   mApzSmoothScrollDestination = Some(aDestination);
   AppendScrollUpdate(ScrollPositionUpdate::NewSmoothScroll(
-      aOrigin, aDestination, aTriggeredByScript, std::move(aSnapTargetIds)));
+      aMode, aOrigin, aDestination, aTriggeredByScript,
+      std::move(aSnapTargetIds)));
 
   nsIContent* content = GetContent();
   if (!DisplayPortUtils::HasNonMinimalNonZeroDisplayPort(content)) {
@@ -7886,7 +7898,7 @@ bool nsHTMLScrollFrame::SmoothScrollVisual(
 
   UniquePtr<ScrollSnapTargetIds> snapTargetIds;
   // Perform the scroll.
-  ApzSmoothScrollTo(mDestination,
+  ApzSmoothScrollTo(mDestination, ScrollMode::SmoothMsd,
                     aUpdateType == FrameMetrics::eRestore
                         ? ScrollOrigin::Restore
                         : ScrollOrigin::Other,
@@ -7895,12 +7907,23 @@ bool nsHTMLScrollFrame::SmoothScrollVisual(
 }
 
 bool nsHTMLScrollFrame::IsSmoothScroll(dom::ScrollBehavior aBehavior) const {
+  if (aBehavior == dom::ScrollBehavior::Instant) {
+    return false;
+  }
+
   // The user smooth scrolling preference should be honored for any requested
   // smooth scrolls. A requested smooth scroll when smooth scrolling is
-  // disabled should be equivalent to an instant scroll.
-  if (aBehavior == dom::ScrollBehavior::Instant ||
-      !nsLayoutUtils::IsSmoothScrollingEnabled()) {
-    return false;
+  // disabled should be equivalent to an instant scroll. This is not enforced
+  // for the <scrollbox> XUL element to allow for the browser chrome to
+  // override this behavior when toolkit.scrollbox.smoothScroll is enabled.
+  if (!GetContent()->IsXULElement(nsGkAtoms::scrollbox)) {
+    if (!nsLayoutUtils::IsSmoothScrollingEnabled()) {
+      return false;
+    }
+  } else {
+    if (!StaticPrefs::toolkit_scrollbox_smoothScroll()) {
+      return false;
+    }
   }
 
   if (aBehavior == dom::ScrollBehavior::Smooth) {

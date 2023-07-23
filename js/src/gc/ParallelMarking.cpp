@@ -81,9 +81,9 @@ bool ParallelMarker::markOneColor(MarkColor color, SliceBudget& sliceBudget) {
 
     // Attempt to populate empty mark stacks.
     //
-    // TODO: When supporting more than two markers we will need a more
+    // TODO: When tuning for more than two markers we may need to adopt a more
     // sophisticated approach.
-    if (!marker->hasEntries(color) && gc->marker().canDonateWork()) {
+    if (!marker->hasEntriesForCurrentColor() && gc->marker().canDonateWork()) {
       GCMarker::moveWork(marker, &gc->marker());
     }
   }
@@ -102,6 +102,10 @@ bool ParallelMarker::markOneColor(MarkColor color, SliceBudget& sliceBudget) {
 
   {
     AutoLockHelperThreadState lock;
+
+    // There should always be enough parallel tasks to run our marking work.
+    MOZ_RELEASE_ASSERT(HelperThreadState().getGCParallelThreadCount(lock) >=
+                       workerCount());
 
     for (size_t i = 0; i < workerCount(); i++) {
       gc->startTask(*tasks[i], lock);
@@ -150,7 +154,7 @@ ParallelMarkTask::~ParallelMarkTask() {
 }
 
 bool ParallelMarkTask::hasWork() const {
-  return marker->hasEntries(marker->markColor());
+  return marker->hasEntriesForCurrentColor();
 }
 
 void ParallelMarkTask::recordDuration() {

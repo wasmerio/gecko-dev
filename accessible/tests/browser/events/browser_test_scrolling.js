@@ -15,7 +15,7 @@ addAccessibleTask(
 b
 c</textarea>
   `,
-  async function(browser, accDoc) {
+  async function (browser, accDoc) {
     let onScrolling = waitForEvents([
       [EVENT_SCROLLING, accDoc],
       [EVENT_SCROLLING_END, accDoc],
@@ -110,4 +110,44 @@ c</textarea>
     });
     await onScrolling;
   }
+);
+
+// Verify that the scrolling start event is fired for an anchor change.
+addAccessibleTask(
+  `
+    <p>a</p>
+    <p>b</p>
+    <p id="c">c</p>
+  `,
+  async function (browser, accDoc) {
+    let onScrollingStart = waitForEvent(EVENT_SCROLLING_START, "c");
+    await SpecialPowers.spawn(browser, [], () => {
+      content.location.hash = "#c";
+    });
+    await onScrollingStart;
+  },
+  { chrome: true, topLevel: true }
+);
+
+// Ensure that a scrollable, focused non-interactive element receives a
+// scrolling start event when an anchor jump to that element is triggered.
+addAccessibleTask(
+  `
+<div style="height: 100vh; width: 100vw; overflow: auto;" id="scrollable">
+  <h1 style="height: 300%;" id="inside-scrollable">test</h1>
+</div>
+  `,
+  async function (browser, accDoc) {
+    let onScrollingStart = waitForEvent(
+      EVENT_SCROLLING_START,
+      "inside-scrollable"
+    );
+    await invokeContentTask(browser, [], () => {
+      const scrollable = content.document.getElementById("scrollable");
+      scrollable.focus();
+      content.location.hash = "#inside-scrollable";
+    });
+    await onScrollingStart;
+  },
+  { chrome: true, topLevel: true, iframe: true, remoteIframe: true }
 );

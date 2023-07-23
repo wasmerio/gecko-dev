@@ -1,4 +1,5 @@
 browser/components/newtab/vendor/
+browser/components/pocket/content/panels/css/normalize.scss
 browser/components/pocket/content/panels/js/vendor/
 browser/components/storybook/node_modules/
 browser/extensions/formautofill/content/third-party/
@@ -153,6 +154,8 @@ security/manager/tools/log_list.json
 security/nss/
 security/sandbox/chromium/
 security/sandbox/chromium-shim/
+services/common/kinto-http-client.sys.mjs
+services/common/kinto-offline-client.js
 testing/gtest/gmock/
 testing/gtest/gtest/
 testing/mochitest/MochiKit/
@@ -170,7 +173,6 @@ testing/xpcshell/dns-packet/
 testing/xpcshell/node_ip/
 testing/xpcshell/node-http2/
 testing/xpcshell/node-ws/
-testing/xpcshell/odoh-wasm/
 third_party/
 toolkit/components/certviewer/content/vendor/
 toolkit/components/jsoncpp/

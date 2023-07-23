@@ -31,10 +31,11 @@ class GeckoViewStorage extends JSONFile {
   }
 
   async updateCreditCards() {
-    const creditCards = await lazy.GeckoViewAutocomplete.fetchCreditCards().then(
-      results => results?.map(r => lazy.CreditCard.parse(r).toGecko()) ?? [],
-      _ => []
-    );
+    const creditCards =
+      await lazy.GeckoViewAutocomplete.fetchCreditCards().then(
+        results => results?.map(r => lazy.CreditCard.parse(r).toGecko()) ?? [],
+        _ => []
+      );
     super.data.creditCards = creditCards;
   }
 
@@ -123,10 +124,6 @@ class Addresses extends AddressesBase {
   }
 
   async findDuplicateGUID(remoteRecord) {
-    throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
-  }
-
-  async mergeToStorage(targetRecord, strict = false) {
     throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
   }
 }
@@ -232,10 +229,6 @@ class CreditCards extends CreditCardsBase {
   }
 
   async findDuplicateGUID(remoteRecord) {
-    throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
-  }
-
-  async mergeToStorage(targetRecord, strict = false) {
     throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
   }
 }

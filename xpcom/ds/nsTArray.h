@@ -435,7 +435,19 @@ class nsTArray_base {
   // @return False if insufficient memory is available; true otherwise.
   template <typename ActualAlloc>
   typename ActualAlloc::ResultTypeProxy EnsureCapacity(size_type aCapacity,
-                                                       size_type aElemSize);
+                                                       size_type aElemSize) {
+    // Do this check here so that our callers can inline it.
+    if (aCapacity <= mHdr->mCapacity) {
+      return ActualAlloc::SuccessResult();
+    }
+    return EnsureCapacityImpl<ActualAlloc>(aCapacity, aElemSize);
+  }
+
+  // The rest of EnsureCapacity. Should only be called if aCapacity >
+  // mHdr->mCapacity.
+  template <typename ActualAlloc>
+  typename ActualAlloc::ResultTypeProxy EnsureCapacityImpl(size_type aCapacity,
+                                                           size_type aElemSize);
 
   // Extend the storage to accommodate aCount extra elements.
   // @param aLength The current size of the array.
@@ -2383,6 +2395,12 @@ class nsTArray_Impl
                      [&comp](const auto& lhs, const auto& rhs) {
                        return comp.LessThan(lhs, rhs);
                      });
+  }
+
+  // A variation on the StableSort method defined above that assumes that
+  // 'operator<' is defined for value_type.
+  void StableSort() {
+    StableSort(nsDefaultComparator<value_type, value_type>());
   }
 
   // This method reverses the array in place.

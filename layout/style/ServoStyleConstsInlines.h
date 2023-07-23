@@ -36,22 +36,23 @@ template struct StyleStrong<StyleAnimationValue>;
 template struct StyleStrong<StyleLockedDeclarationBlock>;
 template struct StyleStrong<StyleStylesheetContents>;
 template struct StyleStrong<StyleLockedKeyframe>;
-template struct StyleStrong<StyleLockedLayerBlockRule>;
-template struct StyleStrong<StyleLockedLayerStatementRule>;
+template struct StyleStrong<StyleLayerBlockRule>;
+template struct StyleStrong<StyleLayerStatementRule>;
 template struct StyleStrong<StyleLockedMediaList>;
 template struct StyleStrong<StyleLockedStyleRule>;
 template struct StyleStrong<StyleLockedImportRule>;
 template struct StyleStrong<StyleLockedKeyframesRule>;
-template struct StyleStrong<StyleLockedMediaRule>;
-template struct StyleStrong<StyleLockedDocumentRule>;
-template struct StyleStrong<StyleLockedNamespaceRule>;
+template struct StyleStrong<StyleMediaRule>;
+template struct StyleStrong<StyleDocumentRule>;
+template struct StyleStrong<StyleNamespaceRule>;
 template struct StyleStrong<StyleLockedPageRule>;
-template struct StyleStrong<StyleLockedSupportsRule>;
-template struct StyleStrong<StyleLockedFontFeatureValuesRule>;
-template struct StyleStrong<StyleLockedFontPaletteValuesRule>;
+template struct StyleStrong<StylePropertyRule>;
+template struct StyleStrong<StyleSupportsRule>;
+template struct StyleStrong<StyleFontFeatureValuesRule>;
+template struct StyleStrong<StyleFontPaletteValuesRule>;
 template struct StyleStrong<StyleLockedFontFaceRule>;
 template struct StyleStrong<StyleLockedCounterStyleRule>;
-template struct StyleStrong<StyleLockedContainerRule>;
+template struct StyleStrong<StyleContainerRule>;
 
 template <typename T>
 inline void StyleOwnedSlice<T>::Clear() {
@@ -400,7 +401,7 @@ inline StyleUrlExtraData::~StyleUrlExtraData() {
 
 inline const URLExtraData& StyleUrlExtraData::get() const {
   if (IsShared()) {
-    return *URLExtraData::sShared[_0 >> 1].get();
+    return *URLExtraData::sShared[_0 >> 1];
   }
   return *reinterpret_cast<const URLExtraData*>(_0);
 }
@@ -889,7 +890,7 @@ template <>
 inline const LengthPercentage& BorderRadius::Get(HalfCorner aCorner) const {
   static_assert(sizeof(BorderRadius) == sizeof(LengthPercentage) * 8, "");
   static_assert(alignof(BorderRadius) == alignof(LengthPercentage), "");
-  auto* self = reinterpret_cast<const LengthPercentage*>(this);
+  const auto* self = reinterpret_cast<const LengthPercentage*>(this);
   return self[aCorner];
 }
 
@@ -914,7 +915,7 @@ inline Maybe<size_t> StyleGridTemplateComponent::RepeatAutoIndex() const {
   if (!IsTrackList()) {
     return Nothing();
   }
-  auto& list = *AsTrackList();
+  const auto& list = *AsTrackList();
   return list.auto_repeat_index < list.values.Length()
              ? Some(list.auto_repeat_index)
              : Nothing();
@@ -986,7 +987,7 @@ inline const StyleImage& StyleImage::FinalImage() const {
   if (!IsImageSet()) {
     return *this;
   }
-  auto& set = *AsImageSet();
+  const auto& set = *AsImageSet();
   auto items = set.items.AsSpan();
   if (MOZ_LIKELY(set.selected_index < items.Length())) {
     return items[set.selected_index].image.FinalImage();
@@ -1000,14 +1001,14 @@ Maybe<CSSIntSize> StyleImage::GetIntrinsicSize() const;
 
 template <>
 inline bool StyleImage::IsImageRequestType() const {
-  auto& finalImage = FinalImage();
+  const auto& finalImage = FinalImage();
   return finalImage.IsUrl() || finalImage.IsRect();
 }
 
 template <>
 inline const StyleComputedImageUrl* StyleImage::GetImageRequestURLValue()
     const {
-  auto& finalImage = FinalImage();
+  const auto& finalImage = FinalImage();
   if (finalImage.IsUrl()) {
     return &finalImage.AsUrl();
   }
@@ -1019,13 +1020,13 @@ inline const StyleComputedImageUrl* StyleImage::GetImageRequestURLValue()
 
 template <>
 inline imgRequestProxy* StyleImage::GetImageRequest() const {
-  auto* url = GetImageRequestURLValue();
+  const auto* url = GetImageRequestURLValue();
   return url ? url->GetImage() : nullptr;
 }
 
 template <>
 inline bool StyleImage::IsResolved() const {
-  auto* url = GetImageRequestURLValue();
+  const auto* url = GetImageRequestURLValue();
   return !url || url->IsImageResolved();
 }
 

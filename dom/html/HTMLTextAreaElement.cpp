@@ -13,7 +13,7 @@
 #include "mozilla/dom/HTMLTextAreaElementBinding.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/EventDispatcher.h"
-#include "mozilla/MappedDeclarations.h"
+#include "mozilla/MappedDeclarationsBuilder.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/PresState.h"
 #include "mozilla/TextControlState.h"
@@ -32,8 +32,6 @@
 #include "nsITextControlFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsLinebreakConverter.h"
-#include "nsMappedAttributes.h"
-#include "nsPIDOMWindow.h"
 #include "nsPresContext.h"
 #include "nsReadableUtils.h"
 #include "nsStyleConsts.h"
@@ -112,19 +110,6 @@ nsresult HTMLTextAreaElement::Clone(dom::NodeInfo* aNodeInfo,
 
   nsresult rv = const_cast<HTMLTextAreaElement*>(this)->CopyInnerTo(it);
   NS_ENSURE_SUCCESS(rv, rv);
-
-  if (mValueChanged) {
-    // Set our value on the clone.
-    nsAutoString value;
-    GetValueInternal(value, true);
-
-    // SetValueInternal handles setting mValueChanged for us
-    if (NS_WARN_IF(
-            NS_FAILED(rv = it->SetValueInternal(
-                          value, {ValueSetterOption::SetValueChanged})))) {
-      return rv;
-    }
-  }
 
   it->SetLastValueChangeWasInteractive(mLastValueChangeWasInteractive);
   it.forget(aResult);
@@ -391,20 +376,18 @@ bool HTMLTextAreaElement::ParseAttribute(int32_t aNamespaceID,
 }
 
 void HTMLTextAreaElement::MapAttributesIntoRule(
-    const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
+    MappedDeclarationsBuilder& aBuilder) {
   // wrap=off
-  if (!aDecls.PropertyIsSet(eCSSProperty_white_space)) {
-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::wrap);
+  if (!aBuilder.PropertyIsSet(eCSSProperty_white_space)) {
+    const nsAttrValue* value = aBuilder.GetAttr(nsGkAtoms::wrap);
     if (value && value->Type() == nsAttrValue::eString &&
         value->Equals(nsGkAtoms::OFF, eIgnoreCase)) {
-      aDecls.SetKeywordValue(eCSSProperty_white_space, StyleWhiteSpace::Pre);
+      aBuilder.SetKeywordValue(eCSSProperty_white_space, StyleWhiteSpace::Pre);
     }
   }
 
-  nsGenericHTMLFormControlElementWithState::MapDivAlignAttributeInto(
-      aAttributes, aDecls);
-  nsGenericHTMLFormControlElementWithState::MapCommonAttributesInto(aAttributes,
-                                                                    aDecls);
+  nsGenericHTMLFormControlElementWithState::MapDivAlignAttributeInto(aBuilder);
+  nsGenericHTMLFormControlElementWithState::MapCommonAttributesInto(aBuilder);
 }
 
 nsChangeHint HTMLTextAreaElement::GetAttributeChangeHint(
@@ -543,8 +526,6 @@ void HTMLTextAreaElement::DoneAddingChildren(bool aHaveNotified) {
   mDoneAddingChildren = true;
 }
 
-bool HTMLTextAreaElement::IsDoneAddingChildren() { return mDoneAddingChildren; }
-
 // Controllers Methods
 
 nsIControllers* HTMLTextAreaElement::GetControllers(ErrorResult& aError) {
@@ -667,6 +648,16 @@ nsresult HTMLTextAreaElement::SetValueFromSetRangeText(
                                    ValueSetterOption::SetValueChanged});
 }
 
+void HTMLTextAreaElement::SetDirectionFromValue(bool aNotify,
+                                                const nsAString* aKnownValue) {
+  nsAutoString value;
+  if (!aKnownValue) {
+    GetValue(value);
+    aKnownValue = &value;
+  }
+  SetDirectionalityFromValue(this, *aKnownValue, aNotify);
+}
+
 nsresult HTMLTextAreaElement::Reset() {
   nsAutoString resetVal;
   GetDefaultValue(resetVal, IgnoreErrors());
@@ -684,7 +675,7 @@ HTMLTextAreaElement::SubmitNamesValues(FormData* aFormData) {
   // Get the name (if no name, no submit)
   //
   nsAutoString name;
-  GetAttr(kNameSpaceID_None, nsGkAtoms::name, name);
+  GetAttr(nsGkAtoms::name, name);
   if (name.IsEmpty()) {
     return NS_OK;
   }
@@ -696,9 +687,15 @@ HTMLTextAreaElement::SubmitNamesValues(FormData* aFormData) {
   GetValueInternal(value, false);
 
   //
-  // Submit
+  // Submit name=value
   //
-  return aFormData->AddNameValuePair(name, value);
+  const nsresult rv = aFormData->AddNameValuePair(name, value);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  // Submit dirname=dir
+  return SubmitDirnameDir(aFormData);
 }
 
 void HTMLTextAreaElement::SaveState() {
@@ -729,7 +726,7 @@ void HTMLTextAreaElement::SaveState() {
     if (state) {
       // We do not want to save the real disabled state but the disabled
       // attribute.
-      state->disabled() = HasAttr(kNameSpaceID_None, nsGkAtoms::disabled);
+      state->disabled() = HasAttr(nsGkAtoms::disabled);
       state->disabledSet() = true;
     }
   }
@@ -796,6 +793,11 @@ nsresult HTMLTextAreaElement::BindToTree(BindContext& aContext,
   nsresult rv =
       nsGenericHTMLFormControlElementWithState::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Set direction based on value if dir=auto
+  if (HasDirAuto()) {
+    SetDirectionFromValue(false);
+  }
 
   // If there is a disabled fieldset in the parent chain, the element is now
   // barred from constraint validation and can't suffer from value missing.
@@ -923,6 +925,9 @@ void HTMLTextAreaElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
       if (nsTextControlFrame* f = do_QueryFrame(GetPrimaryFrame())) {
         f->PlaceholderChanged(aOldValue, aValue);
       }
+    } else if (aName == nsGkAtoms::dir && aValue &&
+               aValue->Equals(nsGkAtoms::_auto, eIgnoreCase)) {
+      SetDirectionFromValue(aNotify);
     }
   }
 
@@ -934,18 +939,27 @@ nsresult HTMLTextAreaElement::CopyInnerTo(Element* aDest) {
   nsresult rv = nsGenericHTMLFormControlElementWithState::CopyInnerTo(aDest);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (aDest->OwnerDoc()->IsStaticDocument()) {
+  if (mValueChanged || aDest->OwnerDoc()->IsStaticDocument()) {
+    // Set our value on the clone.
+    auto* dest = static_cast<HTMLTextAreaElement*>(aDest);
+
     nsAutoString value;
     GetValueInternal(value, true);
-    ErrorResult ret;
-    static_cast<HTMLTextAreaElement*>(aDest)->SetValue(value, ret);
-    return ret.StealNSResult();
+
+    // SetValueInternal handles setting mValueChanged for us. dest is a fresh
+    // element so setting its value can't really run script.
+    if (NS_WARN_IF(
+            NS_FAILED(rv = MOZ_KnownLive(dest)->SetValueInternal(
+                          value, {ValueSetterOption::SetValueChanged})))) {
+      return rv;
+    }
   }
+
   return NS_OK;
 }
 
 bool HTMLTextAreaElement::IsMutable() const {
-  return (!HasAttr(kNameSpaceID_None, nsGkAtoms::readonly) && !IsDisabled());
+  return !HasAttr(nsGkAtoms::readonly) && !IsDisabled();
 }
 
 void HTMLTextAreaElement::SetCustomValidity(const nsAString& aError) {
@@ -1011,7 +1025,7 @@ void HTMLTextAreaElement::UpdateValueMissingValidityState() {
 
 void HTMLTextAreaElement::UpdateBarredFromConstraintValidation() {
   SetBarredFromConstraintValidation(
-      HasAttr(kNameSpaceID_None, nsGkAtoms::readonly) ||
+      HasAttr(nsGkAtoms::readonly) ||
       HasFlag(ELEMENT_IS_DATALIST_OR_HAS_DATALIST_ANCESTOR) || IsDisabled());
 }
 
@@ -1115,7 +1129,7 @@ void HTMLTextAreaElement::InitializeKeyboardEventListeners() {
 
 void HTMLTextAreaElement::OnValueChanged(ValueChangeKind aKind,
                                          bool aNewValueEmpty,
-                                         const nsAString*) {
+                                         const nsAString* aKnownNewValue) {
   if (aKind != ValueChangeKind::Internal) {
     mLastValueChangeWasInteractive = aKind == ValueChangeKind::UserInteraction;
   }
@@ -1132,6 +1146,10 @@ void HTMLTextAreaElement::OnValueChanged(ValueChangeKind aKind,
   UpdateTooLongValidityState();
   UpdateTooShortValidityState();
   UpdateValueMissingValidityState();
+
+  if (HasDirAuto()) {
+    SetDirectionFromValue(true, aKnownNewValue);
+  }
 
   if (validBefore != IsValid() ||
       (emptyBefore != IsValueEmpty() && HasAttr(nsGkAtoms::placeholder))) {

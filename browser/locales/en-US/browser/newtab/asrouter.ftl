@@ -34,12 +34,14 @@ cfr-doorhanger-extension-author = by { $name }
 # This is a notification displayed in the address bar.
 # When clicked it opens a panel with a message for the user.
 cfr-doorhanger-extension-notification = Recommendation
+# .a11y-announcement is extracted in JS and announced via A11y.announce.
 cfr-doorhanger-extension-notification2 = Recommendation
   .tooltiptext = Extension recommendation
   .a11y-announcement = Extension recommendation available
 
 # This is a notification displayed in the address bar.
 # When clicked it opens a panel with a message for the user.
+# .a11y-announcement is extracted in JS and announced via A11y.announce.
 cfr-doorhanger-feature-notification = Recommendation
   .tooltiptext = Feature recommendation
   .a11y-announcement = Feature recommendation available
@@ -244,6 +246,6 @@ fxa-sync-cfr-secondary = Remind me later
 ## Device Migration FxA Spotlight
 
 device-migration-fxa-spotlight-header = Using an older device?
-device-migration-fxa-spotlight-body = Back up your data to make sure you don’t lose important info like bookmarks and passwords –– especially if you switch to a new device.
+device-migration-fxa-spotlight-body = Back up your data to make sure you don’t lose important info like bookmarks and passwords — especially if you switch to a new device.
 device-migration-fxa-spotlight-primary-button = How to back up my data
 device-migration-fxa-spotlight-link = Remind me later

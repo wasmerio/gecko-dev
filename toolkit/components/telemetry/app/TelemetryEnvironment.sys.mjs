@@ -14,9 +14,10 @@ import { UpdateUtils } from "resource://gre/modules/UpdateUtils.sys.mjs";
 
 const Utils = TelemetryUtils;
 
-const { AddonManager, AddonManagerPrivate } = ChromeUtils.import(
-  "resource://gre/modules/AddonManager.jsm"
-);
+import {
+  AddonManager,
+  AddonManagerPrivate,
+} from "resource://gre/modules/AddonManager.sys.mjs";
 
 const lazy = {};
 
@@ -223,10 +224,10 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["browser.cache.disk.enable", { what: RECORD_PREF_VALUE }],
   ["browser.cache.disk.capacity", { what: RECORD_PREF_VALUE }],
   ["browser.cache.memory.enable", { what: RECORD_PREF_VALUE }],
-  ["browser.cache.offline.enable", { what: RECORD_PREF_VALUE }],
   ["browser.formfill.enable", { what: RECORD_PREF_VALUE }],
   ["browser.fixup.alternate.enabled", { what: RECORD_DEFAULTPREF_VALUE }],
   ["browser.migrate.interactions.bookmarks", { what: RECORD_PREF_VALUE }],
+  ["browser.migrate.interactions.csvpasswords", { what: RECORD_PREF_VALUE }],
   ["browser.migrate.interactions.history", { what: RECORD_PREF_VALUE }],
   ["browser.migrate.interactions.passwords", { what: RECORD_PREF_VALUE }],
   ["browser.newtabpage.enabled", { what: RECORD_PREF_VALUE }],
@@ -270,7 +271,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["devtools.debugger.enabled", { what: RECORD_PREF_VALUE }],
   ["devtools.debugger.remote-enabled", { what: RECORD_PREF_VALUE }],
   ["doh-rollout.doorhanger-decision", { what: RECORD_PREF_VALUE }],
-  ["dom.ipc.plugins.enabled", { what: RECORD_PREF_VALUE }],
   ["dom.ipc.processCount", { what: RECORD_PREF_VALUE }],
   ["dom.max_script_run_time", { what: RECORD_PREF_VALUE }],
   ["editor.truncate_user_pastes", { what: RECORD_PREF_VALUE }],
@@ -286,12 +286,8 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
     { what: RECORD_PREF_VALUE },
   ],
   ["extensions.formautofill.creditCards.enabled", { what: RECORD_PREF_VALUE }],
-  [
-    "extensions.formautofill.creditCards.available",
-    { what: RECORD_PREF_VALUE },
-  ],
-  ["extensions.formautofill.creditCards.used", { what: RECORD_PREF_VALUE }],
   ["extensions.manifestV3.enabled", { what: RECORD_PREF_VALUE }],
+  ["extensions.quarantinedDomains.enabled", { what: RECORD_PREF_VALUE }],
   ["extensions.strictCompatibility", { what: RECORD_PREF_VALUE }],
   ["extensions.update.enabled", { what: RECORD_PREF_VALUE }],
   ["extensions.update.url", { what: RECORD_PREF_VALUE }],
@@ -302,7 +298,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["gfx.direct2d.disabled", { what: RECORD_PREF_VALUE }],
   ["gfx.direct2d.force-enabled", { what: RECORD_PREF_VALUE }],
   ["gfx.webrender.all", { what: RECORD_PREF_VALUE }],
-  ["gfx.webrender.all.qualified", { what: RECORD_PREF_VALUE }],
   ["layers.acceleration.disabled", { what: RECORD_PREF_VALUE }],
   ["layers.acceleration.force-enabled", { what: RECORD_PREF_VALUE }],
   ["layers.async-pan-zoom.enabled", { what: RECORD_PREF_VALUE }],
@@ -345,7 +340,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["network.trr.strict_native_fallback", { what: RECORD_DEFAULTPREF_VALUE }],
   ["pdfjs.disabled", { what: RECORD_PREF_VALUE }],
   ["places.history.enabled", { what: RECORD_PREF_VALUE }],
-  ["plugins.show_infobar", { what: RECORD_PREF_VALUE }],
   ["privacy.firstparty.isolate", { what: RECORD_PREF_VALUE }],
   ["privacy.resistFingerprinting", { what: RECORD_PREF_VALUE }],
   ["privacy.trackingprotection.enabled", { what: RECORD_PREF_VALUE }],
@@ -362,8 +356,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["signon.rememberSignons", { what: RECORD_PREF_VALUE }],
   ["signon.firefoxRelay.feature", { what: RECORD_PREF_VALUE }],
   ["toolkit.telemetry.pioneerId", { what: RECORD_PREF_STATE }],
-  ["widget.content.allow-gtk-dark-theme", { what: RECORD_DEFAULTPREF_VALUE }],
-  ["widget.content.gtk-theme-override", { what: RECORD_PREF_STATE }],
   [
     "widget.content.gtk-high-contrast.enabled",
     { what: RECORD_DEFAULTPREF_VALUE },
@@ -657,6 +649,17 @@ EnvironmentAddonBuilder.prototype = {
   onUninstalled(addon) {
     this._onAddonChange(addon);
   },
+  onPropertyChanged(addon, propertiesChanged) {
+    // Avoid to update the telemetry environment for onPropertyChanged
+    // calls that we are not actually interested in (and quarantineIgnoredByApp
+    // is not expected to change at runtime, unless the entire active addons
+    // entry is also replaced, e.g. on the extension being uninstalled and
+    // installed again).
+    if (!propertiesChanged.includes("quarantineIgnoredByUser")) {
+      return;
+    }
+    this._onAddonChange(addon);
+  },
 
   _onAddonChange(addon) {
     if (addon && addon.isBuiltin && !addon.isSystem) {
@@ -830,6 +833,12 @@ EnvironmentAddonBuilder.prototype = {
             hasBinaryComponents: false,
             installDay: Utils.millisecondsToDays(installDate.getTime()),
             signedState: addon.signedState,
+            quarantineIgnoredByApp: enforceBoolean(
+              addon.quarantineIgnoredByApp
+            ),
+            quarantineIgnoredByUser: enforceBoolean(
+              addon.quarantineIgnoredByUser
+            ),
           });
         }
       } catch (ex) {
@@ -1077,7 +1086,8 @@ EnvironmentCache.prototype = {
 
       // Windows only values stored in processData
       this._currentEnvironment.system.isWow64 = this._getProcessData().isWow64;
-      this._currentEnvironment.system.isWowARM64 = this._getProcessData().isWowARM64;
+      this._currentEnvironment.system.isWowARM64 =
+        this._getProcessData().isWowARM64;
     }
 
     if (!this._initTask) {
@@ -1654,18 +1664,15 @@ EnvironmentCache.prototype = {
     let resetDate = await profileAccessor.reset;
     let firstUseDate = await profileAccessor.firstUse;
 
-    this._currentEnvironment.profile.creationDate = Utils.millisecondsToDays(
-      creationDate
-    );
+    this._currentEnvironment.profile.creationDate =
+      Utils.millisecondsToDays(creationDate);
     if (resetDate) {
-      this._currentEnvironment.profile.resetDate = Utils.millisecondsToDays(
-        resetDate
-      );
+      this._currentEnvironment.profile.resetDate =
+        Utils.millisecondsToDays(resetDate);
     }
     if (firstUseDate) {
-      this._currentEnvironment.profile.firstUseDate = Utils.millisecondsToDays(
-        firstUseDate
-      );
+      this._currentEnvironment.profile.firstUseDate =
+        Utils.millisecondsToDays(firstUseDate);
     }
   },
 
@@ -1718,7 +1725,8 @@ EnvironmentCache.prototype = {
    */
   async _loadAsyncUpdateSettings() {
     if (AppConstants.MOZ_UPDATER) {
-      this._updateAutoDownloadCache = await UpdateUtils.getAppUpdateAutoEnabled();
+      this._updateAutoDownloadCache =
+        await UpdateUtils.getAppUpdateAutoEnabled();
       this._updateBackgroundCache = await UpdateUtils.readUpdateConfigSetting(
         "app.update.background.enabled"
       );
@@ -1735,10 +1743,12 @@ EnvironmentCache.prototype = {
    */
   _loadAsyncUpdateSettingsFromCache() {
     if (this._updateAutoDownloadCache !== undefined) {
-      this._currentEnvironment.settings.update.autoDownload = this._updateAutoDownloadCache;
+      this._currentEnvironment.settings.update.autoDownload =
+        this._updateAutoDownloadCache;
     }
     if (this._updateBackgroundCache !== undefined) {
-      this._currentEnvironment.settings.update.background = this._updateBackgroundCache;
+      this._currentEnvironment.settings.update.background =
+        this._updateBackgroundCache;
     }
   },
 
@@ -1760,8 +1770,8 @@ EnvironmentCache.prototype = {
   async _updateServicesInfo() {
     let syncEnabled = false;
     let accountEnabled = false;
-    let weaveService = Cc["@mozilla.org/weave/service;1"].getService()
-      .wrappedJSObject;
+    let weaveService =
+      Cc["@mozilla.org/weave/service;1"].getService().wrappedJSObject;
     syncEnabled = weaveService && weaveService.enabled;
     if (syncEnabled) {
       // All sync users are account users, definitely.
@@ -1988,6 +1998,7 @@ EnvironmentCache.prototype = {
       ContentBackend: getGfxField("ContentBackend", null),
       Headless: getGfxField("isHeadless", null),
       EmbeddedInFirefoxReality: getGfxField("EmbeddedInFirefoxReality", null),
+      TargetFrameRate: getGfxField("TargetFrameRate", null),
       // The following line is disabled due to main thread jank and will be enabled
       // again as part of bug 1154500.
       // DWriteVersion: getGfxField("DWriteVersion", null),

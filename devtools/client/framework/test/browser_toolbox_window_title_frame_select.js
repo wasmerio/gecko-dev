@@ -14,7 +14,6 @@ const URL =
   URL_ROOT_SSL + "browser_toolbox_window_title_frame_select_page.html";
 const IFRAME_URL =
   URL_ROOT_SSL + "browser_toolbox_window_title_changes_page.html";
-const { LocalizationHelper } = require("resource://devtools/shared/l10n.js");
 const L10N = new LocalizationHelper(
   "devtools/client/locales/toolbox.properties"
 );
@@ -33,7 +32,7 @@ function waitForTitleChange(toolbox) {
   });
 }
 
-add_task(async function() {
+add_task(async function () {
   Services.prefs.setBoolPref("devtools.command-button-frames.enabled", true);
 
   await addTab(URL);
@@ -96,17 +95,16 @@ add_task(async function() {
 
   // Listen to will-navigate to check if the view is empty
   const { resourceCommand } = toolbox.commands;
-  const {
-    onResource: willNavigate,
-  } = await resourceCommand.waitForNextResource(
-    resourceCommand.TYPES.DOCUMENT_EVENT,
-    {
-      ignoreExistingResources: true,
-      predicate(resource) {
-        return resource.name == "will-navigate";
-      },
-    }
-  );
+  const { onResource: willNavigate } =
+    await resourceCommand.waitForNextResource(
+      resourceCommand.TYPES.DOCUMENT_EVENT,
+      {
+        ignoreExistingResources: true,
+        predicate(resource) {
+          return resource.name == "will-navigate";
+        },
+      }
+    );
 
   // Only select the iframe after we are able to select an element from the top
   // level document.

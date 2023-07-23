@@ -18,11 +18,10 @@ const TELEMETRY_SUBSESSION_TOPIC = "internal-telemetry-after-subsession-split";
 
 const RESTORE_ON_DEMAND_PREF = "browser.sessionstore.restore_on-demand";
 
-ChromeUtils.defineModuleGetter(
-  this,
-  "MINIMUM_TAB_COUNT_INTERVAL_MS",
-  "resource:///modules/BrowserUsageTelemetry.jsm"
-);
+ChromeUtils.defineESModuleGetters(this, {
+  MINIMUM_TAB_COUNT_INTERVAL_MS:
+    "resource:///modules/BrowserUsageTelemetry.sys.mjs",
+});
 
 const { ObjectUtils } = ChromeUtils.import(
   "resource://gre/modules/ObjectUtils.jsm"
@@ -492,9 +491,8 @@ add_task(async function test_loadedTabsHistogram() {
 
   resetTimestamps();
   const tabCount = TelemetryTestUtils.getAndClearHistogram("TAB_COUNT");
-  const loadedTabCount = TelemetryTestUtils.getAndClearHistogram(
-    "LOADED_TAB_COUNT"
-  );
+  const loadedTabCount =
+    TelemetryTestUtils.getAndClearHistogram("LOADED_TAB_COUNT");
 
   checkTabCountHistogram(tabCount.snapshot(), {}, "TAB_COUNT - initial count");
   checkTabCountHistogram(

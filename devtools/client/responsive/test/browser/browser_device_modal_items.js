@@ -10,14 +10,13 @@ const {
   parseUserAgent,
 } = require("resource://devtools/client/responsive/utils/ua.js");
 
-const { LocalizationHelper } = require("resource://devtools/shared/l10n.js");
 const L10N = new LocalizationHelper(
   "devtools/client/locales/device.properties",
   true
 );
 addRDMTask(
   TEST_URL,
-  async function({ ui }) {
+  async function ({ ui }) {
     const { toolWindow } = ui;
     const { store, document } = toolWindow;
 

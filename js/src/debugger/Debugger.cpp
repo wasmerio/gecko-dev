@@ -370,7 +370,7 @@ bool js::ParseEvalOptions(JSContext* cx, HandleValue value,
     if (!url_str) {
       return false;
     }
-    UniqueChars url_bytes = JS_EncodeStringToLatin1(cx, url_str);
+    UniqueChars url_bytes = JS_EncodeStringToUTF8(cx, url_str);
     if (!url_bytes) {
       return false;
     }
@@ -2439,7 +2439,8 @@ static bool RememberSourceURL(JSContext* cx, HandleScript script) {
     return true;
   }
 
-  RootedString filenameString(cx, JS_AtomizeString(cx, filename));
+  RootedString filenameString(cx,
+                              AtomizeUTF8Chars(cx, filename, strlen(filename)));
   if (!filenameString) {
     return false;
   }
@@ -4143,6 +4144,8 @@ struct MOZ_STACK_CLASS Debugger::CallData {
   bool adoptSource();
   bool enableAsyncStack();
   bool disableAsyncStack();
+  bool enableUnlimitedStacksCapturing();
+  bool disableUnlimitedStacksCapturing();
 
   using Method = bool (CallData::*)();
 
@@ -5422,7 +5425,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery : public Debugger::QueryBase {
     // Compute urlCString and displayURLChars, if a url or displayURL was
     // given respectively.
     if (url.isString()) {
-      urlCString = JS_EncodeStringToLatin1(cx, url.toString());
+      Rooted<JSString*> str(cx, url.toString());
+      urlCString = JS_EncodeStringToUTF8(cx, str);
       if (!urlCString) {
         return false;
       }
@@ -6137,8 +6141,7 @@ bool Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   frontend::Parser<frontend::FullParseHandler, char16_t> parser(
-      &fc, cx->stackLimitForCurrentPrincipal(), options, chars.twoByteChars(),
-      length,
+      &fc, options, chars.twoByteChars(), length,
       /* foldConstants = */ true, compilationState,
       /* syntaxParser = */ nullptr);
   if (!parser.checkOptions() || !parser.parse()) {
@@ -6330,6 +6333,36 @@ bool Debugger::CallData::disableAsyncStack() {
   return true;
 }
 
+bool Debugger::CallData::enableUnlimitedStacksCapturing() {
+  if (!args.requireAtLeast(cx, "Debugger.enableUnlimitedStacksCapturing", 1)) {
+    return false;
+  }
+  Rooted<GlobalObject*> global(cx, dbg->unwrapDebuggeeArgument(cx, args[0]));
+  if (!global) {
+    return false;
+  }
+
+  global->realm()->isUnlimitedStacksCapturingEnabled = true;
+
+  args.rval().setUndefined();
+  return true;
+}
+
+bool Debugger::CallData::disableUnlimitedStacksCapturing() {
+  if (!args.requireAtLeast(cx, "Debugger.disableUnlimitedStacksCapturing", 1)) {
+    return false;
+  }
+  Rooted<GlobalObject*> global(cx, dbg->unwrapDebuggeeArgument(cx, args[0]));
+  if (!global) {
+    return false;
+  }
+
+  global->realm()->isUnlimitedStacksCapturingEnabled = false;
+
+  args.rval().setUndefined();
+  return true;
+}
+
 const JSPropertySpec Debugger::properties[] = {
     JS_DEBUG_PSGS("onDebuggerStatement", getOnDebuggerStatement,
                   setOnDebuggerStatement),
@@ -6374,6 +6407,10 @@ const JSFunctionSpec Debugger::methods[] = {
     JS_DEBUG_FN("adoptSource", adoptSource, 1),
     JS_DEBUG_FN("enableAsyncStack", enableAsyncStack, 1),
     JS_DEBUG_FN("disableAsyncStack", disableAsyncStack, 1),
+    JS_DEBUG_FN("enableUnlimitedStacksCapturing",
+                enableUnlimitedStacksCapturing, 1),
+    JS_DEBUG_FN("disableUnlimitedStacksCapturing",
+                disableUnlimitedStacksCapturing, 1),
     JS_FS_END};
 
 const JSFunctionSpec Debugger::static_methods[]{

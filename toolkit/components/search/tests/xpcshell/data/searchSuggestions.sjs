@@ -4,7 +4,9 @@
 let { setTimeout } = ChromeUtils.importESModule(
   "resource://gre/modules/Timer.sys.mjs"
 );
-let { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+let { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 
 Cu.importGlobalProperties(["TextEncoder"]);
 
@@ -173,7 +175,7 @@ function handleRequest(request, response) {
 
 function parseQueryString(queryString) {
   let query = {};
-  queryString.split("&").forEach(function(val) {
+  queryString.split("&").forEach(function (val) {
     let [name, value] = val.split("=");
     query[name] = decodeURIComponent(value).replace(/[+]/g, " ");
   });

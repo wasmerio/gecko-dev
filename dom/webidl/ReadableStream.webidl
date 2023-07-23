@@ -12,6 +12,9 @@ interface ReadableStream {
   [Throws]
   constructor(optional object underlyingSource, optional QueuingStrategy strategy = {});
 
+  [Pref="dom.streams.from.enabled", Throws]
+  static ReadableStream from(any asyncIterable);
+
   readonly attribute boolean locked;
 
   [NewObject]
@@ -20,10 +23,10 @@ interface ReadableStream {
   [Throws]
   ReadableStreamReader getReader(optional ReadableStreamGetReaderOptions options = {});
 
-  [Throws]
+  [Pref="dom.streams.transform_streams.enabled", Throws]
   ReadableStream pipeThrough(ReadableWritablePair transform, optional StreamPipeOptions options = {});
 
-  [NewObject]
+  [Pref="dom.streams.pipeTo.enabled", NewObject]
   Promise<undefined> pipeTo(WritableStream destination, optional StreamPipeOptions options = {});
 
   [Throws]

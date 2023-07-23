@@ -8,7 +8,7 @@ const { UrlbarSearchUtils } = ChromeUtils.importESModule(
 
 let baconEngineExtension;
 
-add_task(async function() {
+add_task(async function () {
   await UrlbarSearchUtils.init();
   // Tell the search service we are running in the US.  This also has the
   // desired side-effect of preventing our geoip lookup.
@@ -64,12 +64,12 @@ add_task(async function onlyEnabled_option_nomatch() {
   let engine = await Services.search.getDefault();
   let domain = engine.searchUrlDomain;
   let token = domain.substr(0, 1);
-  Services.prefs.setCharPref("browser.search.hiddenOneOffs", engine.name);
+  engine.hideOneOffButton = true;
   let matchedEngines = await UrlbarSearchUtils.enginesForDomainPrefix(token, {
     onlyEnabled: true,
   });
   Assert.notEqual(matchedEngines[0].searchUrlDomain, domain);
-  Services.prefs.clearUserPref("browser.search.hiddenOneOffs");
+  engine.hideOneOffButton = false;
   matchedEngines = await UrlbarSearchUtils.enginesForDomainPrefix(token, {
     onlyEnabled: true,
   });

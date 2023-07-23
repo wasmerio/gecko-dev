@@ -11,7 +11,15 @@ ChromeUtils.defineESModuleGetters(this, {
   UrlbarProviderWeather: "resource:///modules/UrlbarProviderWeather.sys.mjs",
 });
 
-add_setup(async function() {
+add_setup(async function () {
+  await QuickSuggestTestUtils.ensureQuickSuggestInit({
+    remoteSettingsResults: [
+      {
+        type: "weather",
+        weather: MerinoTestUtils.WEATHER_RS_DATA,
+      },
+    ],
+  });
   await MerinoTestUtils.initWeather();
 });
 
@@ -47,15 +55,20 @@ add_task(async function test_weather_result_selection() {
   await PlacesUtils.history.clear();
 });
 
-// Clicks the "Show less frequently" result menu command until the min keyword
-// length cap is reached.
-add_task(async function showLessFrequentlyCapReached() {
+// Does a search, clicks the "Show less frequently" result menu command, and
+// repeats both steps until the min keyword length cap is reached.
+add_task(async function showLessFrequentlyCapReached_manySearches() {
   // Set up a min keyword length and cap.
-  QuickSuggest.weather._test_setRsData({
-    keywords: ["weather"],
-    min_keyword_length: 3,
-    min_keyword_length_cap: 4,
-  });
+  await QuickSuggestTestUtils.setRemoteSettingsResults([
+    {
+      type: "weather",
+      weather: {
+        keywords: ["weather"],
+        min_keyword_length: 3,
+        min_keyword_length_cap: 4,
+      },
+    },
+  ]);
 
   // Trigger the suggestion.
   await UrlbarTestUtils.promiseAutocompleteResultPopup({
@@ -133,7 +146,85 @@ add_task(async function showLessFrequentlyCapReached() {
   gURLBar.view.resultMenu.hidePopup(true);
 
   await UrlbarTestUtils.promisePopupClose(window);
-  QuickSuggest.weather._test_setRsData(MerinoTestUtils.WEATHER_RS_DATA);
+  await QuickSuggestTestUtils.setRemoteSettingsResults([
+    {
+      type: "weather",
+      weather: MerinoTestUtils.WEATHER_RS_DATA,
+    },
+  ]);
+  UrlbarPrefs.clear("weather.minKeywordLength");
+});
+
+// Repeatedly clicks the "Show less frequently" result menu command after doing
+// a single search until the min keyword length cap is reached.
+add_task(async function showLessFrequentlyCapReached_oneSearch() {
+  // Set up a min keyword length and cap.
+  await QuickSuggestTestUtils.setRemoteSettingsResults([
+    {
+      type: "weather",
+      weather: {
+        keywords: ["weather"],
+        min_keyword_length: 3,
+        min_keyword_length_cap: 6,
+      },
+    },
+  ]);
+
+  // Trigger the suggestion.
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: "wea",
+  });
+
+  let resultIndex = 1;
+  let details = await UrlbarTestUtils.getDetailsOfResultAt(window, resultIndex);
+  Assert.equal(
+    details.result.providerName,
+    UrlbarProviderWeather.name,
+    "Weather suggestion should be present at expected index after 'wea' search"
+  );
+
+  let command = "show_less_frequently";
+
+  for (let i = 0; i < 3; i++) {
+    await UrlbarTestUtils.openResultMenuAndClickItem(window, command, {
+      resultIndex,
+      openByMouse: true,
+    });
+
+    Assert.ok(
+      gURLBar.view.isOpen,
+      "The view should remain open clicking the command"
+    );
+    Assert.ok(
+      details.element.row.hasAttribute("feedback-acknowledgment"),
+      "Row should have feedback acknowledgment after clicking command"
+    );
+    Assert.equal(
+      UrlbarPrefs.get("weather.minKeywordLength"),
+      4 + i,
+      "weather.minKeywordLength should be incremented once"
+    );
+  }
+
+  let menuitem = await UrlbarTestUtils.openResultMenuAndGetItem({
+    window,
+    command,
+    resultIndex,
+  });
+  Assert.ok(
+    !menuitem,
+    "The menuitem should not exist after the cap is reached"
+  );
+
+  gURLBar.view.resultMenu.hidePopup(true);
+  await UrlbarTestUtils.promisePopupClose(window);
+  await QuickSuggestTestUtils.setRemoteSettingsResults([
+    {
+      type: "weather",
+      weather: MerinoTestUtils.WEATHER_RS_DATA,
+    },
+  ]);
   UrlbarPrefs.clear("weather.minKeywordLength");
 });
 

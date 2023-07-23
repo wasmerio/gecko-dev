@@ -7,8 +7,11 @@ import {
   getPaneCollapse,
   getQuickOpenEnabled,
   getSource,
-  getSourceContent,
-  getMainThread,
+  getSourceTextContent,
+  getIgnoreListSourceUrls,
+  getSourceByURL,
+  getBreakpointsForSource,
+  getContext,
 } from "../selectors";
 import { selectSource } from "../actions/sources/select";
 import {
@@ -16,8 +19,11 @@ import {
   getLocationsInViewport,
   updateDocuments,
 } from "../utils/editor";
+import { blackboxSourceActorsForSource } from "./sources/blackbox";
+import { toggleBreakpoints } from "./breakpoints";
 import { copyToTheClipboard } from "../utils/clipboard";
 import { isFulfilled } from "../utils/async-value";
+import { primaryPaneTabs } from "../constants";
 
 export function setPrimaryPaneTab(tabName) {
   return { type: "SET_PRIMARY_PANE_TAB", tabName };
@@ -39,6 +45,18 @@ export function setActiveSearch(activeSearch) {
 
     if (getQuickOpenEnabled(getState())) {
       dispatch({ type: "CLOSE_QUICK_OPEN" });
+    }
+
+    // Open start panel if it was collapsed so the project search UI is visible
+    if (
+      activeSearch === primaryPaneTabs.PROJECT_SEARCH &&
+      getPaneCollapse(getState(), "start")
+    ) {
+      dispatch({
+        type: "TOGGLE_PANE",
+        position: "start",
+        paneCollapsed: false,
+      });
     }
 
     dispatch({
@@ -114,6 +132,15 @@ export function togglePaneCollapse(position, paneCollapsed) {
       return;
     }
 
+    // Set active search to null when closing start panel if project search was active
+    if (
+      position === "start" &&
+      paneCollapsed &&
+      getActiveSearch(getState()) === primaryPaneTabs.PROJECT_SEARCH
+    ) {
+      dispatch(closeActiveSearch());
+    }
+
     dispatch({
       type: "TOGGLE_PANE",
       position,
@@ -171,35 +198,6 @@ export function closeConditionalPanel() {
   };
 }
 
-export function clearProjectDirectoryRoot(cx) {
-  return {
-    type: "SET_PROJECT_DIRECTORY_ROOT",
-    cx,
-    url: "",
-    name: "",
-  };
-}
-
-export function setProjectDirectoryRoot(cx, newRoot, newName) {
-  return ({ dispatch, getState }) => {
-    // If the new project root is against the top level thread,
-    // replace its thread ID with "top-level", so that later,
-    // getDirectoryForUniquePath could match the project root,
-    // even after a page reload where the new top level thread actor ID
-    // will be different.
-    const mainThread = getMainThread(getState());
-    if (mainThread && newRoot.startsWith(mainThread.actor)) {
-      newRoot = newRoot.replace(mainThread.actor, "top-level");
-    }
-    dispatch({
-      type: "SET_PROJECT_DIRECTORY_ROOT",
-      cx,
-      url: newRoot,
-      name: newName,
-    });
-  };
-}
-
 export function updateViewport() {
   return {
     type: "SET_VIEWPORT",
@@ -221,7 +219,7 @@ export function setSearchOptions(searchKey, searchOptions) {
 
 export function copyToClipboard(location) {
   return ({ dispatch, getState }) => {
-    const content = getSourceContent(getState(), location);
+    const content = getSourceTextContent(getState(), location);
     if (content && isFulfilled(content) && content.value.type === "text") {
       copyToTheClipboard(content.value.value);
     }
@@ -240,5 +238,25 @@ export function setJavascriptTracingLogMethod(value) {
 export function setHideOrShowIgnoredSources(shouldHide) {
   return ({ dispatch, getState }) => {
     dispatch({ type: "HIDE_IGNORED_SOURCES", shouldHide });
+  };
+}
+
+export function toggleSourceMapIgnoreList(shouldEnable) {
+  return async thunkArgs => {
+    const { dispatch, getState } = thunkArgs;
+    const cx = getContext(getState());
+    const ignoreListSourceUrls = getIgnoreListSourceUrls(getState());
+    // Blackbox the source actors on the server
+    for (const url of ignoreListSourceUrls) {
+      const source = getSourceByURL(getState(), url);
+      await blackboxSourceActorsForSource(thunkArgs, source, shouldEnable);
+      // Disable breakpoints in sources on the ignore list
+      const breakpoints = getBreakpointsForSource(getState(), source.id);
+      await dispatch(toggleBreakpoints(cx, shouldEnable, breakpoints));
+    }
+    await dispatch({
+      type: "ENABLE_SOURCEMAP_IGNORELIST",
+      shouldEnable,
+    });
   };
 }

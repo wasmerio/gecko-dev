@@ -12,14 +12,10 @@
 
 ChromeUtils.defineESModuleGetters(this, {
   AboutReaderParent: "resource:///actors/AboutReaderParent.sys.mjs",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   PromiseUtils: "resource://gre/modules/PromiseUtils.sys.mjs",
 });
-ChromeUtils.defineModuleGetter(
-  this,
-  "BrowserWindowTracker",
-  "resource:///modules/BrowserWindowTracker.jsm"
-);
 
 var { ExtensionError } = ExtensionUtils;
 
@@ -751,6 +747,10 @@ class Tab extends TabBase {
     return this.nativeTab.soundPlaying;
   }
 
+  get autoDiscardable() {
+    return !this.nativeTab.undiscardable;
+  }
+
   get browser() {
     return this.nativeTab.linkedBrowser;
   }
@@ -1014,7 +1014,7 @@ class Window extends WindowBase {
   async setState(state) {
     let { window } = this;
 
-    const expectedState = (function() {
+    const expectedState = (function () {
       switch (state) {
         case "maximized":
           return window.STATE_MAXIMIZED;
@@ -1080,7 +1080,7 @@ class Window extends WindowBase {
 
       let onSizeModeChange;
       const promiseExpectedSizeMode = new Promise(resolve => {
-        onSizeModeChange = function() {
+        onSizeModeChange = function () {
           if (window.windowState == expectedState) {
             resolve();
           }

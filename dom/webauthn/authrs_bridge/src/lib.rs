@@ -44,6 +44,17 @@ fn make_prompt(action: &str, tid: u64, origin: &str, browsing_context_id: u64) -
     )
 }
 
+fn make_uv_invalid_error_prompt(
+    tid: u64,
+    origin: &str,
+    browsing_context_id: u64,
+    retries: i64,
+) -> String {
+    format!(
+        r#"{{"is_ctap2":true,"action":"uv-invalid","tid":{tid},"origin":"{origin}","browsingContextId":{browsing_context_id},"retriesLeft":{retries}}}"#,
+    )
+}
+
 fn make_pin_required_prompt(
     tid: u64,
     origin: &str,
@@ -357,8 +368,23 @@ fn status_callback(
                 let notification_str = make_prompt("pin-not-set", tid, origin, browsing_context_id);
                 controller.send_prompt(tid, &notification_str);
             }
-            Ok(StatusUpdate::PinUvError(e)) => {
-                warn!("Unexpected error: {:?}", e)
+            Ok(StatusUpdate::PinUvError(StatusPinUv::InvalidUv(attempts))) => {
+                let notification_str = make_uv_invalid_error_prompt(
+                    tid,
+                    origin,
+                    browsing_context_id,
+                    attempts.map_or(-1, |x| x as i64),
+                );
+                controller.send_prompt(tid, &notification_str);
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::UvBlocked)) => {
+                let notification_str = make_prompt("uv-blocked", tid, origin, browsing_context_id);
+                controller.send_prompt(tid, &notification_str);
+            }
+            Ok(StatusUpdate::PinUvError(StatusPinUv::PinIsTooShort))
+            | Ok(StatusUpdate::PinUvError(StatusPinUv::PinIsTooLong(..))) => {
+                // These should never happen.
+                warn!("STATUS: Got unexpected StatusPinUv-error.");
             }
             Ok(StatusUpdate::InteractiveManagement((_, dev_info, auth_info))) => {
                 debug!(
@@ -690,6 +716,12 @@ impl AuthrsTransport {
                 let _ = controller.finish_sign(tid, result);
             }));
 
+        // Bug 1834771 - Pre-filtering allowlists broke AppID support. As a temporary
+        // workaround, we will fallback to CTAP1 when the request includes the AppID
+        // extension and the allowlist is non-empty.
+        let use_ctap1_fallback = static_prefs::pref!("security.webauthn.ctap2") == false
+            || (alternate_rp_id.is_some() && !allow_list.is_empty());
+
         let info = SignArgs {
             client_data_hash: client_data_hash_arr,
             relying_party_id: relying_party_id.to_string(),
@@ -700,7 +732,7 @@ impl AuthrsTransport {
             extensions: Default::default(),
             pin: None,
             alternate_rp_id,
-            use_ctap1_fallback: static_prefs::pref!("security.webauthn.ctap2") == false,
+            use_ctap1_fallback,
         };
 
         self.auth_service

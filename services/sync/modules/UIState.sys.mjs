@@ -185,7 +185,7 @@ const UIStateInternal = {
       // The most likely scenario is a user logged out, so reflect that.
       // Bug 995134 calls for better errors so we could retry if we were
       // sure this was the failure reason.
-      console.error("Error updating FxA account info: " + e);
+      console.error("Error updating FxA account info:", e);
       return null;
     }
   },
@@ -212,8 +212,9 @@ const UIStateInternal = {
 
     // Referencing Weave.Service will implicitly initialize sync, and we don't
     // want to force that - so first check if it is ready.
-    let service = Cc["@mozilla.org/weave/service;1"].getService(Ci.nsISupports)
-      .wrappedJSObject;
+    let service = Cc["@mozilla.org/weave/service;1"].getService(
+      Ci.nsISupports
+    ).wrappedJSObject;
     if (!service.ready) {
       return false;
     }

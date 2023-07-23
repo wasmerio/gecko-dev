@@ -17,14 +17,9 @@ const { AppConstants } = ChromeUtils.importESModule(
 ChromeUtils.defineESModuleGetters(this, {
   DownloadUtils: "resource://gre/modules/DownloadUtils.sys.mjs",
   PlacesDBUtils: "resource://gre/modules/PlacesDBUtils.sys.mjs",
+  PluralForm: "resource://gre/modules/PluralForm.sys.mjs",
   ProcessType: "resource://gre/modules/ProcessType.sys.mjs",
 });
-
-ChromeUtils.defineModuleGetter(
-  this,
-  "PluralForm",
-  "resource://gre/modules/PluralForm.jsm"
-);
 
 window.addEventListener("load", function onload(event) {
   try {
@@ -59,7 +54,7 @@ window.addEventListener("load", function onload(event) {
 });
 
 function prefsTable(data) {
-  return sortedArrayFromObject(data).map(function([name, value]) {
+  return sortedArrayFromObject(data).map(function ([name, value]) {
     return $.new("tr", [
       $.new("td", name, "pref-name"),
       // Very long preference values can cause users problems when they
@@ -276,7 +271,7 @@ var snapshotFormatters = {
     let dateNow = new Date();
     $.append(
       $("crashes-tbody"),
-      data.submitted.map(function(crash) {
+      data.submitted.map(function (crash) {
         let date = new Date(crash.date);
         let timePassed = dateNow - date;
         let formattedDateStrId;
@@ -310,7 +305,7 @@ var snapshotFormatters = {
   addons(data) {
     $.append(
       $("addons-tbody"),
-      data.map(function(addon) {
+      data.map(function (addon) {
         return $.new("tr", [
           $.new("td", addon.name),
           $.new("td", addon.type),
@@ -337,7 +332,7 @@ var snapshotFormatters = {
   features(data) {
     $.append(
       $("features-tbody"),
-      data.map(function(feature) {
+      data.map(function (feature) {
         return $.new("tr", [
           $.new("td", feature.name),
           $.new("td", feature.version),
@@ -360,9 +355,8 @@ var snapshotFormatters = {
       (a, b) => a + b,
       0
     );
-    document.querySelector(
-      "#remoteprocesses-row a"
-    ).textContent = remoteProcessesCount;
+    document.querySelector("#remoteprocesses-row a").textContent =
+      remoteProcessesCount;
 
     // Display the regular "web" process type first in the list,
     // and with special formatting.
@@ -397,7 +391,7 @@ var snapshotFormatters = {
 
     $.append(
       $("experimental-features-tbody"),
-      data.map(function([title, pref, value]) {
+      data.map(function ([title, pref, value]) {
         return $.new("tr", [
           $.new("td", `${title} (${pref})`, "pref-name"),
           $.new("td", value, "pref-value"),
@@ -436,7 +430,7 @@ var snapshotFormatters = {
     const statsBody = $("place-database-stats-tbody");
     $.append(
       statsBody,
-      data.map(function(entry) {
+      data.map(function (entry) {
         return $.new("tr", [
           $.new("td", entry.entity),
           $.new("td", entry.count),
@@ -448,15 +442,24 @@ var snapshotFormatters = {
       })
     );
     statsBody.style.display = "none";
-    $("place-database-stats-toggle").addEventListener("click", function(event) {
-      if (statsBody.style.display === "none") {
-        document.l10n.setAttributes(event.target, "place-database-stats-hide");
-        statsBody.style.display = "";
-      } else {
-        document.l10n.setAttributes(event.target, "place-database-stats-show");
-        statsBody.style.display = "none";
+    $("place-database-stats-toggle").addEventListener(
+      "click",
+      function (event) {
+        if (statsBody.style.display === "none") {
+          document.l10n.setAttributes(
+            event.target,
+            "place-database-stats-hide"
+          );
+          statsBody.style.display = "";
+        } else {
+          document.l10n.setAttributes(
+            event.target,
+            "place-database-stats-show"
+          );
+          statsBody.style.display = "none";
+        }
       }
-    });
+    );
   },
 
   printingPreferences(data) {
@@ -467,7 +470,7 @@ var snapshotFormatters = {
     $.append(tbody, prefsTable(data));
     $("support-printing-clear-settings-button").addEventListener(
       "click",
-      function() {
+      function () {
         for (let name in data) {
           Services.prefs.clearUserPref(name);
         }
@@ -490,7 +493,7 @@ var snapshotFormatters = {
 
     // Read APZ info out of data.info, stripping it out in the process.
     let apzInfo = [];
-    let formatApzInfo = function(info) {
+    let formatApzInfo = function (info) {
       let out = [];
       for (let type of [
         "Wheel",
@@ -550,7 +553,7 @@ var snapshotFormatters = {
     if ("info" in data) {
       apzInfo = formatApzInfo(data.info);
 
-      let trs = sortedArrayFromObject(data.info).map(function([prop, val]) {
+      let trs = sortedArrayFromObject(data.info).map(function ([prop, val]) {
         let td = $.new("td", String(val));
         td.style["word-break"] = "break-all";
         return $.new("tr", [$.new("th", prop, "column"), td]);
@@ -568,7 +571,7 @@ var snapshotFormatters = {
       if (AppConstants.NIGHTLY_BUILD || AppConstants.MOZ_DEV_EDITION) {
         gpuProcessKillButton = $.new("button");
 
-        gpuProcessKillButton.addEventListener("click", function() {
+        gpuProcessKillButton.addEventListener("click", function () {
           windowUtils.terminateGPUProcess();
         });
 
@@ -590,7 +593,7 @@ var snapshotFormatters = {
     ) {
       let gpuDeviceResetButton = $.new("button");
 
-      gpuDeviceResetButton.addEventListener("click", function() {
+      gpuDeviceResetButton.addEventListener("click", function () {
         windowUtils.triggerDeviceReset();
       });
 
@@ -611,7 +614,7 @@ var snapshotFormatters = {
           let assembled = assembleFromGraphicsFailure(i, data);
           combined.push(assembled);
         }
-        combined.sort(function(a, b) {
+        combined.sort(function (a, b) {
           if (a.index < b.index) {
             return -1;
           }
@@ -622,7 +625,7 @@ var snapshotFormatters = {
         });
         $.append(
           $("graphics-failures-tbody"),
-          combined.map(function(val) {
+          combined.map(function (val) {
             return $.new("tr", [
               $.new("th", val.header, "column"),
               $.new("td", val.message),
@@ -636,7 +639,7 @@ var snapshotFormatters = {
             $.new("th", "LogFailure", "column"),
             $.new(
               "td",
-              data.failures.map(function(val) {
+              data.failures.map(function (val) {
                 return $.new("p", val);
               })
             ),
@@ -886,7 +889,7 @@ var snapshotFormatters = {
     if (crashGuards.length) {
       for (let guard of crashGuards) {
         let resetButton = $.new("button");
-        let onClickReset = function() {
+        let onClickReset = function () {
           Services.prefs.setIntPref(guard.prefName, 0);
           resetButton.removeEventListener("click", onClickReset);
           resetButton.disabled = true;
@@ -909,7 +912,7 @@ var snapshotFormatters = {
     }
   },
 
-  media(data) {
+  async media(data) {
     function insertBasicInfo(key, value) {
       function createRow(key, value) {
         let th = $.new("th", null, "column");
@@ -1022,7 +1025,7 @@ var snapshotFormatters = {
       }
       let button = $("enumerate-database-button");
       if (button) {
-        button.addEventListener("click", function(event) {
+        button.addEventListener("click", function (event) {
           let { KeyValueService } = ChromeUtils.importESModule(
             "resource://gre/modules/kvstore.sys.mjs"
           );
@@ -1106,9 +1109,95 @@ var snapshotFormatters = {
     // Media Capabilitites
     insertEnumerateDatabase();
 
-    // Codec decode/encode support information (inc. HW accel)
-    if (["win", "macosx", "linux"].includes(AppConstants.platform)) {
-      insertBasicInfo("media-codec-support-info", data.codecSupportInfo);
+    // Create codec support matrix if possible
+    if (data.codecSupportInfo.length) {
+      const [
+        supportText,
+        unsupportedText,
+        codecNameHeaderText,
+        codecSWDecodeText,
+        codecHWDecodeText,
+      ] = await document.l10n.formatValues([
+        "media-codec-support-supported",
+        "media-codec-support-unsupported",
+        "media-codec-support-codec-name",
+        "media-codec-support-sw-decoding",
+        "media-codec-support-hw-decoding",
+      ]);
+
+      function formatCodecRowHeader(a, b, c) {
+        let h1 = $.new("th", a);
+        let h2 = $.new("th", b);
+        let h3 = $.new("th", c);
+        h1.classList.add("codec-table-name");
+        h2.classList.add("codec-table-sw");
+        h3.classList.add("codec-table-hw");
+        return $.new("tr", [h1, h2, h3]);
+      }
+
+      function formatCodecRow(codec, sw, hw) {
+        let swCell = $.new("td", sw ? supportText : unsupportedText);
+        let hwCell = $.new("td", hw ? supportText : unsupportedText);
+        if (sw) {
+          swCell.classList.add("supported");
+        } else {
+          swCell.classList.add("unsupported");
+        }
+        if (hw) {
+          hwCell.classList.add("supported");
+        } else {
+          hwCell.classList.add("unsupported");
+        }
+        return $.new("tr", [$.new("td", codec), swCell, hwCell]);
+      }
+
+      // Parse codec support string and create dictionary containing
+      // SW/HW support information for each codec found
+      let codecs = {};
+      for (const codec_string of data.codecSupportInfo.split("\n")) {
+        const s = codec_string.split(" ");
+        const codec_name = s[0];
+        const codec_support = s[1];
+
+        if (!(codec_name in codecs)) {
+          codecs[codec_name] = {
+            name: codec_name,
+            sw: false,
+            hw: false,
+          };
+        }
+
+        if (codec_support === "SW") {
+          codecs[codec_name].sw = true;
+        } else if (codec_support === "HW") {
+          codecs[codec_name].hw = true;
+        }
+      }
+
+      // Create row in support table for each codec
+      let codecSupportRows = [];
+      for (const c in codecs) {
+        if (!codecs.hasOwnProperty(c)) {
+          continue;
+        }
+        codecSupportRows.push(
+          formatCodecRow(codecs[c].name, codecs[c].sw, codecs[c].hw)
+        );
+      }
+
+      let codecSupportTable = $.new("table", [
+        formatCodecRowHeader(
+          codecNameHeaderText,
+          codecSWDecodeText,
+          codecHWDecodeText
+        ),
+        $.new("tbody", codecSupportRows),
+      ]);
+      codecSupportTable.id = "codec-table";
+
+      if (["win", "macosx", "linux"].includes(AppConstants.platform)) {
+        insertBasicInfo("media-codec-support-info", [codecSupportTable]);
+      }
     }
   },
 
@@ -1123,11 +1212,6 @@ var snapshotFormatters = {
   accessibility(data) {
     $("a11y-activated").textContent = data.isActive;
     $("a11y-force-disabled").textContent = data.forceDisabled || 0;
-
-    let a11yHandlerUsed = $("a11y-handler-used");
-    if (a11yHandlerUsed) {
-      a11yHandlerUsed.textContent = data.handlerUsed;
-    }
 
     let a11yInstantiator = $("a11y-instantiator");
     if (a11yInstantiator) {
@@ -1151,7 +1235,7 @@ var snapshotFormatters = {
         $.new("th", null, null, { "data-l10n-id": "loaded-lib-versions" }),
       ]),
     ];
-    sortedArrayFromObject(data).forEach(function([name, val]) {
+    sortedArrayFromObject(data).forEach(function ([name, val]) {
       trs.push(
         $.new("tr", [
           $.new("td", name),
@@ -1682,22 +1766,19 @@ function safeModeRestart() {
 function setupEventListeners() {
   let button = $("reset-box-button");
   if (button) {
-    button.addEventListener("click", function(event) {
+    button.addEventListener("click", function (event) {
       ResetProfile.openConfirmationDialog(window);
     });
   }
   button = $("clear-startup-cache-button");
   if (button) {
-    button.addEventListener("click", async function(event) {
-      const [
-        promptTitle,
-        promptBody,
-        restartButtonLabel,
-      ] = await document.l10n.formatValues([
-        { id: "startup-cache-dialog-title2" },
-        { id: "startup-cache-dialog-body2" },
-        { id: "restart-button-label" },
-      ]);
+    button.addEventListener("click", async function (event) {
+      const [promptTitle, promptBody, restartButtonLabel] =
+        await document.l10n.formatValues([
+          { id: "startup-cache-dialog-title2" },
+          { id: "startup-cache-dialog-body2" },
+          { id: "restart-button-label" },
+        ]);
       const buttonFlags =
         Services.prompt.BUTTON_POS_0 * Services.prompt.BUTTON_TITLE_IS_STRING +
         Services.prompt.BUTTON_POS_1 * Services.prompt.BUTTON_TITLE_CANCEL +
@@ -1724,7 +1805,7 @@ function setupEventListeners() {
   }
   button = $("restart-in-safe-mode-button");
   if (button) {
-    button.addEventListener("click", function(event) {
+    button.addEventListener("click", function (event) {
       if (
         Services.obs
           .enumerateObservers("restart-in-safe-mode")
@@ -1742,7 +1823,7 @@ function setupEventListeners() {
   if (AppConstants.MOZ_UPDATER) {
     button = $("update-dir-button");
     if (button) {
-      button.addEventListener("click", function(event) {
+      button.addEventListener("click", function (event) {
         // Get the update directory.
         let updateDir = Services.dirsvc.get("UpdRootD", Ci.nsIFile);
         if (!updateDir.exists()) {
@@ -1760,7 +1841,7 @@ function setupEventListeners() {
     }
     button = $("show-update-history-button");
     if (button) {
-      button.addEventListener("click", function(event) {
+      button.addEventListener("click", function (event) {
         window.browsingContext.topChromeWindow.openDialog(
           "chrome://mozapps/content/update/history.xhtml",
           "Update:History",
@@ -1771,7 +1852,7 @@ function setupEventListeners() {
   }
   button = $("verify-place-integrity-button");
   if (button) {
-    button.addEventListener("click", function(event) {
+    button.addEventListener("click", function (event) {
       PlacesDBUtils.checkAndFixDatabase().then(tasksStatusMap => {
         let logs = [];
         for (let [key, value] of tasksStatusMap) {
@@ -1786,13 +1867,13 @@ function setupEventListeners() {
     });
   }
 
-  $("copy-raw-data-to-clipboard").addEventListener("click", function(event) {
+  $("copy-raw-data-to-clipboard").addEventListener("click", function (event) {
     copyRawDataToClipboard(this);
   });
-  $("copy-to-clipboard").addEventListener("click", function(event) {
+  $("copy-to-clipboard").addEventListener("click", function (event) {
     copyContentsToClipboard();
   });
-  $("profile-dir-button").addEventListener("click", function(event) {
+  $("profile-dir-button").addEventListener("click", function (event) {
     openProfileDirectory();
   });
 }

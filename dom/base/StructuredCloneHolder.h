@@ -307,7 +307,8 @@ class StructuredCloneHolder : public StructuredCloneHolderBase {
   // serialize objects such as ImageData, CryptoKey, RTCCertificate, etc.
 
   static JSObject* ReadFullySerializableObjects(
-      JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag);
+      JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
+      bool aIsForIndexedDB);
 
   static bool WriteFullySerializableObjects(JSContext* aCx,
                                             JSStructuredCloneWriter* aWriter,
@@ -317,6 +318,9 @@ class StructuredCloneHolder : public StructuredCloneHolderBase {
   static bool ReadString(JSStructuredCloneReader* aReader, nsString& aString);
   static bool WriteString(JSStructuredCloneWriter* aWriter,
                           const nsAString& aString);
+  static bool ReadCString(JSStructuredCloneReader* aReader, nsCString& aString);
+  static bool WriteCString(JSStructuredCloneWriter* aWriter,
+                           const nsACString& aString);
 
   static const JSStructuredCloneCallbacks sCallbacks;
 

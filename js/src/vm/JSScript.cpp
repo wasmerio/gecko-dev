@@ -77,7 +77,6 @@
 #include "vm/StringType.h"    // JSString, JSAtom
 #include "vm/Time.h"          // AutoIncrementalTimer
 #include "vm/ToSource.h"      // JS::ValueToSource
-#include "vm/Warnings.h"      // js::WarnNumberLatin1
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -415,14 +414,8 @@ void js::FillImmutableFlagsFromCompileOptionsForFunction(
 
 // Check if flags matches to compile options for flags set by
 // FillImmutableFlagsFromCompileOptionsForTopLevel above.
-//
-// If isMultiDecode is true, this check minimal set of CompileOptions that is
-// shared across multiple scripts in JS::DecodeMultiStencilsOffThread.
-// Other options should be checked when getting the decoded script from the
-// cache.
 bool js::CheckCompileOptionsMatch(const ReadOnlyCompileOptions& options,
-                                  ImmutableScriptFlags flags,
-                                  bool isMultiDecode) {
+                                  ImmutableScriptFlags flags) {
   using ImmutableFlags = ImmutableScriptFlagsEnum;
 
   bool selfHosted = !!(flags & uint32_t(ImmutableFlags::SelfHosted));
@@ -435,13 +428,13 @@ bool js::CheckCompileOptionsMatch(const ReadOnlyCompileOptions& options,
   return options.selfHostingMode == selfHosted &&
          options.noScriptRval == noScriptRval &&
          options.isRunOnce == treatAsRunOnce &&
-         (isMultiDecode || (options.forceStrictMode() == forceStrict &&
-                            options.nonSyntacticScope == hasNonSyntacticScope));
+         options.forceStrictMode() == forceStrict &&
+         options.nonSyntacticScope == hasNonSyntacticScope;
 }
 
 JS_PUBLIC_API bool JS::CheckCompileOptionsMatch(
     const ReadOnlyCompileOptions& options, JSScript* script) {
-  return js::CheckCompileOptionsMatch(options, script->immutableFlags(), false);
+  return js::CheckCompileOptionsMatch(options, script->immutableFlags());
 }
 
 bool JSScript::initScriptCounts(JSContext* cx) {
@@ -1886,7 +1879,7 @@ bool ScriptSource::initFromOptions(FrontendContext* fc,
   if (options.hasIntroductionInfo) {
     MOZ_ASSERT(options.introductionType != nullptr);
     const char* filename =
-        options.filename() ? options.filename() : "<unknown>";
+        options.filename() ? options.filename().c_str() : "<unknown>";
     UniqueChars formatted = FormatIntroducedFilename(
         filename, options.introductionLineno, options.introductionType);
     if (!formatted) {
@@ -1897,13 +1890,13 @@ bool ScriptSource::initFromOptions(FrontendContext* fc,
       return false;
     }
   } else if (options.filename()) {
-    if (!setFilename(fc, options.filename())) {
+    if (!setFilename(fc, options.filename().c_str())) {
       return false;
     }
   }
 
   if (options.introducerFilename()) {
-    if (!setIntroducerFilename(fc, options.introducerFilename())) {
+    if (!setIntroducerFilename(fc, options.introducerFilename().c_str())) {
       return false;
     }
   }
@@ -3416,6 +3409,10 @@ bool JSScript::dump(JSContext* cx, JS::Handle<JSScript*> script,
     }
 
     json.endObject();
+  }
+
+  if (sp->hadOutOfMemory()) {
+    return false;
   }
 
   if (!sp->put("\n")) {

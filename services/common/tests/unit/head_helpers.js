@@ -41,7 +41,9 @@ var { getTestLogger, initTestLogging } = ChromeUtils.importESModule(
 var { MockRegistrar } = ChromeUtils.importESModule(
   "resource://testing-common/MockRegistrar.sys.mjs"
 );
-var { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+var { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 
 function do_check_empty(obj) {
   do_check_attribute_count(obj, 0);
@@ -89,7 +91,7 @@ function do_check_throws_message(aFunc, aResult) {
  * @usage _("Hello World") -> prints "Hello World"
  * @usage _(1, 2, 3) -> prints "1 2 3"
  */
-var _ = function(some, debug, text, to) {
+var _ = function (some, debug, text, to) {
   print(Array.from(arguments).join(" "));
 };
 
@@ -167,7 +169,7 @@ function writeBytesToOutputStream(outputStream, string) {
  * Ensure exceptions from inside callbacks leads to test failures.
  */
 function ensureThrows(func) {
-  return function() {
+  return function () {
     try {
       func.apply(this, arguments);
     } catch (ex) {

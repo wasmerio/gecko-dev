@@ -73,10 +73,11 @@ urlbar:
           the user. The groups may be repeated, since the list will match 1:1
           the results list, so we can link each result to a group. The possible
           group names are: `heuristic`, `adaptive_history`, `search_history`,
-          `search_suggest`, `trending_search`, `top_pick`, `top_site`,
-          `remote_tab`, `addon`, `general`, `suggest`, `about_page` and
-          `suggested_index`. If the group did not fall into any of these, this
-          will be `unknown` and a bug should be filed to investigate it.
+          `search_suggest`, `search_suggest_rich`, `trending_search`,
+          `trending_search_rich`, `top_pick`, `top_site`, `remote_tab`,
+          `addon`, `general`, `suggest`, `about_page` and `suggested_index`. If
+          the group did not fall into any of these, this will be `unknown` and
+          a bug should be filed to investigate it.
         type: string
       results:
         description: >
@@ -106,9 +107,12 @@ urlbar:
           `remote_tab`,
           `rs_adm_nonsponsored`,
           `rs_adm_sponsored`,
+          `rs_amo`,
+          `rs_pocket`,
           `search_engine`,
           `search_history`,
           `search_suggest`,
+          `search_suggest_rich`,
           `suggest_non_sponsor`,
           `suggest_sponsor`,
           `tab`,
@@ -120,6 +124,7 @@ urlbar:
           `tip_unknown`,
           `top_site`,
           `trending_search`,
+          `trending_search_rich`,
           `unit`,
           `url`,
           `weather`
@@ -220,10 +225,13 @@ urlbar:
           `remote_tab`,
           `rs_adm_nonsponsored`,
           `rs_adm_sponsored`,
+          `rs_amo`,
+          `rs_pocket`,
           `search_engine`,
           `search_history`,
           `search_shortcut_button`,
           `search_suggest`,
+          `search_suggest_rich`,
           `site_specific_contextual_search`,
           `suggest_non_sponsor`,
           `suggest_sponsor`,
@@ -236,6 +244,7 @@ urlbar:
           `tip_unknown`,
           `top_site`,
           `trending_search`,
+          `trending_search_rich`,
           `unit`,
           `url`,
           `weather`
@@ -256,10 +265,10 @@ urlbar:
           `BookmarkKeywords`, `calculator`, `UrlbarProviderContextualSearch`,
           `HeuristicFallback`, `HistoryUrlHeuristic`, `InputHistory`,
           `UrlbarProviderInterventions`, `Omnibox`, `OpenTabs`, `Places`,
-          `PreloadedSites`, `PrivateSearch`, `quickactions`,
-          `UrlbarProviderQuickSuggest`, `RemoteTabs`, `SearchSuggestions`,
-          `UrlbarProviderSearchTips`, `TabToSearch`, `TokenAliasEngines`,
-          `UrlbarProviderTopSites`, `UnitConversion` and `UnifiedComplete`.
+          `PrivateSearch`, `quickactions`, `UrlbarProviderQuickSuggest`,
+          `RemoteTabs`, `SearchSuggestions`, `UrlbarProviderSearchTips`,
+          `TabToSearch`, `TokenAliasEngines`, `UrlbarProviderTopSites`,
+          `UnitConversion` and `UnifiedComplete`.
           If engagement_type is `drop_go` or `paste_go`, this will be null
           because no results are shown. And also, if selected_result is
           `experimental_addon`, it means that the user selected a result
@@ -287,12 +296,13 @@ urlbar:
           the user. The groups may be repeated, since the list will match 1:1
           the results list, so we can link each result to a group. The possible
           group names are: `heuristic`, `adaptive_history`, `search_history`,
-          `search_suggest`, `trending_search`, `top_pick`, `top_site`,
-          `remote_tab`, `addon`, `general`, `suggest`, `about_page` and
-          `suggested_index`. If the group did not fall into any of these, this
-          will be `unknown` and a bug should be filed to investigate it. If
-          engagement_type is `drop_go` or `paste_go`, this will be empty string
-          because no results are shown.
+          `search_suggest`, `search_suggest_rich`, `trending_search`,
+          `trending_search_rich`, `top_pick`, `top_site`, `remote_tab`, 
+          `addon`, `general`, `suggest`, `about_page` and `suggested_index`. 
+          If the group did not fall into any of these, this will be `unknown`
+          and a bug should be filed to investigate it. If engagement_type is
+          `drop_go` or `paste_go`, this will be empty string because no results
+          are shown.
         type: string
       results:
         description: >
@@ -322,9 +332,12 @@ urlbar:
           `remote_tab`,
           `rs_adm_nonsponsored`,
           `rs_adm_sponsored`,
+          `rs_amo`,
+          `rs_pocket`,
           `search_engine`,
           `search_history`,
           `search_suggest`,
+          `search_suggest_rich`,
           `suggest_non_sponsor`,
           `suggest_sponsor`,
           `tab`,
@@ -336,6 +349,7 @@ urlbar:
           `tip_unknown`,
           `top_site`,
           `trending_search`,
+          `trending_search_rich`,
           `unit`,
           `url`,
           `weather`
@@ -416,10 +430,11 @@ urlbar:
           the user. The groups may be repeated, since the list will match 1:1
           the results list, so we can link each result to a group. The possible
           group names are: `heuristic`, `adaptive_history`, `search_history`,
-          `search_suggest`, `trending_search`, `top_pick`, `top_site`,
-          `remote_tab`, `addon`, `general`, `suggest`, `about_page` and
-          `suggested_index`. If the group did not fall into any of these, this
-          will be `unknown` and a bug should be filed to investigate it.
+          `search_suggest`, `search_suggest_rich`, `trending_search`,
+          `trending_search_rich`, `top_pick`, `top_site`, `remote_tab`,
+          `addon`, `general`, `suggest`, `about_page` and `suggested_index`. If
+          the group did not fall into any of these, this will be `unknown` and
+          a bug should be filed to investigate it.
         type: string
       results:
         description: >
@@ -449,9 +464,12 @@ urlbar:
           `remote_tab`,
           `rs_adm_nonsponsored`,
           `rs_adm_sponsored`,
+          `rs_amo`,
+          `rs_pocket`,
           `search_engine`,
           `search_history`,
           `search_suggest`,
+          `search_suggest_rich`,
           `suggest_non_sponsor`,
           `suggest_sponsor`,
           `tab`,
@@ -463,6 +481,7 @@ urlbar:
           `tip_unknown`,
           `top_site`,
           `trending_search`,
+          `trending_search_rich`,
           `unit`,
           `url`,
           `weather`
@@ -491,7 +510,7 @@ urlbar:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1819766
     data_reviews:
-      - ""
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1819766#c9
     data_sensitivity:
       - interaction
     notification_emails:
@@ -534,3 +553,207 @@ urlbar:
     expires: never
     send_in_pings:
       - events
+
+# Replacement for PingCentre "quicksuggest-block|impression|click" pings.
+quick_suggest:
+  ping_type:
+    type: string
+    description: >
+      The ping's type. In other situations might be designated by an event's
+      name or an interaction field. E.g. "quicksuggest-impression",
+      "quicksuggest-block", "quicksuggest-click".
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  position:
+    type: quantity
+    unit: QuickSuggest position
+    description: >
+      The position (1-based) of the QuickSuggest item being interatcted with.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  source:
+    type: string
+    description: >
+      The source of the interaction. E.g. "urlbar".
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  match_type:
+    type: string
+    description: >
+      Whether this was a best/top match or not. Either "best-match" or
+      "firefox-suggest".
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  block_id:
+    type: string
+    description: >
+      A unique identifier for the suggestion (a.k.a. a keywords block).
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  improve_suggest_experience:
+    type: boolean
+    description: >
+      Whether the "Improve Suggest Experience" checkbox is checked.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  advertiser:
+    type: string
+    description: >
+      The name of the advertiser providing the sponsored TopSite.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+      - web_activity
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  request_id:
+    type: string
+    description: >
+      A request identifier for each API request to
+      [Merino](https://mozilla-services.github.io/merino/).
+      Only present for suggestions provided by Merino.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+      - web_activity
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  is_clicked:
+    type: boolean
+    description: >
+      Whether this quicksuggest-impression ping was for an item that was
+      clicked.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  reporting_url:
+    type: url
+    description: >
+      The url to report this interaction to.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - web_activity
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - top-sites
+
+  context_id:
+    type: uuid
+    description: >
+      An identifier to identify users for Contextual Services user interaction pings.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest
+
+  iab_category:
+    type: string
+    description: >
+      The suggestion's category. Either "22 - Shopping" or "5 - Educational".
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
+    data_sensitivity:
+      - interaction
+      - web_activity
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings:
+      - quick-suggest

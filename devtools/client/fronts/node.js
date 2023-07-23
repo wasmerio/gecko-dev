@@ -469,6 +469,10 @@ class NodeFront extends FrontClassWithSpec(nodeSpec) {
     return this._form.causesOverflow;
   }
 
+  get containerType() {
+    return this._form.containerType;
+  }
+
   get isTreeDisplayed() {
     let parent = this;
     while (parent) {
@@ -611,9 +615,10 @@ class NodeFront extends FrontClassWithSpec(nodeSpec) {
     }
 
     // Get the target for this frame element
-    this._childBrowsingContextTarget = await this.targetFront.getWindowGlobalTarget(
-      this._form.browsingContextID
-    );
+    this._childBrowsingContextTarget =
+      await this.targetFront.getWindowGlobalTarget(
+        this._form.browsingContextID
+      );
 
     // Bug 1776250: When the target is destroyed, we need to easily find the
     // parent node front so that we can update its frontend container in the

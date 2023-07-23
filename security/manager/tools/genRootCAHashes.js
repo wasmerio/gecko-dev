@@ -15,7 +15,9 @@ const CertDb = Cc[nsX509CertDB].getService(Ci.nsIX509CertDB);
 const { FileUtils } = ChromeUtils.importESModule(
   "resource://gre/modules/FileUtils.sys.mjs"
 );
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 const { CommonUtils } = ChromeUtils.importESModule(
   "resource://services-common/utils.sys.mjs"
 );
@@ -140,7 +142,7 @@ function writeRootHashes(fos) {
 
     // Output the sorted gTrustAnchors
     writeString(fos, FP_PREAMBLE);
-    gTrustAnchors.roots.forEach(function(fp) {
+    gTrustAnchors.roots.forEach(function (fp) {
       let fpBytes = atob(fp.sha256Fingerprint);
 
       writeString(fos, "  {\n");
@@ -252,7 +254,7 @@ writeTrustAnchors(trustAnchorsFile);
 
 // Sort all trust anchors before writing, as AccumulateRootCA.cpp
 // will perform binary searches
-gTrustAnchors.roots.sort(function(a, b) {
+gTrustAnchors.roots.sort(function (a, b) {
   // We need to work from the binary values, not the base64 values.
   let aBin = atob(a.sha256Fingerprint);
   let bBin = atob(b.sha256Fingerprint);
@@ -267,8 +269,7 @@ gTrustAnchors.roots.sort(function(a, b) {
 });
 
 // Write the output file.
-var rootHashesFileOutputStream = FileUtils.openSafeFileOutputStream(
-  rootHashesFile
-);
+var rootHashesFileOutputStream =
+  FileUtils.openSafeFileOutputStream(rootHashesFile);
 writeRootHashes(rootHashesFileOutputStream);
 FileUtils.closeSafeFileOutputStream(rootHashesFileOutputStream);

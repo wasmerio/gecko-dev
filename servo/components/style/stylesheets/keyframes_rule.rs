@@ -23,8 +23,8 @@ use cssparser::{
     QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser, SourceLocation, Token,
 };
 use servo_arc::Arc;
-use std::fmt::{self, Write};
 use std::borrow::Cow;
+use std::fmt::{self, Write};
 use style_traits::{CssWriter, ParseError, ParsingMode, StyleParseErrorKind, ToCss};
 
 /// A [`@keyframes`][keyframes] rule.
@@ -225,7 +225,7 @@ impl Keyframe {
         let mut input = ParserInput::new(css);
         let mut input = Parser::new(&mut input);
 
-        let mut declarations = SourcePropertyDeclaration::new();
+        let mut declarations = SourcePropertyDeclaration::default();
         let mut rule_parser = KeyframeListParser {
             context: &mut context,
             shared_lock: &lock,
@@ -539,13 +539,15 @@ pub fn parse_keyframe_list<'a>(
     input: &mut Parser,
     shared_lock: &SharedRwLock,
 ) -> Vec<Arc<Locked<Keyframe>>> {
-    let mut declarations = SourcePropertyDeclaration::new();
+    let mut declarations = SourcePropertyDeclaration::default();
     let mut parser = KeyframeListParser {
         context,
         shared_lock,
         declarations: &mut declarations,
     };
-    RuleBodyParser::new(input, &mut parser).filter_map(Result::ok) .collect()
+    RuleBodyParser::new(input, &mut parser)
+        .filter_map(Result::ok)
+        .collect()
 }
 
 impl<'a, 'b, 'i> AtRuleParser<'i> for KeyframeListParser<'a, 'b> {
@@ -588,28 +590,31 @@ impl<'a, 'b, 'i> QualifiedRuleParser<'i> for KeyframeListParser<'a, 'b> {
     ) -> Result<Self::QualifiedRule, ParseError<'i>> {
         let mut block = PropertyDeclarationBlock::new();
         let declarations = &mut self.declarations;
-        self.context.nest_for_rule(CssRuleType::Keyframe, |context| {
-            let mut parser = KeyframeDeclarationParser {
-                context: &context,
-                declarations,
-            };
-            let mut iter = RuleBodyParser::new(input, &mut parser);
-            while let Some(declaration) = iter.next() {
-                match declaration {
-                    Ok(()) => {
-                        block.extend(iter.parser.declarations.drain(), Importance::Normal);
-                    },
-                    Err((error, slice)) => {
-                        iter.parser.declarations.clear();
-                        let location = error.location;
-                        let error =
-                            ContextualParseError::UnsupportedKeyframePropertyDeclaration(slice, error);
-                        context.log_css_error(location, error);
-                    },
+        self.context
+            .nest_for_rule(CssRuleType::Keyframe, |context| {
+                let mut parser = KeyframeDeclarationParser {
+                    context: &context,
+                    declarations,
+                };
+                let mut iter = RuleBodyParser::new(input, &mut parser);
+                while let Some(declaration) = iter.next() {
+                    match declaration {
+                        Ok(()) => {
+                            block.extend(iter.parser.declarations.drain(), Importance::Normal);
+                        },
+                        Err((error, slice)) => {
+                            iter.parser.declarations.clear();
+                            let location = error.location;
+                            let error =
+                                ContextualParseError::UnsupportedKeyframePropertyDeclaration(
+                                    slice, error,
+                                );
+                            context.log_css_error(location, error);
+                        },
+                    }
+                    // `parse_important` is not called here, `!important` is not allowed in keyframe blocks.
                 }
-                // `parse_important` is not called here, `!important` is not allowed in keyframe blocks.
-            }
-        });
+            });
         Ok(Arc::new(self.shared_lock.wrap(Keyframe {
             selector,
             block: Arc::new(self.shared_lock.wrap(block)),
@@ -618,9 +623,15 @@ impl<'a, 'b, 'i> QualifiedRuleParser<'i> for KeyframeListParser<'a, 'b> {
     }
 }
 
-impl<'a, 'b, 'i> RuleBodyItemParser<'i, Arc<Locked<Keyframe>>, StyleParseErrorKind<'i>> for KeyframeListParser<'a, 'b> {
-    fn parse_qualified(&self) -> bool { true }
-    fn parse_declarations(&self) -> bool { false }
+impl<'a, 'b, 'i> RuleBodyItemParser<'i, Arc<Locked<Keyframe>>, StyleParseErrorKind<'i>>
+    for KeyframeListParser<'a, 'b>
+{
+    fn parse_qualified(&self) -> bool {
+        true
+    }
+    fn parse_declarations(&self) -> bool {
+        false
+    }
 }
 
 struct KeyframeDeclarationParser<'a, 'b: 'a> {
@@ -668,7 +679,13 @@ impl<'a, 'b, 'i> DeclarationParser<'i> for KeyframeDeclarationParser<'a, 'b> {
     }
 }
 
-impl<'a, 'b, 'i> RuleBodyItemParser<'i, (), StyleParseErrorKind<'i>> for KeyframeDeclarationParser<'a, 'b> {
-    fn parse_qualified(&self) -> bool { false }
-    fn parse_declarations(&self) -> bool { true }
+impl<'a, 'b, 'i> RuleBodyItemParser<'i, (), StyleParseErrorKind<'i>>
+    for KeyframeDeclarationParser<'a, 'b>
+{
+    fn parse_qualified(&self) -> bool {
+        false
+    }
+    fn parse_declarations(&self) -> bool {
+        true
+    }
 }

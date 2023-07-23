@@ -6,14 +6,14 @@
 #ifndef LIB_EXTRAS_ENC_JXL_H_
 #define LIB_EXTRAS_ENC_JXL_H_
 
+#include <jxl/encode.h>
+#include <jxl/parallel_runner.h>
+#include <jxl/thread_parallel_runner.h>
+#include <jxl/types.h>
 #include <stdint.h>
 
 #include <vector>
 
-#include "jxl/encode.h"
-#include "jxl/parallel_runner.h"
-#include "jxl/thread_parallel_runner.h"
-#include "jxl/types.h"
 #include "lib/extras/packed_image.h"
 
 namespace jxl {
@@ -48,6 +48,7 @@ struct JXLCompressParams {
   // Upper bound on the intensity level present in the image in nits (zero means
   // that the library chooses a default).
   float intensity_target = 0;
+  int already_downsampled = 1;
   // Overrides for bitdepth, codestream level and alpha premultiply.
   size_t override_bitdepth = 0;
   int32_t codestream_level = -1;

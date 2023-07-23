@@ -13,9 +13,10 @@
 
 #include <stddef.h>  // size_t
 
-#include "js/AllocPolicy.h"     // SystemAllocPolicy, AllocFunction
-#include "js/ErrorReport.h"     // JSErrorCallback, JSErrorFormatString
-#include "js/Modules.h"         // JS::ImportAssertionVector
+#include "js/AllocPolicy.h"  // SystemAllocPolicy, AllocFunction
+#include "js/ErrorReport.h"  // JSErrorCallback, JSErrorFormatString
+#include "js/Modules.h"      // JS::ImportAssertionVector
+#include "js/Stack.h"  // JS::NativeStackSize, JS::NativeStackLimit, JS::NativeStackLimitMax
 #include "js/Vector.h"          // Vector
 #include "vm/ErrorReporting.h"  // CompileError
 #include "vm/MallocProvider.h"  // MallocProvider
@@ -44,6 +45,8 @@ struct FrontendErrors {
   bool hadErrors() const {
     return outOfMemory || overRecursed || allocationOverflow || error;
   }
+
+  void clearErrors();
 };
 
 class FrontendAllocator : public MallocProvider<FrontendAllocator> {
@@ -73,6 +76,22 @@ class FrontendContext {
 
   JS::ImportAssertionVector supportedImportAssertions_;
 
+  // Limit pointer for checking native stack consumption.
+  //
+  // The pointer is calculated based on the stack base of the current thread
+  // except for JS::NativeStackLimitMax. Once such value is set, this
+  // FrontendContext can be used only in the thread.
+  //
+  // In order to enforce this thread rule, setNativeStackLimitThread should
+  // be called when setting the value, and assertNativeStackLimitThread should
+  // be called at each entry-point that might make use of this field.
+  JS::NativeStackLimit stackLimit_ = JS::NativeStackLimitMax;
+
+#ifdef DEBUG
+  // The thread ID where the native stack limit is set.
+  mozilla::Maybe<size_t> stackLimitThreadId_;
+#endif
+
  protected:
   // (optional) Current JSContext to support main-thread-specific
   // handling for error reporting, GC, and memory allocation.
@@ -88,6 +107,9 @@ class FrontendContext {
         scriptDataTableHolder_(&js::globalSharedScriptDataTableHolder),
         supportedImportAssertions_() {}
   ~FrontendContext();
+
+  void setStackQuota(JS::NativeStackSize stackSize);
+  JS::NativeStackLimit stackLimit() const { return stackLimit_; }
 
   bool allocateOwnedPool();
 
@@ -109,6 +131,7 @@ class FrontendContext {
   //   * js::frontend::NameCollectionPool for reusing allocation
   //   * js::SharedScriptDataTableHolder for de-duplicating bytecode
   //     within given runtime
+  //   * Copy the native stack limit from the JSContext
   //
   // And also this JSContext can be retrieved by maybeCurrentJSContext below.
   void setCurrentJSContext(JSContext* cx);
@@ -160,12 +183,18 @@ class FrontendContext {
   bool hadOverRecursed() const { return errors_.overRecursed; }
   bool hadAllocationOverflow() const { return errors_.allocationOverflow; }
   bool hadErrors() const;
+  void clearErrors();
 
 #ifdef __wasi__
   void incWasiRecursionDepth();
   void decWasiRecursionDepth();
   bool checkWasiRecursionLimit();
 #endif  // __wasi__
+
+#ifdef DEBUG
+  void setNativeStackLimitThread();
+  void assertNativeStackLimitThread();
+#endif
 
  private:
   void ReportOutOfMemory();

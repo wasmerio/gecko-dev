@@ -13,7 +13,7 @@ void a11y::PlatformInit() {}
 
 void a11y::PlatformShutdown() {}
 
-void a11y::ProxyCreated(RemoteAccessible*, uint32_t) {}
+void a11y::ProxyCreated(RemoteAccessible*) {}
 
 void a11y::ProxyDestroyed(RemoteAccessible*) {}
 
@@ -21,11 +21,14 @@ void a11y::ProxyEvent(RemoteAccessible*, uint32_t) {}
 
 void a11y::ProxyStateChangeEvent(RemoteAccessible*, uint64_t, bool) {}
 
-void a11y::ProxyCaretMoveEvent(RemoteAccessible* aTarget, int32_t aOffset,
-                               bool aIsSelectionCollapsed,
-                               int32_t aGranularity) {}
+void a11y::ProxyFocusEvent(RemoteAccessible* aTarget,
+                           const LayoutDeviceIntRect& aCaretRect) {}
 
-void a11y::ProxyTextChangeEvent(RemoteAccessible*, const nsString&, int32_t,
+void a11y::ProxyCaretMoveEvent(RemoteAccessible* aTarget, int32_t aOffset,
+                               bool aIsSelectionCollapsed, int32_t aGranularity,
+                               const LayoutDeviceIntRect& aCaretRect) {}
+
+void a11y::ProxyTextChangeEvent(RemoteAccessible*, const nsAString&, int32_t,
                                 uint32_t, bool, bool) {}
 
 void a11y::ProxyShowHideEvent(RemoteAccessible*, RemoteAccessible*, bool,

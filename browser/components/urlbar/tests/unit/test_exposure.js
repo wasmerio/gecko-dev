@@ -48,6 +48,7 @@ const EXPECTED_REMOTE_SETTINGS_URLBAR_RESULT = {
     sponsoredBlockId: 1,
     sponsoredAdvertiser: "TestAdvertiser",
     isSponsored: true,
+    descriptionL10n: { id: "urlbar-result-action-sponsored" },
     helpUrl: QuickSuggest.HELP_URL,
     helpL10n: {
       id: UrlbarPrefs.get("resultMenu")
@@ -62,6 +63,7 @@ const EXPECTED_REMOTE_SETTINGS_URLBAR_RESULT = {
     },
     displayUrl: "http://test.com/q=frabbits",
     source: "remote-settings",
+    provider: "AdmWikipedia",
   },
 };
 
@@ -96,6 +98,7 @@ const EXPECTED_NON_SPONSORED_REMOTE_SETTINGS_RESULT = {
     },
     displayUrl: "http://test.com/q=frabbits",
     source: "remote-settings",
+    provider: "AdmWikipedia",
   },
 };
 
@@ -115,7 +118,12 @@ add_setup(async function test_setup() {
 
   // Set up the remote settings client with the test data.
   await QuickSuggestTestUtils.ensureQuickSuggestInit({
-    remoteSettingsResults: REMOTE_SETTINGS_RESULTS,
+    remoteSettingsResults: [
+      {
+        type: "data",
+        attachment: REMOTE_SETTINGS_RESULTS,
+      },
+    ],
   });
 });
 

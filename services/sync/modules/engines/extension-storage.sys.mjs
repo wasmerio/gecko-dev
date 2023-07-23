@@ -18,12 +18,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   Observers: "resource://services-common/observers.sys.mjs",
   SCORE_INCREMENT_MEDIUM: "resource://services-sync/constants.sys.mjs",
   Svc: "resource://services-sync/util.sys.mjs",
-});
+  extensionStorageSync: "resource://gre/modules/ExtensionStorageSync.sys.mjs",
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  extensionStorageSync: "resource://gre/modules/ExtensionStorageSync.jsm",
   extensionStorageSyncKinto:
-    "resource://gre/modules/ExtensionStorageSyncKinto.jsm",
+    "resource://gre/modules/ExtensionStorageSyncKinto.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -44,11 +42,13 @@ function getEngineEnabled() {
   // However, we also respect engine.extension-storage.force, which
   // can be set to true or false, if a power user wants to customize
   // the behavior despite the lack of UI.
-  const forced = lazy.Svc.Prefs.get(PREF_FORCE_ENABLE, undefined);
-  if (forced !== undefined) {
-    return forced;
+  if (
+    lazy.Svc.PrefBranch.getPrefType(PREF_FORCE_ENABLE) !=
+    Ci.nsIPrefBranch.PREF_INVALID
+  ) {
+    return lazy.Svc.PrefBranch.getBoolPref(PREF_FORCE_ENABLE);
   }
-  return lazy.Svc.Prefs.get("engine.addons", false);
+  return lazy.Svc.PrefBranch.getBoolPref("engine.addons", false);
 }
 
 function setEngineEnabled(enabled) {
@@ -59,8 +59,11 @@ function setEngineEnabled(enabled) {
   // preference. So if that pref exists, we set it to this value. If that pref
   // doesn't exist, we just ignore it and hope that the 'addons' engine is also
   // going to be set to the same state.
-  if (lazy.Svc.Prefs.has(PREF_FORCE_ENABLE)) {
-    lazy.Svc.Prefs.set(PREF_FORCE_ENABLE, enabled);
+  if (
+    lazy.Svc.PrefBranch.getPrefType(PREF_FORCE_ENABLE) !=
+    Ci.nsIPrefBranch.PREF_INVALID
+  ) {
+    lazy.Svc.PrefBranch.setBoolPref(PREF_FORCE_ENABLE, enabled);
   }
 }
 

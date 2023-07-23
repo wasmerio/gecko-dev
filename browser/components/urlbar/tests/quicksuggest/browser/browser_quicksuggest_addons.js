@@ -16,6 +16,7 @@ const TEST_MERINO_SUGGESTIONS = [
       amo: {
         rating: "5",
         number_of_ratings: "1234567",
+        guid: "first@addon",
       },
     },
     is_top_pick: true,
@@ -30,9 +31,11 @@ const TEST_MERINO_SUGGESTIONS = [
       amo: {
         rating: "4.5",
         number_of_ratings: "123",
+        guid: "second@addon",
       },
     },
     is_sponsored: true,
+    is_top_pick: false,
   },
   {
     provider: "amo",
@@ -44,12 +47,28 @@ const TEST_MERINO_SUGGESTIONS = [
       amo: {
         rating: "0",
         number_of_ratings: "0",
+        guid: "third@addon",
+      },
+    },
+    is_top_pick: false,
+  },
+  {
+    provider: "amo",
+    icon: "https://example.com/fourth.svg",
+    url: "https://example.com/fourth-addon",
+    title: "Fourth Addon",
+    description: "This is a fourth addon",
+    custom_details: {
+      amo: {
+        rating: "4",
+        number_of_ratings: "4",
+        guid: "fourth@addon",
       },
     },
   },
 ];
 
-add_setup(async function() {
+add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
       ["browser.urlbar.quicksuggest.enabled", true],
@@ -102,7 +121,8 @@ add_task(async function basic() {
       )} reviews`
     );
 
-    if (merinoSuggestion.is_top_pick) {
+    const isTopPick = merinoSuggestion.is_top_pick ?? true;
+    if (isTopPick) {
       Assert.equal(result.suggestedIndex, 1);
     } else if (merinoSuggestion.is_sponsored) {
       Assert.equal(
@@ -223,6 +243,7 @@ add_task(async function disable() {
   const { result } = await UrlbarTestUtils.getDetailsOfResultAt(window, 1);
   Assert.equal(result.payload.telemetryType, "adm_sponsored");
 
+  MerinoTestUtils.server.response.body.suggestions = TEST_MERINO_SUGGESTIONS;
   await SpecialPowers.popPrefEnv();
 });
 
@@ -230,118 +251,67 @@ add_task(async function resultMenu_showLessFrequently() {
   await SpecialPowers.pushPrefEnv({
     set: [
       ["browser.urlbar.addons.featureGate", true],
-      ["browser.urlbar.addons.minKeywordLength", 0],
+      ["browser.urlbar.addons.showLessFrequentlyCount", 0],
     ],
   });
-  MerinoTestUtils.server.response.body.suggestions = TEST_MERINO_SUGGESTIONS;
+
   const cleanUpNimbus = await UrlbarTestUtils.initNimbusFeature({
-    addonsKeywordsMinimumLengthCap: 3,
+    addonsShowLessFrequentlyCap: 3,
   });
 
   // Sanity check.
-  Assert.equal(UrlbarPrefs.get("addonsKeywordsMinimumLengthCap"), 3);
-  Assert.equal(UrlbarPrefs.get("addonsKeywordsMinimumLength"), 0);
-  Assert.equal(UrlbarPrefs.get("addons.minKeywordLength"), 0);
+  Assert.equal(UrlbarPrefs.get("addonsShowLessFrequentlyCap"), 3);
+  Assert.equal(UrlbarPrefs.get("addons.showLessFrequentlyCount"), 0);
 
   await doShowLessFrequently({
-    input: "12",
+    input: "aaa b",
     expected: {
       isSuggestionShown: true,
       isMenuItemShown: true,
     },
   });
-  Assert.equal(UrlbarPrefs.get("addons.minKeywordLength"), 1);
+  Assert.equal(UrlbarPrefs.get("addons.showLessFrequentlyCount"), 1);
 
   await doShowLessFrequently({
-    input: "12",
+    input: "aaa b",
     expected: {
       isSuggestionShown: true,
       isMenuItemShown: true,
     },
   });
-  Assert.equal(UrlbarPrefs.get("addons.minKeywordLength"), 2);
+  Assert.equal(UrlbarPrefs.get("addons.showLessFrequentlyCount"), 2);
 
   await doShowLessFrequently({
-    input: "12",
+    input: "aaa b",
     expected: {
       isSuggestionShown: true,
       isMenuItemShown: true,
     },
   });
-  Assert.equal(UrlbarPrefs.get("addons.minKeywordLength"), 3);
+  Assert.equal(UrlbarPrefs.get("addons.showLessFrequentlyCount"), 3);
 
   await doShowLessFrequently({
-    input: "12",
+    input: "aaa b",
     expected: {
-      // The suggestion should not display since addons.minKeywordLength is 3
-      // and the text length is 2,
+      // The suggestion should not display since addons.showLessFrequentlyCount
+      // is 3 and the substring (" b") after the first word ("aaa") is 2 chars
+      // long.
       isSuggestionShown: false,
     },
   });
 
   await doShowLessFrequently({
-    input: "123",
+    input: "aaa bb",
     expected: {
       // The suggestion should display, but item should not shown since the
-      // addons.minKeywordLength reached to addonsKeywordsMinimumLengthCap
+      // addons.showLessFrequentlyCount reached to addonsShowLessFrequentlyCap
       // already.
       isSuggestionShown: true,
       isMenuItemShown: false,
     },
   });
 
-  await cleanUpNimbus;
-  await SpecialPowers.popPrefEnv();
-});
-
-add_task(async function resultMenu_showLessFrequentlyWithNimbusMinimumLength() {
-  await SpecialPowers.pushPrefEnv({
-    set: [
-      ["browser.urlbar.addons.featureGate", true],
-      ["browser.urlbar.addons.minKeywordLength", 0],
-    ],
-  });
-  MerinoTestUtils.server.response.body.suggestions = TEST_MERINO_SUGGESTIONS;
-  const cleanUpNimbus = await UrlbarTestUtils.initNimbusFeature({
-    addonsKeywordsMinimumLengthCap: 3,
-    addonsKeywordsMinimumLength: 2,
-  });
-
-  // Sanity check.
-  Assert.equal(UrlbarPrefs.get("addonsKeywordsMinimumLengthCap"), 3);
-  Assert.equal(UrlbarPrefs.get("addonsKeywordsMinimumLength"), 2);
-  Assert.equal(UrlbarPrefs.get("addons.minKeywordLength"), 0);
-
-  await doShowLessFrequently({
-    input: "12",
-    expected: {
-      isSuggestionShown: true,
-      isMenuItemShown: true,
-    },
-  });
-  Assert.equal(UrlbarPrefs.get("addons.minKeywordLength"), 3);
-
-  await doShowLessFrequently({
-    input: "12",
-    expected: {
-      // The suggestion should not display since addons.minKeywordLength is 3
-      // and the text length is 2,
-      isSuggestionShown: false,
-    },
-  });
-
-  await doShowLessFrequently({
-    input: "123",
-    expected: {
-      // The suggestion should display, but item should not shown since the
-      // addons.minKeywordLength reached to addonsKeywordsMinimumLengthCap
-      // already.
-      isSuggestionShown: true,
-      isMenuItemShown: false,
-    },
-  });
-
-  await cleanUpNimbus;
+  await cleanUpNimbus();
   await SpecialPowers.popPrefEnv();
 });
 
@@ -353,6 +323,86 @@ add_task(async function resultMenu_notInterested() {
 // Tests the "Not relevant" result menu dismissal command.
 add_task(async function notRelevant() {
   await doDismissTest("not_relevant");
+});
+
+add_task(async function rowLabel() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.urlbar.addons.featureGate", true]],
+  });
+
+  const testCases = [
+    {
+      bestMatch: true,
+      expected: "Firefox extension",
+    },
+    {
+      bestMatch: false,
+      expected: "Firefox Suggest",
+    },
+  ];
+
+  for (const { bestMatch, expected } of testCases) {
+    await SpecialPowers.pushPrefEnv({
+      set: [["browser.urlbar.bestMatch.enabled", bestMatch]],
+    });
+
+    await UrlbarTestUtils.promiseAutocompleteResultPopup({
+      window,
+      value: "only match the Merino suggestion",
+    });
+    Assert.equal(UrlbarTestUtils.getResultCount(window), 2);
+
+    const { element } = await UrlbarTestUtils.getDetailsOfResultAt(window, 1);
+    const row = element.row;
+    Assert.equal(row.getAttribute("label"), expected);
+
+    await SpecialPowers.popPrefEnv();
+  }
+
+  await SpecialPowers.popPrefEnv();
+});
+
+add_task(async function treatmentB() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.urlbar.addons.featureGate", true]],
+  });
+
+  const cleanUpNimbus = await UrlbarTestUtils.initNimbusFeature({
+    addonsUITreatment: "b",
+  });
+  // Sanity check.
+  Assert.equal(UrlbarPrefs.get("addonsUITreatment"), "b");
+
+  const merinoSuggestion = TEST_MERINO_SUGGESTIONS[0];
+  MerinoTestUtils.server.response.body.suggestions = [merinoSuggestion];
+
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window,
+    value: "only match the Merino suggestion",
+  });
+  Assert.equal(UrlbarTestUtils.getResultCount(window), 2);
+
+  const { element } = await UrlbarTestUtils.getDetailsOfResultAt(window, 1);
+  const row = element.row;
+  const icon = row.querySelector(".urlbarView-dynamic-addons-icon");
+  Assert.equal(icon.src, merinoSuggestion.icon);
+  const url = row.querySelector(".urlbarView-dynamic-addons-url");
+  Assert.equal(url.textContent, merinoSuggestion.url);
+  const title = row.querySelector(".urlbarView-dynamic-addons-title");
+  Assert.equal(title.textContent, merinoSuggestion.title);
+  const description = row.querySelector(
+    ".urlbarView-dynamic-addons-description"
+  );
+  Assert.equal(description.textContent, merinoSuggestion.description);
+  const ratingContainer = row.querySelector(
+    ".urlbarView-dynamic-addons-ratingContainer"
+  );
+  Assert.ok(BrowserTestUtils.is_hidden(ratingContainer));
+  const reviews = row.querySelector(".urlbarView-dynamic-addons-reviews");
+  Assert.equal(reviews.textContent, "Recommended");
+
+  await cleanUpNimbus();
+  await SpecialPowers.popPrefEnv();
 });
 
 async function doShowLessFrequently({ input, expected }) {
@@ -399,6 +449,10 @@ async function doShowLessFrequently({ input, expected }) {
       gURLBar.view.isOpen,
       "The view should remain open clicking the command"
     );
+    Assert.ok(
+      details.element.row.hasAttribute("feedback-acknowledgment"),
+      "Row should have feedback acknowledgment after clicking command"
+    );
   } catch (e) {
     Assert.ok(!expected.isMenuItemShown);
     Assert.ok(
@@ -419,16 +473,6 @@ async function doDismissTest(command) {
     set: [["browser.urlbar.addons.featureGate", true]],
   });
 
-  const cleanUpNimbus = await UrlbarTestUtils.initNimbusFeature({
-    addonsKeywordsMinimumLengthCap: 0,
-    addonsKeywordsMinimumLength: 0,
-  });
-
-  // Sanity check.
-  Assert.equal(UrlbarPrefs.get("addonsKeywordsMinimumLengthCap"), 0);
-  Assert.equal(UrlbarPrefs.get("addonsKeywordsMinimumLength"), 0);
-  Assert.equal(UrlbarPrefs.get("addons.minKeywordLength"), 0);
-
   await UrlbarTestUtils.promiseAutocompleteResultPopup({
     window,
     value: "123",
@@ -443,6 +487,9 @@ async function doDismissTest(command) {
     "Addons suggestion should be present"
   );
 
+  // Sanity check.
+  Assert.ok(UrlbarPrefs.get("suggest.addons"));
+
   // Click the command.
   await UrlbarTestUtils.openResultMenuAndClickItem(
     window,
@@ -451,8 +498,8 @@ async function doDismissTest(command) {
   );
 
   Assert.ok(
-    !UrlbarPrefs.get("addons.featureGate"),
-    "addons.featureGate pref should be set to false after dismissal"
+    !UrlbarPrefs.get("suggest.addons"),
+    "suggest.addons pref should be set to false after dismissal"
   );
 
   // The row should be a tip now.
@@ -481,7 +528,7 @@ async function doDismissTest(command) {
   // Get the dismissal acknowledgment's "Got it" button and click it.
   let gotItButton = UrlbarTestUtils.getButtonForResultIndex(
     window,
-    "0",
+    0,
     resultIndex
   );
   Assert.ok(gotItButton, "Row should have a 'Got it' button");
@@ -508,7 +555,6 @@ async function doDismissTest(command) {
 
   await UrlbarTestUtils.promisePopupClose(window);
 
-  await cleanUpNimbus;
   await SpecialPowers.popPrefEnv();
-  UrlbarPrefs.clear("addons.featureGate");
+  UrlbarPrefs.clear("suggest.addons");
 }

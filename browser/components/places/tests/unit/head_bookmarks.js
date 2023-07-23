@@ -36,13 +36,13 @@ const DEFAULT_BOOKMARKS_ON_TOOLBAR = 1;
 const DEFAULT_BOOKMARKS_ON_MENU = 1;
 
 function checkItemHasAnnotation(guid, name) {
-  return PlacesUtils.promiseItemId(guid).then(id => {
+  return PlacesTestUtils.promiseItemId(guid).then(id => {
     let hasAnnotation = PlacesUtils.annotations.itemHasAnnotation(id, name);
     Assert.ok(hasAnnotation, `Expected annotation ${name}`);
   });
 }
 
-var createCorruptDB = async function() {
+var createCorruptDB = async function () {
   let dbPath = PathUtils.join(PathUtils.profileDir, "places.sqlite");
   await IOUtils.remove(dbPath);
 
@@ -72,7 +72,7 @@ const NUMBER_OF_TRIES = 30;
  * @returns {Promise} to the asynchronous value being polled.
  * @throws if the asynchronous value is not available after tryCount attempts.
  */
-var waitForResolvedPromise = async function(
+var waitForResolvedPromise = async function (
   promiseFn,
   timeoutMsg,
   tryCount = NUMBER_OF_TRIES

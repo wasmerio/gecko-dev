@@ -20,7 +20,8 @@ const { LoginTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/LoginTestUtils.sys.mjs"
 );
 if (LoginHelper.relatedRealmsEnabled) {
-  let rsPromise = LoginTestUtils.remoteSettings.setupWebsitesWithSharedCredentials();
+  let rsPromise =
+    LoginTestUtils.remoteSettings.setupWebsitesWithSharedCredentials();
   async () => {
     await rsPromise;
   };
@@ -154,13 +155,13 @@ addMessageListener(
   }
 );
 
-addMessageListener("loadRecipes", async function(recipes) {
+addMessageListener("loadRecipes", async function (recipes) {
   var recipeParent = await LoginManagerParent.recipeParentPromise;
   await recipeParent.load(recipes);
   sendAsyncMessage("loadedRecipes", recipes);
 });
 
-addMessageListener("resetRecipes", async function() {
+addMessageListener("resetRecipes", async function () {
   let recipeParent = await LoginManagerParent.recipeParentPromise;
   await recipeParent.reset();
   sendAsyncMessage("recipesReset");
@@ -197,7 +198,7 @@ addMessageListener("getTelemetryEvents", options => {
   sendAsyncMessage("getTelemetryEvents", events);
 });
 
-addMessageListener("proxyLoginManager", msg => {
+addMessageListener("proxyLoginManager", async msg => {
   // Recreate nsILoginInfo objects from vanilla JS objects.
   let recreatedArgs = msg.args.map((arg, index) => {
     if (msg.loginInfoIndices.includes(index)) {
@@ -207,7 +208,7 @@ addMessageListener("proxyLoginManager", msg => {
     return arg;
   });
 
-  let rv = Services.logins[msg.methodName](...recreatedArgs);
+  let rv = await Services.logins[msg.methodName](...recreatedArgs);
   if (rv instanceof Ci.nsILoginInfo) {
     rv = LoginHelper.loginToVanillaObject(rv);
   } else if (

@@ -2,11 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.defineESModuleGetters(this, {
-  SearchTestUtils: "resource://testing-common/SearchTestUtils.sys.mjs",
-  UrlbarTestUtils: "resource://testing-common/UrlbarTestUtils.sys.mjs",
-});
-
 const CONFIG_DEFAULT = [
   {
     webExtension: { id: "basic@search.mozilla.org" },
@@ -23,7 +18,6 @@ const CONFIG_DEFAULT = [
 ];
 
 SearchTestUtils.init(this);
-UrlbarTestUtils.init(this);
 
 add_setup(async () => {
   // Use engines in test directory
@@ -36,6 +30,10 @@ add_setup(async () => {
       ["browser.urlbar.suggest.searches", true],
       ["browser.urlbar.trending.featureGate", true],
       ["browser.urlbar.trending.requireSearchMode", false],
+      ["browser.urlbar.eventTelemetry.enabled", true],
+      // Bug 1775917: Disable the persisted-search-terms search tip because if
+      // not dismissed, it can cause issues with other search tests.
+      ["browser.urlbar.tipShownCount.searchTip_persist", 999],
     ],
   });
 
@@ -57,6 +55,8 @@ add_task(async function test_trending_results() {
 });
 
 async function check_results({ featureEnabled = false }) {
+  Services.telemetry.clearEvents();
+  Services.telemetry.clearScalars();
   await SpecialPowers.pushPrefEnv({
     set: [["browser.urlbar.richSuggestions.featureGate", featureEnabled]],
   });
@@ -74,15 +74,37 @@ async function check_results({ featureEnabled = false }) {
     Assert.equal(result.type, UrlbarUtils.RESULT_TYPE.SEARCH);
     Assert.equal(result.providerName, "SearchSuggestions");
     Assert.equal(result.payload.engine, "basic");
-    Assert.equal(result.payload.isRichSuggestion, featureEnabled);
+    Assert.equal(result.isRichSuggestion, featureEnabled);
     if (featureEnabled) {
       Assert.equal(typeof result.payload.description, "string");
       Assert.ok(result.payload.icon.startsWith("data:"));
     }
   }
 
-  await UrlbarTestUtils.promisePopupClose(window, () => {
-    EventUtils.synthesizeKey("KEY_Escape");
+  info("Select first remote search suggestion & hit Enter.");
+  EventUtils.synthesizeKey("KEY_ArrowDown", {}, window);
+  EventUtils.synthesizeKey("VK_RETURN", {}, window);
+
+  let event = {
+    category: "urlbar",
+    method: "engagement",
+    object: "enter",
+    value: "typed",
+    extra: {
+      elapsed: val => parseInt(val) > 0,
+      numChars: "0",
+      numWords: "0",
+      selIndex: "0",
+      selType: featureEnabled ? "trending_rich" : "trending",
+      provider: "SearchSuggestions",
+    },
+  };
+
+  TelemetryTestUtils.assertEvents([event], {
+    category: "urlbar",
   });
+  let scalars = TelemetryTestUtils.getProcessScalars("parent", false, true);
+  TelemetryTestUtils.assertScalar(scalars, "urlbar.engagement", 1);
+
   await SpecialPowers.popPrefEnv();
 }

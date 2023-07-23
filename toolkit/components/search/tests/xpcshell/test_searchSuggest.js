@@ -43,7 +43,7 @@ add_task(async function setup() {
   consoleAllowList = consoleAllowList.concat([
     "Non-200 status or empty HTTP response: 404",
     "Non-200 status or empty HTTP response: 500",
-    "Unexpected response, searchString does not match remote response",
+    "SearchSuggestionController found an unexpected string value",
     "HTTP request timeout",
     "HTTP error",
   ]);
@@ -834,7 +834,7 @@ add_task(async function minus_one_results_requested() {
 
 add_task(async function test_userContextId() {
   let controller = new SearchSuggestionController();
-  controller._fetchRemote = function(
+  controller._fetchRemote = function (
     searchTerm,
     engine,
     privateMode,

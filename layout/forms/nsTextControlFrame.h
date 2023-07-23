@@ -78,8 +78,8 @@ class nsTextControlFrame : public nsContainerFrame,
               nsReflowStatus& aStatus) override;
 
   Maybe<nscoord> GetNaturalBaselineBOffset(
-      mozilla::WritingMode aWM,
-      BaselineSharingGroup aBaselineGroup) const override {
+      mozilla::WritingMode aWM, BaselineSharingGroup aBaselineGroup,
+      BaselineExportContext) const override {
     if (!IsSingleLineTextControl()) {
       return Nothing{};
     }
@@ -275,7 +275,7 @@ class nsTextControlFrame : public nsContainerFrame,
    * @returns false if it does not exist
    */
   bool AttributeExists(nsAtom* aAtt) const {
-    return mContent && mContent->AsElement()->HasAttr(kNameSpaceID_None, aAtt);
+    return mContent && mContent->AsElement()->HasAttr(aAtt);
   }
 
   /**

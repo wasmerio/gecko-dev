@@ -888,6 +888,7 @@ export const LoginHelper = {
         aNewLoginData.usernameField,
         aNewLoginData.passwordField
       );
+      newLogin.unknownFields = aNewLoginData.unknownFields;
       newLogin.QueryInterface(Ci.nsILoginMetaInfo);
 
       // Automatically update metainfo when password is changed.
@@ -919,6 +920,7 @@ export const LoginHelper = {
           case "password":
           case "usernameField":
           case "passwordField":
+          case "unknownFields":
           // nsILoginMetaInfo (fall through)
           case "guid":
           case "timeCreated":
@@ -1255,13 +1257,27 @@ export const LoginHelper = {
    * @param {string} args.entryPoint
    *                 The name of the entry point, used for telemetry
    */
-  openPasswordManager(window, { filterString = "", entryPoint = "" } = {}) {
+  openPasswordManager(
+    window,
+    { filterString = "", entryPoint = "", loginGuid = null } = {}
+  ) {
+    // Get currently active tab's origin
+    const openedFrom =
+      window.gBrowser?.selectedTab.linkedBrowser.currentURI.spec;
+
+    // If no loginGuid is set, get sanitized origin, this will return null for about:* uris
+    const preselectedLogin = loginGuid ?? this.getLoginOrigin(openedFrom);
+
     const params = new URLSearchParams({
       ...(filterString && { filter: filterString }),
       ...(entryPoint && { entryPoint }),
     });
-    const separator = params.toString() ? "?" : "";
-    const destination = `about:logins${separator}${params}`;
+
+    const paramsPart = params.toString() ? `?${params}` : "";
+    const fragmentsPart = preselectedLogin
+      ? `#${window.encodeURIComponent(preselectedLogin)}`
+      : "";
+    const destination = `about:logins${paramsPart}${fragmentsPart}`;
 
     // We assume that managementURL has a '?' already
     window.openTrustedLinkIn(destination, "tab");
@@ -1365,7 +1381,8 @@ export const LoginHelper = {
    */
   isInferredLoginForm(formElement) {
     // This is copied from 'loginFormAttrRegex' in NewPasswordModel.jsm
-    const loginExpr = /login|log in|log on|log-on|sign in|sigin|sign\/in|sign-in|sign on|sign-on/i;
+    const loginExpr =
+      /login|log in|log on|log-on|sign in|sigin|sign\/in|sign-in|sign on|sign-on/i;
 
     if (Logic.elementAttrsMatchRegex(formElement, loginExpr)) {
       return true;
@@ -1495,6 +1512,7 @@ export const LoginHelper = {
       this.importing = false;
 
       Services.obs.notifyObservers(null, "passwordmgr-reload-all");
+      this.notifyStorageChanged("importLogins", []);
     }
   },
 
@@ -1830,6 +1848,14 @@ export class OptInFeature {
 
   get isEnabled() {
     return this.#currentPrefValue == OptInFeature.PREF_ENABLED_VALUE;
+  }
+
+  get isDisabled() {
+    return this.#currentPrefValue == OptInFeature.PREF_DISABLED_VALUE;
+  }
+
+  markAsAvailable() {
+    this.#markAs(OptInFeature.PREF_AVAILABLE_VALUE);
   }
 
   markAsOffered() {

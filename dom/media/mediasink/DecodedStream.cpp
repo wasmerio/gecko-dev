@@ -465,8 +465,7 @@ DecodedStream::DecodedStream(
       mPlaybackRate(aPlaybackRate),
       mPreservesPitch(aPreservesPitch),
       mAudioQueue(aAudioQueue),
-      mVideoQueue(aVideoQueue),
-      mAudioDevice(std::move(aAudioDevice)) {}
+      mVideoQueue(aVideoQueue) {}
 
 DecodedStream::~DecodedStream() {
   MOZ_ASSERT(mStartTime.isNothing(), "playback should've ended.");
@@ -478,7 +477,8 @@ RefPtr<DecodedStream::EndedPromise> DecodedStream::OnEnded(TrackType aType) {
 
   if (aType == TrackInfo::kAudioTrack && mInfo.HasAudio()) {
     return mAudioEndedPromise;
-  } else if (aType == TrackInfo::kVideoTrack && mInfo.HasVideo()) {
+  }
+  if (aType == TrackInfo::kVideoTrack && mInfo.HasVideo()) {
     return mVideoEndedPromise;
   }
   return nullptr;
@@ -721,6 +721,12 @@ void DecodedStream::SetPreservesPitch(bool aPreservesPitch) {
   }
 }
 
+RefPtr<GenericPromise> DecodedStream::SetAudioDevice(
+    RefPtr<AudioDeviceInfo> aDevice) {
+  // All audio is captured, so nothing is actually played out, so nothing to do.
+  return GenericPromise::CreateAndResolve(true, __func__);
+}
+
 double DecodedStream::PlaybackRate() const {
   AssertOwnerThread();
   return mPlaybackRate;
@@ -790,7 +796,7 @@ already_AddRefed<AudioData> DecodedStream::CreateSilenceDataIfGapExists(
     NS_WARNING("OOM in DecodedStream::CreateSilenceDataIfGapExists");
     return nullptr;
   }
-  auto duration = FramesToTimeUnit(missingFrames.value(), aNextAudio->mRate);
+  auto duration = media::TimeUnit(missingFrames.value(), aNextAudio->mRate);
   if (!duration.IsValid()) {
     NS_WARNING("Int overflow in DecodedStream::CreateSilenceDataIfGapExists");
     return nullptr;
@@ -820,16 +826,14 @@ void DecodedStreamData::WriteVideoToSegment(
     VideoSegment* aOutput, const PrincipalHandle& aPrincipalHandle,
     double aPlaybackRate) {
   RefPtr<layers::Image> image = aImage;
-  auto end =
-      mVideoTrack->MicrosecondsToTrackTimeRoundDown(aEnd.ToMicroseconds());
-  auto start =
-      mVideoTrack->MicrosecondsToTrackTimeRoundDown(aStart.ToMicroseconds());
   aOutput->AppendFrame(image.forget(), aIntrinsicSize, aPrincipalHandle, false,
                        aTimeStamp);
   // Extend this so we get accurate durations for all frames.
   // Because this track is pushed, we need durations so the graph can track
   // when playout of the track has finished.
   MOZ_ASSERT(aPlaybackRate > 0);
+  TrackTime start = aStart.ToTicksAtRate(mVideoTrack->mSampleRate);
+  TrackTime end = aEnd.ToTicksAtRate(mVideoTrack->mSampleRate);
   aOutput->ExtendLastFrameBy(
       static_cast<TrackTime>((float)(end - start) / aPlaybackRate));
 
@@ -1010,20 +1014,25 @@ void DecodedStream::SendVideo(const PrincipalHandle& aPrincipalHandle) {
       forceBlack = true;
       // Override the frame's size (will be 0x0 otherwise)
       mData->mLastVideoImageDisplaySize = mInfo.mVideo.mDisplay;
+      LOG_DS(LogLevel::Debug, "No mLastVideoImage");
     }
     if (compensateEOS) {
       VideoSegment endSegment;
-      // Calculate the deviation clock time from DecodedStream.
-      // We round the nr of microseconds up, because WriteVideoToSegment
-      // will round the conversion from microseconds to TrackTime down.
-      auto deviation = TimeUnit::FromMicroseconds(
-          mData->mVideoTrack->TrackTimeToMicroseconds(1) + 1);
       auto start = mData->mLastVideoEndTime.valueOr(mStartTime.ref());
       mData->WriteVideoToSegment(
-          mData->mLastVideoImage, start, start + deviation,
+          mData->mLastVideoImage, start, start,
           mData->mLastVideoImageDisplaySize,
-          currentTime + (start + deviation - currentPosition).ToTimeDuration(),
-          &endSegment, aPrincipalHandle, mPlaybackRate);
+          currentTime + (start - currentPosition).ToTimeDuration(), &endSegment,
+          aPrincipalHandle, mPlaybackRate);
+      // ForwardedInputTrack drops zero duration frames, even at the end of
+      // the track.  Give the frame a minimum duration so that it is not
+      // dropped.
+      endSegment.ExtendLastFrameBy(1);
+      LOG_DS(LogLevel::Debug,
+             "compensateEOS: start %s, duration %" PRId64
+             ", mPlaybackRate %lf, sample rate %" PRId32,
+             start.ToString().get(), endSegment.GetDuration(), mPlaybackRate,
+             mData->mVideoTrack->mSampleRate);
       MOZ_ASSERT(endSegment.GetDuration() > 0);
       if (forceBlack) {
         endSegment.ReplaceWithDisabled();
@@ -1058,7 +1067,7 @@ TimeUnit DecodedStream::GetEndTime(TrackType aType) const {
   TRACE("DecodedStream::GetEndTime");
   if (aType == TrackInfo::kAudioTrack && mInfo.HasAudio() && mData) {
     auto t = mStartTime.ref() +
-             FramesToTimeUnit(mData->mAudioFramesWritten, mInfo.mAudio.mRate);
+             media::TimeUnit(mData->mAudioFramesWritten, mInfo.mAudio.mRate);
     if (t.IsValid()) {
       return t;
     }
@@ -1155,7 +1164,8 @@ void DecodedStream::GetDebugInfo(dom::MediaSinkDebugInfo& aInfo) {
   aInfo.mDecodedStream.mLastAudio =
       lastAudio ? lastAudio->GetEndTime().ToMicroseconds() : -1;
   aInfo.mDecodedStream.mAudioQueueFinished = mAudioQueue.IsFinished();
-  aInfo.mDecodedStream.mAudioQueueSize = mAudioQueue.GetSize();
+  aInfo.mDecodedStream.mAudioQueueSize =
+      AssertedCast<int>(mAudioQueue.GetSize());
   if (mData) {
     mData->GetDebugInfo(aInfo.mDecodedStream.mData);
   }

@@ -20,9 +20,7 @@ const THUMBNAIL_DIRECTORY = "thumbnails";
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const { BasePromiseWorker } = ChromeUtils.import(
-  "resource://gre/modules/PromiseWorker.jsm"
-);
+import { BasePromiseWorker } from "resource://gre/modules/PromiseWorker.sys.mjs";
 
 const lazy = {};
 
@@ -260,9 +258,8 @@ export var PageThumbs = {
     }
     if (aBrowser.isRemoteBrowser) {
       if (aBrowser.browsingContext.currentWindowGlobal) {
-        let thumbnailsActor = aBrowser.browsingContext.currentWindowGlobal.getActor(
-          "Thumbnails"
-        );
+        let thumbnailsActor =
+          aBrowser.browsingContext.currentWindowGlobal.getActor("Thumbnails");
         return thumbnailsActor
           .sendQuery("Browser:Thumbnail:CheckState")
           .catch(err => {
@@ -411,9 +408,8 @@ export var PageThumbs = {
       // see if this was an error response.
       channelError = lazy.PageThumbUtils.isChannelErrorResponse(channel);
     } else {
-      let thumbnailsActor = aBrowser.browsingContext.currentWindowGlobal.getActor(
-        "Thumbnails"
-      );
+      let thumbnailsActor =
+        aBrowser.browsingContext.currentWindowGlobal.getActor("Thumbnails");
       let resp = await thumbnailsActor.sendQuery(
         "Browser:Thumbnail:GetOriginalURL"
       );
@@ -427,7 +423,7 @@ export var PageThumbs = {
       let buffer = await TaskUtils.readBlob(blob);
       await this._store(originalURL, url, buffer, channelError);
     } catch (ex) {
-      console.error("Exception thrown during thumbnail capture: '", ex, "'");
+      console.error("Exception thrown during thumbnail capture:", ex);
     }
   },
 
@@ -654,12 +650,10 @@ export var PageThumbsStorage = {
    */
   copy: function Storage_copy(aSourceURL, aTargetURL, aNoOverwrite) {
     this.ensurePath();
-    let sourceFile = lazy.PageThumbsStorageService.getFilePathForURL(
-      aSourceURL
-    );
-    let targetFile = lazy.PageThumbsStorageService.getFilePathForURL(
-      aTargetURL
-    );
+    let sourceFile =
+      lazy.PageThumbsStorageService.getFilePathForURL(aSourceURL);
+    let targetFile =
+      lazy.PageThumbsStorageService.getFilePathForURL(aTargetURL);
     let options = { noOverwrite: aNoOverwrite };
     return PageThumbsWorker.post("copy", [
       sourceFile,

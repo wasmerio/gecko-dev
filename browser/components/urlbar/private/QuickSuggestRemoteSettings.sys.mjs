@@ -81,10 +81,19 @@ class _QuickSuggestRemoteSettings {
    *         ],
    *       },
    *     },
+   *     show_less_frequently_cap,
    *   }
    */
   get config() {
     return this.#config;
+  }
+
+  /**
+   * @returns {Array}
+   *   Array of `BasicFeature` instances.
+   */
+  get features() {
+    return [...this.#features];
   }
 
   get logger() {
@@ -191,15 +200,11 @@ class _QuickSuggestRemoteSettings {
   }
 
   async #syncConfig() {
-    if (this._test_ignoreSettingsSync) {
-      return;
-    }
-
     this.logger.debug("Syncing config");
     let rs = this.#rs;
 
     let configArray = await rs.get({ filters: { type: "configuration" } });
-    if (rs != this.#rs || this._test_ignoreSettingsSync) {
+    if (rs != this.#rs) {
       return;
     }
 
@@ -208,19 +213,11 @@ class _QuickSuggestRemoteSettings {
   }
 
   async #syncFeature(feature) {
-    if (this._test_ignoreSettingsSync) {
-      return;
-    }
-
     this.logger.debug("Syncing feature: " + feature.name);
     await feature.onRemoteSettingsSync(this.#rs);
   }
 
   async #syncAll({ event = null } = {}) {
-    if (this._test_ignoreSettingsSync) {
-      return;
-    }
-
     this.logger.debug("Syncing all");
     let rs = this.#rs;
 
@@ -236,7 +233,7 @@ class _QuickSuggestRemoteSettings {
             ])
           )
       );
-      if (rs != this.#rs || this._test_ignoreSettingsSync) {
+      if (rs != this.#rs) {
         return;
       }
     }
@@ -259,14 +256,6 @@ class _QuickSuggestRemoteSettings {
     this.logger.debug("Setting config: " + JSON.stringify(config));
     this.#config = config;
     this.#emitter.emit("config-set");
-  }
-
-  get _test_rs() {
-    return this.#rs;
-  }
-
-  _test_setConfig(config) {
-    this.#setConfig(config);
   }
 
   // The `RemoteSettings` client.
@@ -315,12 +304,27 @@ export class SuggestionsMap {
 
   /**
    * Adds a list of suggestion objects to the results map. Each suggestion must
-   * have a `keywords` property.
+   * have a property whose value is an array of keyword strings. The
+   * suggestion's keywords will be taken from this array either exactly as they
+   * are specified or by generating new keywords from them; see `mapKeyword`.
    *
    * @param {Array} suggestions
    *   Array of suggestion objects.
+   * @param {object} options
+   *   Options object.
+   * @param {string} options.keywordsProperty
+   *   The name of the keywords property in each suggestion.
+   * @param {Function} options.mapKeyword
+   *   If null, the keywords for each suggestion will be taken from the keywords
+   *   array exactly as they are specified. Otherwise, this function will be
+   *   called for each string in the array, and it should return an array of
+   *   strings. The suggestion's final list of keywords will be the union of all
+   *   strings returned by this function. See also the `MAP_KEYWORD_*` consts.
    */
-  async add(suggestions) {
+  async add(
+    suggestions,
+    { keywordsProperty = "keywords", mapKeyword = null } = {}
+  ) {
     // There can be many suggestions, and each suggestion can have many
     // keywords. To avoid blocking the main thread for too long, update the map
     // in chunks, and to avoid blocking the UI and other higher priority work,
@@ -340,23 +344,41 @@ export class SuggestionsMap {
             suggestionIndex < suggestions.length
           ) {
             let suggestion = suggestions[suggestionIndex];
-            if (keywordIndex == suggestion.keywords.length) {
+            let keywords = suggestion[keywordsProperty];
+            if (keywordIndex == keywords.length) {
+              // We've added entries for all keywords of the current suggestion.
+              // Move on to the next suggestion.
               suggestionIndex++;
               keywordIndex = 0;
               continue;
             }
-            // If the keyword's only suggestion is `suggestion`, store it
-            // directly as the value. Otherwise store an array of suggestions.
-            // For details, see the `#suggestionsByKeyword` comment.
-            let keyword = suggestion.keywords[keywordIndex];
-            let object = this.#suggestionsByKeyword.get(keyword);
-            if (!object) {
-              this.#suggestionsByKeyword.set(keyword, suggestion);
-            } else if (!Array.isArray(object)) {
-              this.#suggestionsByKeyword.set(keyword, [object, suggestion]);
-            } else {
-              object.push(suggestion);
+
+            // As a convenience, allow `mapKeyword` to return a string even
+            // though the JSDoc says an array must be returned.
+            let originalKeyword = keywords[keywordIndex];
+            let mappedKeywords =
+              mapKeyword?.(originalKeyword) ?? originalKeyword;
+            if (typeof mappedKeywords == "string") {
+              mappedKeywords = [mappedKeywords];
             }
+
+            for (let keyword of mappedKeywords) {
+              // If the keyword's only suggestion is `suggestion`, store it
+              // directly as the value. Otherwise store an array of unique
+              // suggestions. See the `#suggestionsByKeyword` comment.
+              let object = this.#suggestionsByKeyword.get(keyword);
+              if (!object) {
+                this.#suggestionsByKeyword.set(keyword, suggestion);
+              } else {
+                let isArray = Array.isArray(object);
+                if (!isArray && object != suggestion) {
+                  this.#suggestionsByKeyword.set(keyword, [object, suggestion]);
+                } else if (isArray && !object.includes(suggestion)) {
+                  object.push(suggestion);
+                }
+              }
+            }
+
             keywordIndex++;
             indexInChunk++;
           }
@@ -370,6 +392,24 @@ export class SuggestionsMap {
 
   clear() {
     this.#suggestionsByKeyword.clear();
+  }
+
+  /**
+   * @returns {Function}
+   *   A `mapKeyword` function that maps a keyword to an array containing the
+   *   keyword's first word plus every subsequent prefix of the keyword.
+   */
+  static get MAP_KEYWORD_PREFIXES_STARTING_AT_FIRST_WORD() {
+    return fullKeyword => {
+      let keywords = [fullKeyword];
+      let spaceIndex = fullKeyword.search(/\s/);
+      if (spaceIndex >= 0) {
+        for (let i = spaceIndex; i < fullKeyword.length; i++) {
+          keywords.push(fullKeyword.substring(0, i));
+        }
+      }
+      return keywords;
+    };
   }
 
   // Maps each keyword in the dataset to one or more suggestions for the

@@ -159,9 +159,8 @@ class WebConsoleActor extends Actor {
 
     this.objectGrip = this.objectGrip.bind(this);
     this._onWillNavigate = this._onWillNavigate.bind(this);
-    this._onChangedToplevelDocument = this._onChangedToplevelDocument.bind(
-      this
-    );
+    this._onChangedToplevelDocument =
+      this._onChangedToplevelDocument.bind(this);
     this.onConsoleServiceMessage = this.onConsoleServiceMessage.bind(this);
     this.onConsoleAPICall = this.onConsoleAPICall.bind(this);
     this.onDocumentEvent = this.onDocumentEvent.bind(this);
@@ -588,10 +587,8 @@ class WebConsoleActor extends Actor {
           }
           if (this.global instanceof Ci.nsIDOMWindow) {
             if (!this.consoleFileActivityListener) {
-              this.consoleFileActivityListener = new ConsoleFileActivityListener(
-                this.global,
-                this
-              );
+              this.consoleFileActivityListener =
+                new ConsoleFileActivityListener(this.global, this);
             }
             this.consoleFileActivityListener.startMonitor();
             startedListeners.push(event);
@@ -749,8 +746,8 @@ class WebConsoleActor extends Actor {
 
           // this.global might not be a window (can be a worker global or a Sandbox),
           // and in such case performance isn't defined
-          const winStartTime = this.global?.performance?.timing
-            ?.navigationStart;
+          const winStartTime =
+            this.global?.performance?.timing?.navigationStart;
 
           const cache = this.consoleAPIListener.getCachedMessages(
             !this.parentActor.isRootActor
@@ -932,17 +929,27 @@ class WebConsoleActor extends Actor {
       eager: request.eager,
       bindings: request.bindings,
       lineNumber: request.lineNumber,
+      // This flag is set to true in most cases as we consider most evaluations as internal and:
+      // * prevent any breakpoint from being triggerred when evaluating the JS input
+      // * prevent spawning Debugger.Source for the evaluated JS and showing it in Debugger UI
+      // This is only set to false when evaluating the console input.
+      disableBreaks: !!request.disableBreaks,
     };
 
     const { mapped } = request;
 
     // Set a flag on the thread actor which indicates an evaluation is being
-    // done for the client. This can affect how debugger handlers behave.
+    // done for the client. This is used to disable all types of breakpoints for all sources
+    // via `disabledBreaks`. When this flag is used, `reportExceptionsWhenBreaksAreDisabled`
+    // allows to still pause on exceptions.
     this.parentActor.threadActor.insideClientEvaluation = evalOptions;
 
-    const evalInfo = evalWithDebugger(input, evalOptions, this);
-
-    this.parentActor.threadActor.insideClientEvaluation = null;
+    let evalInfo;
+    try {
+      evalInfo = evalWithDebugger(input, evalOptions, this);
+    } finally {
+      this.parentActor.threadActor.insideClientEvaluation = null;
+    }
 
     return new Promise((resolve, reject) => {
       // Queue up a task to run in the next tick so any microtask created by the evaluated
@@ -1012,9 +1019,8 @@ class WebConsoleActor extends Actor {
           } = exceptionStack[0];
           frame = { source, sourceId, line, column };
 
-          exceptionStack = WebConsoleUtils.removeFramesAboveDebuggerEval(
-            exceptionStack
-          );
+          exceptionStack =
+            WebConsoleUtils.removeFramesAboveDebuggerEval(exceptionStack);
         }
 
         errorMessage = String(error);
@@ -1097,9 +1103,8 @@ class WebConsoleActor extends Actor {
     let resultGrip;
     if (!awaitResult) {
       try {
-        const objectActor = this.parentActor.threadActor.getThreadLifetimeObject(
-          result
-        );
+        const objectActor =
+          this.parentActor.threadActor.getThreadLifetimeObject(result);
         if (objectActor) {
           resultGrip = this.parentActor.threadActor.createValueGrip(result);
         } else {
@@ -1248,7 +1253,8 @@ class WebConsoleActor extends Actor {
       // We only return commands and keywords when we are not dealing with a property or
       // element access.
       if (matchProp && !lastNonAlphaIsDot && !isElementAccess) {
-        const colonOnlyCommands = WebConsoleCommandsManager.getColonOnlyCommandNames();
+        const colonOnlyCommands =
+          WebConsoleCommandsManager.getColonOnlyCommandNames();
         for (const name of WebConsoleCommandsManager.getAllCommandNames()) {
           // Filter out commands like `screenshot` as it is inaccessible without the `:` prefix
           if (
@@ -1358,9 +1364,8 @@ class WebConsoleActor extends Actor {
   }
 
   getActorIdForInternalSourceId(id) {
-    const actor = this.parentActor.sourcesManager.getSourceActorByInternalSourceId(
-      id
-    );
+    const actor =
+      this.parentActor.sourcesManager.getSourceActorByInternalSourceId(id);
     return actor ? actor.actorID : null;
   }
 

@@ -9,9 +9,9 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  AboutNewTab: "resource:///modules/AboutNewTab.jsm",
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
+ChromeUtils.defineESModuleGetters(lazy, {
+  AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
 });
 
 XPCOMUtils.defineLazyGetter(lazy, "ReferrerInfo", () =>
@@ -709,7 +709,8 @@ export const URILoadingHelper = {
    */
   openTrustedLinkIn(window, url, where, params = {}) {
     if (!params.triggeringPrincipal) {
-      params.triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+      params.triggeringPrincipal =
+        Services.scriptSecurityManager.getSystemPrincipal();
     }
 
     params.forceForeground ??= true;
@@ -724,9 +725,8 @@ export const URILoadingHelper = {
    */
   openWebLinkIn(window, url, where, params = {}) {
     if (!params.triggeringPrincipal) {
-      params.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal(
-        {}
-      );
+      params.triggeringPrincipal =
+        Services.scriptSecurityManager.createNullPrincipal({});
     }
     if (params.triggeringPrincipal.isSystemPrincipal) {
       throw new Error(

@@ -42,6 +42,7 @@ var MigrationWizard = {
   _autoMigrate: null,
   _receivedPermissions: new Set(),
   _succeededMigrationEventArgs: null,
+  _openedTime: null,
 
   init() {
     Services.telemetry.setEventRecordingEnabled("browser.migration", true);
@@ -70,6 +71,14 @@ var MigrationWizard = {
     Services.telemetry
       .getHistogramById("FX_MIGRATION_ENTRY_POINT")
       .add(entryPointId);
+
+    // If the caller passed openedTime, that means this is the first time that
+    // the migration wizard is opening, and we want to measure its performance.
+    // Stash the time that opening was invoked so that we can measure the
+    // total elapsed time when the source list is shown.
+    if (args.openedTime) {
+      this._openedTime = args.openedTime;
+    }
 
     this.isInitialMigration =
       entrypoint == MigrationUtils.MIGRATION_ENTRYPOINTS.FIRSTRUN;
@@ -104,58 +113,58 @@ var MigrationWizard = {
 
     this._setSourceForDataLocalization();
 
-    document.addEventListener("wizardcancel", function() {
+    document.addEventListener("wizardcancel", function () {
       MigrationWizard.onWizardCancel();
     });
 
     document
       .getElementById("selectProfile")
-      .addEventListener("pageshow", function() {
+      .addEventListener("pageshow", function () {
         MigrationWizard.onSelectProfilePageShow();
       });
     document
       .getElementById("importItems")
-      .addEventListener("pageshow", function() {
+      .addEventListener("pageshow", function () {
         MigrationWizard.onImportItemsPageShow();
       });
     document
       .getElementById("migrating")
-      .addEventListener("pageshow", function() {
+      .addEventListener("pageshow", function () {
         MigrationWizard.onMigratingPageShow();
       });
-    document.getElementById("done").addEventListener("pageshow", function() {
+    document.getElementById("done").addEventListener("pageshow", function () {
       MigrationWizard.onDonePageShow();
     });
 
     document
       .getElementById("selectProfile")
-      .addEventListener("pagerewound", function() {
+      .addEventListener("pagerewound", function () {
         MigrationWizard.onSelectProfilePageRewound();
       });
     document
       .getElementById("importItems")
-      .addEventListener("pagerewound", function() {
+      .addEventListener("pagerewound", function () {
         MigrationWizard.onImportItemsPageRewound();
       });
 
     document
       .getElementById("selectProfile")
-      .addEventListener("pageadvanced", function() {
+      .addEventListener("pageadvanced", function () {
         MigrationWizard.onSelectProfilePageAdvanced();
       });
     document
       .getElementById("importItems")
-      .addEventListener("pageadvanced", function() {
+      .addEventListener("pageadvanced", function () {
         MigrationWizard.onImportItemsPageAdvanced();
       });
     document
       .getElementById("importPermissions")
-      .addEventListener("pageadvanced", function(e) {
+      .addEventListener("pageadvanced", function (e) {
         MigrationWizard.onImportPermissionsPageAdvanced(e);
       });
     document
       .getElementById("importSource")
-      .addEventListener("pageadvanced", function(e) {
+      .addEventListener("pageadvanced", function (e) {
         MigrationWizard.onImportSourcePageAdvanced(e);
       });
 
@@ -289,6 +298,17 @@ var MigrationWizard = {
       document.getElementById("importAll").hidden = true;
     }
 
+    // This must be the first time we're opening the migration wizard,
+    // and we want to know how long it took to get to this point, where
+    // we're showing the source list.
+    if (this._openedTime !== null) {
+      let elapsed = Cu.now() - this._openedTime;
+      Services.telemetry.scalarSet(
+        "migration.time_to_produce_legacy_migrator_list",
+        elapsed
+      );
+    }
+
     // Advance to the next page if the caller told us to.
     if (this._migrator && this._skipImportSourcePage) {
       this._wiz.advance();
@@ -297,8 +317,8 @@ var MigrationWizard = {
   },
 
   onImportSourcePageAdvanced(event) {
-    var newSource = document.getElementById("importSourceGroup").selectedItem
-      .id;
+    var newSource =
+      document.getElementById("importSourceGroup").selectedItem.id;
 
     this.recordEvent("browser_selected", { migrator_key: newSource });
 
@@ -440,6 +460,7 @@ var MigrationWizard = {
       formdata: "0",
       passwords: "0",
       bookmarks: "0",
+      payment_methods: "0",
 
       // "other" will get incremented, so we keep this as a number for
       // now, and will cast to a string before submitting to Event telemetry.
@@ -468,6 +489,9 @@ var MigrationWizard = {
             break;
           case MigrationUtils.resourceTypes.BOOKMARKS:
             extraKeys.bookmarks = "1";
+            break;
+          case MigrationUtils.resourceTypes.PAYMENT_METHODS:
+            extraKeys.payment_methods = "1";
             break;
           default:
             extraKeys.other++;
@@ -638,6 +662,9 @@ var MigrationWizard = {
       case MigrationUtils.resourceTypes.BOOKMARKS:
         obj.bookmarks = "1";
         break;
+      case MigrationUtils.resourceTypes.PAYMENT_METHODS:
+        obj.payment_methods = "1";
+        break;
       default:
         obj.other++;
     }
@@ -650,6 +677,7 @@ var MigrationWizard = {
       formdata: "0",
       passwords: "0",
       bookmarks: "0",
+      payment_methods: "0",
       // "other" will get incremented, so we keep this as a number for
       // now, and will cast to a string before submitting to Event telemetry.
       other: 0,
@@ -676,6 +704,7 @@ var MigrationWizard = {
           formdata: "0",
           passwords: "0",
           bookmarks: "0",
+          payment_methods: "0",
           // "other" will get incremented, so we keep this as a number for
           // now, and will cast to a string before submitting to Event telemetry.
           other: 0,
@@ -742,6 +771,9 @@ var MigrationWizard = {
             break;
           case MigrationUtils.resourceTypes.BOOKMARKS:
             type = "bookmarks";
+            break;
+          case MigrationUtils.resourceTypes.PAYMENT_METHODS:
+            type = "payment methods";
             break;
           case MigrationUtils.resourceTypes.OTHERDATA:
             type = "misc. data";

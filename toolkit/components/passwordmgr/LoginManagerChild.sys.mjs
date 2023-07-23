@@ -23,6 +23,24 @@ const SUBMIT_FORM_IS_REMOVED = 3;
 const LOG_MESSAGE_FORM_SUBMISSION = "form submission";
 const LOG_MESSAGE_FIELD_EDIT = "field edit";
 
+export const AUTOFILL_RESULT = {
+  FILLED: "filled",
+  NO_PASSWORD_FIELD: "no_password_field",
+  PASSWORD_DISABLED_READONLY: "password_disabled_readonly",
+  NO_LOGINS_FIT: "no_logins_fit",
+  NO_SAVED_LOGINS: "no_saved_logins",
+  EXISTING_PASSWORD: "existing_password",
+  EXISTING_USERNAME: "existing_username",
+  MULTIPLE_LOGINS: "multiple_logins",
+  NO_AUTOFILL_FORMS: "no_autofill_forms",
+  AUTOCOMPLETE_OFF: "autocomplete_off",
+  INSECURE: "insecure",
+  PASSWORD_AUTOCOMPLETE_NEW_PASSWORD: "password_autocomplete_new_password",
+  TYPE_NO_LONGER_PASSWORD: "type_no_longer_password",
+  FORM_IN_CROSSORIGIN_SUBFRAME: "form_in_crossorigin_subframe",
+  FILLED_USERNAME_ONLY_FORM: "filled_username_only_form",
+};
+
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { PrivateBrowsingUtils } from "resource://gre/modules/PrivateBrowsingUtils.sys.mjs";
@@ -39,6 +57,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
   LoginRecipesContent: "resource://gre/modules/LoginRecipes.sys.mjs",
   SignUpFormRuleset: "resource://gre/modules/SignUpFormRuleset.sys.mjs",
+  LoginManagerTelemetry: "resource://gre/modules/LoginManagerTelemetry.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -228,9 +247,8 @@ const observer = {
         );
 
         if (field.hasBeenTypePassword) {
-          let triggeredByFillingGenerated = docState.generatedPasswordFields.has(
-            field
-          );
+          let triggeredByFillingGenerated =
+            docState.generatedPasswordFields.has(field);
           // Autosave generated password initial fills and subsequent edits
           if (triggeredByFillingGenerated) {
             loginManagerChild._passwordEditedOrGenerated(field, {
@@ -268,9 +286,8 @@ const observer = {
           break;
         }
         // flag this form as user-modified for the closest form/root ancestor
-        let alreadyModified = docState.fieldModificationsByRootElement.get(
-          formLikeRoot
-        );
+        let alreadyModified =
+          docState.fieldModificationsByRootElement.get(formLikeRoot);
         let { login: filledLogin, userTriggered: fillWasUserTriggered } =
           docState.fillsByRootElement.get(formLikeRoot) || {};
 
@@ -299,9 +316,8 @@ const observer = {
         // when it is removed from DOM.
         let alreadyModifiedFormLessField = true;
         if (!HTMLFormElement.isInstance(formLikeRoot)) {
-          alreadyModifiedFormLessField = docState.formlessModifiedPasswordFields.has(
-            field
-          );
+          alreadyModifiedFormLessField =
+            docState.formlessModifiedPasswordFields.has(field);
           if (!alreadyModifiedFormLessField) {
             docState.formlessModifiedPasswordFields.add(field);
           }
@@ -349,15 +365,12 @@ const observer = {
           // a field marked as a generated password field on every "input" event
           loginManagerChild._passwordEditedOrGenerated(field);
         } else {
-          let [
-            usernameField,
-            passwordField,
-          ] = docState.getUserNameAndPasswordFields(field);
+          let [usernameField, passwordField] =
+            docState.getUserNameAndPasswordFields(field);
           if (field == usernameField && passwordField?.value) {
             loginManagerChild._passwordEditedOrGenerated(passwordField, {
-              triggeredByFillingGenerated: docState.generatedPasswordFields.has(
-                passwordField
-              ),
+              triggeredByFillingGenerated:
+                docState.generatedPasswordFields.has(passwordField),
             });
           }
         }
@@ -602,21 +615,20 @@ export class LoginFormState {
     }
     const threshold = lazy.LoginHelper.signupDetectionConfidenceThreshold;
     let score = this.#cachedSignUpFormScore.get(formElement);
-    if (score) {
-      return score >= threshold;
-    }
-    TelemetryStopwatch.start("PWMGR_SIGNUP_FORM_DETECTION_MS");
-    try {
-      const { rules, type } = lazy.SignUpFormRuleset;
-      const results = rules.against(formElement);
-      score = results.get(formElement).scoreFor(type);
-      TelemetryStopwatch.finish("PWMGR_SIGNUP_FORM_DETECTION_MS");
-    } finally {
-      if (TelemetryStopwatch.running("PWMGR_SIGNUP_FORM_DETECTION_MS")) {
-        TelemetryStopwatch.cancel("PWMGR_SIGNUP_FORM_DETECTION_MS");
+    if (!score) {
+      TelemetryStopwatch.start("PWMGR_SIGNUP_FORM_DETECTION_MS");
+      try {
+        const { rules, type } = lazy.SignUpFormRuleset;
+        const results = rules.against(formElement);
+        score = results.get(formElement).scoreFor(type);
+        TelemetryStopwatch.finish("PWMGR_SIGNUP_FORM_DETECTION_MS");
+      } finally {
+        if (TelemetryStopwatch.running("PWMGR_SIGNUP_FORM_DETECTION_MS")) {
+          TelemetryStopwatch.cancel("PWMGR_SIGNUP_FORM_DETECTION_MS");
+        }
       }
+      this.#cachedSignUpFormScore.set(formElement, score);
     }
-    this.#cachedSignUpFormScore.set(formElement, score);
     return score > threshold;
   }
 
@@ -638,9 +650,8 @@ export class LoginFormState {
   #isLoginAlreadyFilled(aUsernameField) {
     let formLikeRoot = lazy.FormLikeFactory.findRootForField(aUsernameField);
     // Look for the existing LoginForm.
-    let existingLoginForm = lazy.LoginFormFactory.getForRootElement(
-      formLikeRoot
-    );
+    let existingLoginForm =
+      lazy.LoginFormFactory.getForRootElement(formLikeRoot);
     if (!existingLoginForm) {
       throw new Error(
         "#isLoginAlreadyFilled called with a username field with " +
@@ -1004,9 +1015,8 @@ export class LoginFormState {
     dismissed = false,
     triggeredByFillingGenerated = false
   ) {
-    const lastSentValues = this.lastSubmittedValuesByRootElement.get(
-      formLikeRoot
-    );
+    const lastSentValues =
+      this.lastSubmittedValuesByRootElement.get(formLikeRoot);
     if (lastSentValues) {
       if (dismissed && !lastSentValues.dismissed) {
         // preserve previous dismissed value if it was false (i.e. shown/open)
@@ -1177,7 +1187,7 @@ export class LoginFormState {
     }
 
     if (!pwFields) {
-      // Locate the password field(s) in the form. Up to 3 supported.
+      // Locate the password field(s) in the form. Up to 5 supported.
       // If there's no password field, there's nothing for us to do.
       const minSubmitPasswordLength = 2;
       pwFields = LoginFormState._getPasswordFields(form, {
@@ -1391,11 +1401,8 @@ export class LoginFormState {
       formOrigin,
       doc.defaultView
     );
-    const {
-      usernameField,
-      newPasswordField,
-      oldPasswordField,
-    } = this._getFormFields(form, false, recipes);
+    const { usernameField, newPasswordField, oldPasswordField } =
+      this._getFormFields(form, false, recipes);
 
     return [usernameField, newPasswordField, oldPasswordField];
   }
@@ -1430,9 +1437,8 @@ export class LoginFormState {
     const LOGIN_FIELD_ORDER = ["username", "new-password", "current-password"];
     let usernameAndPasswordFields = this.getUserNameAndPasswordFields(aField);
     let fieldNameHint;
-    let indexOfFieldInUsernameAndPasswordFields = usernameAndPasswordFields.indexOf(
-      aField
-    );
+    let indexOfFieldInUsernameAndPasswordFields =
+      usernameAndPasswordFields.indexOf(aField);
     if (indexOfFieldInUsernameAndPasswordFields == -1) {
       // For fields in the form that are neither username nor password,
       // set fieldNameHint to "other". Right now, in contextmenu, we treat both
@@ -1687,9 +1693,10 @@ export class LoginManagerChild extends JSWindowActorChild {
   #onDOMDocFetchSuccess(event) {
     let document = event.target;
     let docState = this.stateForDocument(document);
-    let weakModificationsRootElements = ChromeUtils.nondeterministicGetWeakMapKeys(
-      docState.fieldModificationsByRootElement
-    );
+    let weakModificationsRootElements =
+      ChromeUtils.nondeterministicGetWeakMapKeys(
+        docState.fieldModificationsByRootElement
+      );
 
     lazy.log(
       `modificationsByRootElement approx size: ${weakModificationsRootElements.length}.`
@@ -1717,9 +1724,10 @@ export class LoginManagerChild extends JSWindowActorChild {
       }
     }
 
-    let weakFormlessModifiedPasswordFields = ChromeUtils.nondeterministicGetWeakSetKeys(
-      docState.formlessModifiedPasswordFields
-    );
+    let weakFormlessModifiedPasswordFields =
+      ChromeUtils.nondeterministicGetWeakSetKeys(
+        docState.formlessModifiedPasswordFields
+      );
 
     lazy.log(
       `formlessModifiedPasswordFields approx size: ${weakFormlessModifiedPasswordFields.length}.`
@@ -2008,7 +2016,7 @@ export class LoginManagerChild extends JSWindowActorChild {
     } else {
       window.addEventListener(
         "DOMContentLoaded",
-        function() {
+        function () {
           lazy.log(
             "Arming the onDOMInputPasswordAdded DeferredTask due to DOMContentLoaded."
           );
@@ -2194,10 +2202,8 @@ export class LoginManagerChild extends JSWindowActorChild {
     // Make sure the username field fillForm will use is the
     // same field as the autocomplete was activated on.
     const docState = this.stateForDocument(acInputField.ownerDocument);
-    let {
-      usernameField,
-      newPasswordField: passwordField,
-    } = docState._getFormFields(acForm, false, recipes);
+    let { usernameField, newPasswordField: passwordField } =
+      docState._getFormFields(acForm, false, recipes);
     if (usernameField == acInputField) {
       // Fill the form when a password field is present.
       if (passwordField) {
@@ -2251,12 +2257,10 @@ export class LoginManagerChild extends JSWindowActorChild {
    * @param {Document} aDocument that was restored from bfcache.
    */
   _onDocumentRestored(aDocument) {
-    let rootElsWeakSet = lazy.LoginFormFactory.getRootElementsWeakSetForDocument(
-      aDocument
-    );
-    let weakLoginFormRootElements = ChromeUtils.nondeterministicGetWeakSetKeys(
-      rootElsWeakSet
-    );
+    let rootElsWeakSet =
+      lazy.LoginFormFactory.getRootElementsWeakSetForDocument(aDocument);
+    let weakLoginFormRootElements =
+      ChromeUtils.nondeterministicGetWeakSetKeys(rootElsWeakSet);
 
     lazy.log(
       `loginFormRootElements approx size: ${weakLoginFormRootElements.length}.`
@@ -2284,12 +2288,10 @@ export class LoginManagerChild extends JSWindowActorChild {
    * @param {Document} document being navigated
    */
   _onNavigation(aDocument) {
-    let rootElsWeakSet = lazy.LoginFormFactory.getRootElementsWeakSetForDocument(
-      aDocument
-    );
-    let weakLoginFormRootElements = ChromeUtils.nondeterministicGetWeakSetKeys(
-      rootElsWeakSet
-    );
+    let rootElsWeakSet =
+      lazy.LoginFormFactory.getRootElementsWeakSetForDocument(aDocument);
+    let weakLoginFormRootElements =
+      ChromeUtils.nondeterministicGetWeakSetKeys(rootElsWeakSet);
 
     lazy.log(`root elements approx size: ${weakLoginFormRootElements.length}`);
 
@@ -2785,34 +2787,15 @@ export class LoginManagerChild extends JSWindowActorChild {
 
     lazy.log(`Found ${form.elements.length} form elements.`);
     // Will be set to one of AUTOFILL_RESULT in the `try` block.
-    let autofillResult = -1;
-    const AUTOFILL_RESULT = {
-      FILLED: 0,
-      NO_PASSWORD_FIELD: 1,
-      PASSWORD_DISABLED_READONLY: 2,
-      NO_LOGINS_FIT: 3,
-      NO_SAVED_LOGINS: 4,
-      EXISTING_PASSWORD: 5,
-      EXISTING_USERNAME: 6,
-      MULTIPLE_LOGINS: 7,
-      NO_AUTOFILL_FORMS: 8,
-      AUTOCOMPLETE_OFF: 9,
-      INSECURE: 10,
-      PASSWORD_AUTOCOMPLETE_NEW_PASSWORD: 11,
-      TYPE_NO_LONGER_PASSWORD: 12,
-      FORM_IN_CROSSORIGIN_SUBFRAME: 13,
-      FILLED_USERNAME_ONLY_FORM: 14,
-    };
+    let autofillResult;
     const docState = this.stateForDocument(form.ownerDocument);
 
     // Heuristically determine what the user/pass fields are
     // We do this before checking to see if logins are stored,
     // so that the user isn't prompted for a primary password
     // without need.
-    let {
-      usernameField,
-      newPasswordField: passwordField,
-    } = docState._getFormFields(form, false, recipes);
+    let { usernameField, newPasswordField: passwordField } =
+      docState._getFormFields(form, false, recipes);
 
     const passwordACFieldName = passwordField?.getAutocompleteInfo().fieldName;
 
@@ -2943,7 +2926,7 @@ export class LoginManagerChild extends JSWindowActorChild {
         maxPasswordLen = passwordField.maxLength;
       }
 
-      let logins = foundLogins.filter(function(l) {
+      let logins = foundLogins.filter(function (l) {
         let fit =
           l.username.length <= maxUsernameLen &&
           l.password.length <= maxPasswordLen;
@@ -3143,16 +3126,15 @@ export class LoginManagerChild extends JSWindowActorChild {
       console.error(ex);
       throw ex;
     } finally {
-      if (autofillResult == -1) {
+      if (!autofillResult) {
         // eslint-disable-next-line no-unsafe-finally
         throw new Error("_fillForm: autofillResult must be specified");
       }
 
       if (!userTriggered) {
         // Ignore fills as a result of user action for this probe.
-        Services.telemetry
-          .getHistogramById("PWMGR_FORM_AUTOFILL_RESULT")
-          .add(autofillResult);
+
+        lazy.LoginManagerTelemetry.recordAutofillResult(autofillResult);
 
         if (usernameField) {
           let focusedElement = lazy.gFormFillService.focusedInput;
@@ -3160,7 +3142,7 @@ export class LoginManagerChild extends JSWindowActorChild {
             usernameField == focusedElement &&
             ![
               AUTOFILL_RESULT.FILLED,
-              AUTOFILL_STATE.FILLED_USERNAME_ONLY_FORM,
+              AUTOFILL_RESULT.FILLED_USERNAME_ONLY_FORM,
             ].includes(autofillResult)
           ) {
             lazy.log(

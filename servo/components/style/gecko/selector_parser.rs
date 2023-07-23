@@ -26,6 +26,7 @@ pub use crate::gecko::snapshot::SnapshotMap;
 
 bitflags! {
     // See NonTSPseudoClass::is_enabled_in()
+    #[derive(Copy, Clone)]
     struct NonTSPseudoClassFlag: u8 {
         const PSEUDO_CLASS_ENABLED_IN_UA_SHEETS = 1 << 0;
         const PSEUDO_CLASS_ENABLED_IN_CHROME = 1 << 1;
@@ -190,22 +191,17 @@ impl NonTSPseudoClass {
         self.state_flag().is_empty() &&
             !matches!(
                 *self,
-                // :dir() depends on state only, but may have an empty
-                // state_flag for invalid arguments.
+                // :dir() depends on state only, but may have an empty state_flag for invalid
+                // arguments.
                 NonTSPseudoClass::Dir(_) |
-                      // :-moz-is-html only depends on the state of the document and
-                      // the namespace of the element; the former is invariant
-                      // across all the elements involved and the latter is already
-                      // checked for by our caching precondtions.
-                      NonTSPseudoClass::MozIsHTML |
                       // We prevent style sharing for NAC.
                       NonTSPseudoClass::MozNativeAnonymous |
                       // :-moz-placeholder is parsed but never matches.
                       NonTSPseudoClass::MozPlaceholder |
-                      // :-moz-lwtheme, :-moz-locale-dir and
-                      // :-moz-window-inactive depend only on the state of the
-                      // document, which is invariant across all the elements
-                      // involved in a given style cache.
+                      // :-moz-is-html, :-moz-lwtheme, :-moz-locale-dir and :-moz-window-inactive
+                      // depend only on the state of the document, which is invariant across all
+                      // elements involved in a given style cache.
+                      NonTSPseudoClass::MozIsHTML |
                       NonTSPseudoClass::MozLWTheme |
                       NonTSPseudoClass::MozLocaleDir(_) |
                       NonTSPseudoClass::MozWindowInactive
@@ -311,6 +307,10 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
     type Impl = SelectorImpl;
     type Error = StyleParseErrorKind<'i>;
 
+    fn parse_parent_selector(&self) -> bool {
+        static_prefs::pref!("layout.css.nesting.enabled")
+    }
+
     #[inline]
     fn parse_slotted(&self) -> bool {
         true
@@ -323,7 +323,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
 
     #[inline]
     fn parse_nth_child_of(&self) -> bool {
-        static_prefs::pref!("layout.css.nth-child-of.enabled")
+        true
     }
 
     #[inline]

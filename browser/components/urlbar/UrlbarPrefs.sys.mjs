@@ -35,9 +35,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Feature gate pref for addon suggestions in the urlbar.
   ["addons.featureGate", false],
 
-  // The minimum prefix length of addons keyword the user must type to trigger
-  // the suggestion. 0 means the min length should be taken from Nimbus.
-  ["addons.minKeywordLength", 0],
+  // The number of times the user has clicked the "Show less frequently" command
+  // for addon suggestions.
+  ["addons.showLessFrequentlyCount", 0],
 
   // "Autofill" is the name of the feature that automatically completes domains
   // and URLs that the user has visited as the user is typing them in the urlbar
@@ -58,10 +58,6 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Set the threshold to not be candidate the input history passed approximately
   // 30 days since user input it as the default.
   ["autoFill.adaptiveHistory.useCountThreshold", [0.47, "float"]],
-
-  // If true, the domains of the user's installed search engines will be
-  // autofilled even if the user hasn't actually visited them.
-  ["autoFill.searchEngines", false],
 
   // Affects the frecency threshold of the autofill algorithm.  The threshold is
   // the mean of all origin frecencies plus one standard deviation multiplied by
@@ -190,6 +186,13 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // should be opened in new tabs by default.
   ["openintab", false],
 
+  // Feature gate pref for Pocket suggestions in the urlbar.
+  ["pocket.featureGate", false],
+
+  // The number of times the user has clicked the "Show less frequently" command
+  // for Pocket suggestions.
+  ["pocket.showLessFrequentlyCount", 0],
+
   // When true, URLs in the user's history that look like search result pages
   // are styled to look like search engine results instead of the usual history
   // results.
@@ -242,6 +245,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Whether results will include switch-to-tab results.
   ["suggest.openpage", true],
 
+  // If `pocket.featureGate` is true, this controls whether Pocket suggestions
+  // are turned on.
+  ["suggest.pocket", true],
+
   // Whether results will include synced tab results. The syncing of open tabs
   // must also be enabled, from Sync preferences.
   ["suggest.remotetab", true],
@@ -272,6 +279,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // Whether results will include sponsored quick suggest suggestions.
   ["suggest.quicksuggest.sponsored", false],
+
+  // If `browser.urlbar.addons.featureGate` is true, this controls whether
+  // addon suggestions are turned on.
+  ["suggest.addons", true],
 
   // Whether results will include search suggestions.
   ["suggest.searches", false],
@@ -393,13 +404,6 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // The index where we show unit conversion results.
   ["unitConversion.suggestedIndex", 1],
 
-  // Results will include a built-in set of popular domains when this is true.
-  ["usepreloadedtopurls.enabled", false],
-
-  // After this many days from the profile creation date, the built-in set of
-  // popular domains will no longer be included in the results.
-  ["usepreloadedtopurls.expire_days", 14],
-
   // Controls the empty search behavior in Search Mode:
   //  0 - Show nothing
   //  1 - Show search history
@@ -449,11 +453,13 @@ const PREF_OTHER_DEFAULTS = new Map([
 // Variables with fallback prefs do not need to be defined here because their
 // defaults are the values of their fallbacks.
 const NIMBUS_DEFAULTS = {
-  addonsKeywordsMinimumLength: 0,
-  addonsKeywordsMinimumLengthCap: 0,
+  addonsShowLessFrequentlyCap: 0,
+  addonsUITreatment: "a",
   experimentType: "",
   isBestMatchExperiment: false,
+  pocketShowLessFrequentlyCap: 0,
   quickSuggestRemoteSettingsDataType: "data",
+  quickSuggestScoreMap: null,
   recordNavigationalSuggestionTelemetry: false,
   weatherKeywords: null,
   weatherKeywordsMinimumLength: 0,
@@ -528,7 +534,6 @@ function makeResultGroups({ showSearchSuggestionsFirst }) {
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
-          { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_PRELOADED },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
@@ -592,10 +597,6 @@ function makeResultGroups({ showSearchSuggestionsFirst }) {
                 // only added for queries starting with "about:".
                 flex: 2,
                 group: lazy.UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
-              },
-              {
-                flex: 1,
-                group: lazy.UrlbarUtils.RESULT_GROUP.PRELOADED,
               },
             ],
           },
@@ -1048,8 +1049,8 @@ class Preferences {
         this[methodName](scenario);
       } catch (error) {
         console.error(
-          `Error migrating Firefox Suggest prefs to version ${nextVersion}: ` +
-            error
+          `Error migrating Firefox Suggest prefs to version ${nextVersion}:`,
+          error
         );
         break;
       }
@@ -1440,8 +1441,8 @@ class Preferences {
           prefName => !this.get(prefName)
         );
       case "autoFillAdaptiveHistoryUseCountThreshold":
-        const nimbusValue = this._nimbus
-          .autoFillAdaptiveHistoryUseCountThreshold;
+        const nimbusValue =
+          this._nimbus.autoFillAdaptiveHistoryUseCountThreshold;
         return nimbusValue === undefined
           ? this.get("autoFill.adaptiveHistory.useCountThreshold")
           : parseFloat(nimbusValue);

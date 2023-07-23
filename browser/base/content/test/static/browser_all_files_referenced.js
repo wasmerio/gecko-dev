@@ -89,9 +89,10 @@ if (AppConstants.MOZ_BACKGROUNDTASKS) {
   gExceptionPaths.push("resource://app/modules/backgroundtasks/");
 }
 
-// Bug 1710546 https://bugzilla.mozilla.org/show_bug.cgi?id=1710546
+// Temporary allowlist for shopping - we'll reference this soon.
 if (AppConstants.NIGHTLY_BUILD) {
-  gExceptionPaths.push("resource://builtin-addons/translations/");
+  gExceptionPaths.push("chrome://browser/content/shopping/shopping.html");
+  gExceptionPaths.push("chrome://global/content/shopping/ShoppingProduct.mjs");
 }
 
 if (AppConstants.NIGHTLY_BUILD) {
@@ -150,12 +151,10 @@ var whitelist = [
   // browser/components/preferences/moreFromMozilla.js
   // These files URLs are constructed programatically at run time.
   {
-    file:
-      "chrome://browser/content/preferences/more-from-mozilla-qr-code-simple.svg",
+    file: "chrome://browser/content/preferences/more-from-mozilla-qr-code-simple.svg",
   },
   {
-    file:
-      "chrome://browser/content/preferences/more-from-mozilla-qr-code-simple-cn.svg",
+    file: "chrome://browser/content/preferences/more-from-mozilla-qr-code-simple-cn.svg",
   },
 
   { file: "resource://gre/greprefs.js" },
@@ -169,59 +168,45 @@ var whitelist = [
 
   // The l10n build system can't package string files only for some platforms.
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/accessible.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/accessible.properties",
     platforms: ["linux", "win"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/intl.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/intl.properties",
     platforms: ["linux", "win"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/platformKeys.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/platformKeys.properties",
     platforms: ["linux", "win"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/accessible.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/accessible.properties",
     platforms: ["macosx", "win"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/intl.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/intl.properties",
     platforms: ["macosx", "win"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/platformKeys.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/platformKeys.properties",
     platforms: ["macosx", "win"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/win/accessible.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/win/accessible.properties",
     platforms: ["linux", "macosx"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/win/intl.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/win/intl.properties",
     platforms: ["linux", "macosx"],
   },
   {
-    file:
-      "resource://gre/chrome/en-US/locale/en-US/global-platform/win/platformKeys.properties",
+    file: "resource://gre/chrome/en-US/locale/en-US/global-platform/win/platformKeys.properties",
     platforms: ["linux", "macosx"],
   },
 
   // Files from upstream library
   { file: "resource://pdf.js/web/debugger.js" },
   { file: "resource://pdf.js/web/debugger.css" },
-
-  // resource://app/modules/translation/TranslationContentHandler.jsm
-  { file: "resource://app/modules/translation/BingTranslator.jsm" },
-  { file: "resource://app/modules/translation/GoogleTranslator.jsm" },
-  { file: "resource://app/modules/translation/YandexTranslator.jsm" },
 
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339424 (wontfix?)
@@ -272,8 +257,7 @@ var whitelist = [
 
   // tookit/mozapps/update/BackgroundUpdate.jsm
   {
-    file:
-      "resource://gre/localization/en-US/toolkit/updates/backgroundupdate.ftl",
+    file: "resource://gre/localization/en-US/toolkit/updates/backgroundupdate.ftl",
   },
   // Bug 1713242 - referenced by aboutThirdParty.html which is only for Windows
   {
@@ -282,8 +266,7 @@ var whitelist = [
   },
   // Bug 1973834 - referenced by aboutWindowsMessages.html which is only for Windows
   {
-    file:
-      "resource://gre/localization/en-US/toolkit/about/aboutWindowsMessages.ftl",
+    file: "resource://gre/localization/en-US/toolkit/about/aboutWindowsMessages.ftl",
     platforms: ["linux", "macosx"],
   },
   // Bug 1721741:
@@ -294,23 +277,14 @@ var whitelist = [
   // toolkit/xre/MacRunFromDmgUtils.mm
   { file: "resource://gre/localization/en-US/toolkit/global/run-from-dmg.ftl" },
 
-  // References to esm generated from jsm programmatically
-  { file: "resource://gre/modules/LangPackMatcher.sys.mjs" },
-
   // Referenced by screenshots extension
   { file: "chrome://browser/content/screenshots/cancel.svg" },
   { file: "chrome://browser/content/screenshots/copy.svg" },
   { file: "chrome://browser/content/screenshots/download.svg" },
   { file: "chrome://browser/content/screenshots/download-white.svg" },
 
-  // Bug 1824826 - Implement a view of history in Firefox View
-  { file: "resource://gre/modules/PlacesQuery.sys.mjs" },
-
-  // Should be removed in bug 1824826 when moz-tab-list is used in Firefox View
-  { file: "resource://app/localization/en-US/browser/mozTabList.ftl" },
-  { file: "chrome://browser/content/firefoxview/moz-tab-list.css" },
-  { file: "chrome://browser/content/firefoxview/moz-tab-list.mjs" },
-  { file: "chrome://browser/content/firefoxview/moz-tab-row.css" },
+  // FIXME: Bug 1840396 - The moz-message-bar component isn't in use yet.
+  { file: "chrome://global/content/elements/moz-message-bar.mjs" },
 ];
 
 if (AppConstants.NIGHTLY_BUILD && AppConstants.platform != "win") {
@@ -930,6 +904,8 @@ add_task(async function checkAllTheFiles() {
     "resource://devtools/",
     "resource://devtools-client-jsonview/",
     "resource://devtools-client-shared/",
+    "resource://devtools-shared-images/",
+    "resource://devtools-highlighter-styles/",
     "resource://app/modules/devtools",
     "resource://gre/modules/devtools",
     "resource://app/localization/en-US/startup/aboutDevTools.ftl",

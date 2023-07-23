@@ -148,10 +148,13 @@ ClientEngine.prototype = {
   },
 
   get lastRecordUpload() {
-    return Svc.Prefs.get(this.name + ".lastRecordUpload", 0);
+    return Svc.PrefBranch.getIntPref(this.name + ".lastRecordUpload", 0);
   },
   set lastRecordUpload(value) {
-    Svc.Prefs.set(this.name + ".lastRecordUpload", Math.floor(value));
+    Svc.PrefBranch.setIntPref(
+      this.name + ".lastRecordUpload",
+      Math.floor(value)
+    );
   },
 
   get remoteClients() {
@@ -672,7 +675,7 @@ ClientEngine.prototype = {
         this._lastDeviceCounts == null ||
         this._lastDeviceCounts.get(prefName) != count
       ) {
-        Svc.Prefs.set(prefName, count);
+        Svc.PrefBranch.setIntPref(prefName, count);
       }
     }
     this._lastDeviceCounts = deviceTypeCounts;
@@ -800,9 +803,8 @@ ClientEngine.prototype = {
       this._log.trace(`Client ${clientId} got a new action`, [command, args]);
       await this._tracker.addChangedID(clientId);
       try {
-        telemetryExtra.deviceID = this.service.identity.hashedDeviceID(
-          clientId
-        );
+        telemetryExtra.deviceID =
+          this.service.identity.hashedDeviceID(clientId);
       } catch (_) {}
 
       this.service.recordTelemetryEvent(
@@ -825,7 +827,7 @@ ClientEngine.prototype = {
    * @return false to abort sync
    */
   async processIncomingCommands() {
-    return this._notify("clients:process-commands", "", async function() {
+    return this._notify("clients:process-commands", "", async function () {
       if (
         !this.localCommands ||
         (this._lastModifiedOnProcessCommands == this._localClientLastModified &&
@@ -1030,7 +1032,8 @@ ClientStore.prototype = {
       }
     }
     if (record.commands) {
-      const maxPayloadSize = this.engine.service.getMemcacheMaxRecordPayloadSize();
+      const maxPayloadSize =
+        this.engine.service.getMemcacheMaxRecordPayloadSize();
       let origOrder = new Map(record.commands.map((c, i) => [c, i]));
       // we sort first by priority, and second by age (indicated by order in the
       // original list)

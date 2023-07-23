@@ -1817,6 +1817,8 @@ void BaseCompiler::popAndAllocateForMulI64(RegI64* r0, RegI64* r1,
   pop2xI64(r0, r1);
 #elif defined(JS_CODEGEN_LOONG64)
   pop2xI64(r0, r1);
+#elif defined(JS_CODEGEN_RISCV64)
+  pop2xI64(r0, r1);
 #else
   MOZ_CRASH("BaseCompiler porting interface: popAndAllocateForMulI64");
 #endif
@@ -1879,6 +1881,12 @@ static void QuotientI64(MacroAssembler& masm, RegI64 rhs, RegI64 srcDest,
   } else {
     masm.as_div_d(srcDest.reg, srcDest.reg, rhs.reg);
   }
+#  elif defined(JS_CODEGEN_RISCV64)
+  if (isUnsigned) {
+    masm.divu(srcDest.reg, srcDest.reg, rhs.reg);
+  } else {
+    masm.div(srcDest.reg, srcDest.reg, rhs.reg);
+  }
 #  else
   MOZ_CRASH("BaseCompiler platform hook: quotientI64");
 #  endif
@@ -1923,6 +1931,12 @@ static void RemainderI64(MacroAssembler& masm, RegI64 rhs, RegI64 srcDest,
     masm.as_mod_du(srcDest.reg, srcDest.reg, rhs.reg);
   } else {
     masm.as_mod_d(srcDest.reg, srcDest.reg, rhs.reg);
+  }
+#  elif defined(JS_CODEGEN_RISCV64)
+  if (isUnsigned) {
+    masm.remu(srcDest.reg, srcDest.reg, rhs.reg);
+  } else {
+    masm.rem(srcDest.reg, srcDest.reg, rhs.reg);
   }
 #  else
   MOZ_CRASH("BaseCompiler platform hook: remainderI64");
@@ -2288,8 +2302,9 @@ static void CtzI32(MacroAssembler& masm, RegI32 rsd) {
 static RegI32 PopcntTemp(BaseCompiler& bc) {
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
   return AssemblerX86Shared::HasPOPCNT() ? RegI32::Invalid() : bc.needI32();
-#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
-    defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) ||    \
+    defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
+    defined(JS_CODEGEN_RISCV64)
   return bc.needI32();
 #else
   MOZ_CRASH("BaseCompiler platform hook: PopcntTemp");
@@ -3145,7 +3160,9 @@ bool BaseCompiler::jumpConditionalWithResults(BranchState* b, Cond cond,
 
 #ifdef ENABLE_WASM_GC
 bool BaseCompiler::jumpConditionalWithResults(BranchState* b, RegRef object,
-                                              RefType type, bool onSuccess) {
+                                              RefType sourceType,
+                                              RefType destType,
+                                              bool onSuccess) {
   if (b->hasBlockResults()) {
     StackHeight resultsBase(0);
     if (!topBranchParams(b->resultType, &resultsBase)) {
@@ -3156,7 +3173,7 @@ bool BaseCompiler::jumpConditionalWithResults(BranchState* b, RegRef object,
       // Temporarily take the result registers so that branchGcHeapType doesn't
       // use them.
       needIntegerResultRegisters(b->resultType);
-      branchGcRefType(object, type, &notTaken,
+      branchGcRefType(object, sourceType, destType, &notTaken,
                       /*onSuccess=*/b->invertBranch ? !onSuccess : onSuccess);
       freeIntegerResultRegisters(b->resultType);
 
@@ -3169,7 +3186,7 @@ bool BaseCompiler::jumpConditionalWithResults(BranchState* b, RegRef object,
     }
   }
 
-  branchGcRefType(object, type, b->label,
+  branchGcRefType(object, sourceType, destType, b->label,
                   /*onSuccess=*/b->invertBranch ? !onSuccess : onSuccess);
   return true;
 }
@@ -4070,7 +4087,7 @@ bool BaseCompiler::emitCatch() {
   // to perform an allocation here to accomodate the variable number of values.
   // There is enough headroom for the fixed number of values.  The general case
   // is handled in emitBody.
-  if (!stk_.reserve(stk_.length() + params.length())) {
+  if (!stk_.reserve(stk_.length() + params.length() + 1)) {
     return false;
   }
 
@@ -7243,13 +7260,13 @@ bool BaseCompiler::emitArrayCopy() {
   return emitInstanceCall(SASigArrayCopy);
 }
 
-void BaseCompiler::emitRefTestCommon(const RefType& type) {
+void BaseCompiler::emitRefTestCommon(RefType sourceType, RefType destType) {
   Label success;
   Label join;
   RegRef object = popRef();
   RegI32 result = needI32();
 
-  branchGcRefType(object, type, &success, /*onSuccess=*/true);
+  branchGcRefType(object, sourceType, destType, &success, /*onSuccess=*/true);
   masm.xor32(result, result);
   masm.jump(&join);
   masm.bind(&success);
@@ -7260,11 +7277,11 @@ void BaseCompiler::emitRefTestCommon(const RefType& type) {
   freeRef(object);
 }
 
-void BaseCompiler::emitRefCastCommon(const RefType& type) {
+void BaseCompiler::emitRefCastCommon(RefType sourceType, RefType destType) {
   RegRef object = popRef();
 
   Label success;
-  branchGcRefType(object, type, &success, /*onSuccess=*/true);
+  branchGcRefType(object, sourceType, destType, &success, /*onSuccess=*/true);
   masm.wasmTrap(Trap::BadCast, bytecodeOffset());
   masm.bind(&success);
   pushRef(object);
@@ -7272,8 +7289,9 @@ void BaseCompiler::emitRefCastCommon(const RefType& type) {
 
 bool BaseCompiler::emitRefTestV5() {
   Nothing nothing;
+  RefType sourceType;
   uint32_t typeIndex;
-  if (!iter_.readRefTestV5(&typeIndex, &nothing)) {
+  if (!iter_.readRefTestV5(&sourceType, &typeIndex, &nothing)) {
     return false;
   }
 
@@ -7282,44 +7300,48 @@ bool BaseCompiler::emitRefTestV5() {
   }
 
   const TypeDef& typeDef = moduleEnv_.types->type(typeIndex);
-  const RefType& type = RefType::fromTypeDef(&typeDef, /*nullable=*/false);
-  emitRefTestCommon(type);
+  RefType destType = RefType::fromTypeDef(&typeDef, /*nullable=*/false);
+  emitRefTestCommon(sourceType, destType);
 
   return true;
 }
 
-void BaseCompiler::branchGcRefType(RegRef object, const RefType& type,
-                                   Label* label, bool onSuccess) {
-  RegI32 scratch1 = MacroAssembler::needScratch1ForBranchWasmGcRefType(type)
-                        ? needI32()
-                        : RegI32::Invalid();
-  RegI32 scratch2 = MacroAssembler::needScratch2ForBranchWasmGcRefType(type)
-                        ? needI32()
-                        : RegI32::Invalid();
+void BaseCompiler::branchGcRefType(RegRef object, RefType sourceType,
+                                   RefType destType, Label* label,
+                                   bool onSuccess) {
   RegPtr superSuperTypeVector;
-  if (MacroAssembler::needSuperSuperTypeVectorForBranchWasmGcRefType(type)) {
-    uint32_t typeIndex = moduleEnv_.types->indexOf(*type.typeDef());
+  if (MacroAssembler::needSuperSuperTypeVectorForBranchWasmGcRefType(
+          destType)) {
+    uint32_t typeIndex = moduleEnv_.types->indexOf(*destType.typeDef());
     superSuperTypeVector = loadSuperTypeVector(typeIndex);
   }
+  RegI32 scratch1 = MacroAssembler::needScratch1ForBranchWasmGcRefType(destType)
+                        ? needI32()
+                        : RegI32::Invalid();
+  RegI32 scratch2 = MacroAssembler::needScratch2ForBranchWasmGcRefType(destType)
+                        ? needI32()
+                        : RegI32::Invalid();
 
-  masm.branchWasmGcObjectIsRefType(object, type, label, onSuccess,
-                                   superSuperTypeVector, scratch1, scratch2);
+  masm.branchWasmGcObjectIsRefType(object, sourceType, destType, label,
+                                   onSuccess, superSuperTypeVector, scratch1,
+                                   scratch2);
 
-  if (superSuperTypeVector.isValid()) {
-    freePtr(superSuperTypeVector);
-  }
   if (scratch2.isValid()) {
     freeI32(scratch2);
   }
   if (scratch1.isValid()) {
     freeI32(scratch1);
   }
+  if (superSuperTypeVector.isValid()) {
+    freePtr(superSuperTypeVector);
+  }
 }
 
 bool BaseCompiler::emitRefCastV5() {
   Nothing nothing;
+  RefType sourceType;
   uint32_t typeIndex;
-  if (!iter_.readRefCastV5(&typeIndex, &nothing)) {
+  if (!iter_.readRefCastV5(&sourceType, &typeIndex, &nothing)) {
     return false;
   }
 
@@ -7328,16 +7350,17 @@ bool BaseCompiler::emitRefCastV5() {
   }
 
   const TypeDef& typeDef = moduleEnv_.types->type(typeIndex);
-  const RefType& type = RefType::fromTypeDef(&typeDef, /*nullable=*/true);
-  emitRefCastCommon(type);
+  RefType destType = RefType::fromTypeDef(&typeDef, /*nullable=*/true);
+  emitRefCastCommon(sourceType, destType);
 
   return true;
 }
 
 bool BaseCompiler::emitRefTest(bool nullable) {
   Nothing nothing;
-  RefType type;
-  if (!iter_.readRefTest(nullable, &type, &nothing)) {
+  RefType sourceType;
+  RefType destType;
+  if (!iter_.readRefTest(nullable, &sourceType, &destType, &nothing)) {
     return false;
   }
 
@@ -7345,15 +7368,16 @@ bool BaseCompiler::emitRefTest(bool nullable) {
     return true;
   }
 
-  emitRefTestCommon(type);
+  emitRefTestCommon(sourceType, destType);
 
   return true;
 }
 
 bool BaseCompiler::emitRefCast(bool nullable) {
   Nothing nothing;
-  RefType type;
-  if (!iter_.readRefCast(nullable, &type, &nothing)) {
+  RefType sourceType;
+  RefType destType;
+  if (!iter_.readRefCast(nullable, &sourceType, &destType, &nothing)) {
     return false;
   }
 
@@ -7361,7 +7385,7 @@ bool BaseCompiler::emitRefCast(bool nullable) {
     return true;
   }
 
-  emitRefCastCommon(type);
+  emitRefCastCommon(sourceType, destType);
 
   return true;
 }
@@ -7369,7 +7393,7 @@ bool BaseCompiler::emitRefCast(bool nullable) {
 bool BaseCompiler::emitBrOnCastCommon(bool onSuccess,
                                       uint32_t labelRelativeDepth,
                                       const ResultType& labelType,
-                                      const RefType& destType) {
+                                      RefType sourceType, RefType destType) {
   Control& target = controlItem(labelRelativeDepth);
   target.bceSafeOnExit &= bceSafe_;
 
@@ -7393,7 +7417,8 @@ bool BaseCompiler::emitBrOnCastCommon(bool onSuccess,
     freeIntegerResultRegisters(b.resultType);
   }
 
-  if (!jumpConditionalWithResults(&b, objectCondition, destType, onSuccess)) {
+  if (!jumpConditionalWithResults(&b, objectCondition, sourceType, destType,
+                                  onSuccess)) {
     return false;
   }
   freeRef(objectCondition);
@@ -7406,11 +7431,12 @@ bool BaseCompiler::emitBrOnCast() {
 
   bool onSuccess;
   uint32_t labelRelativeDepth;
+  RefType sourceType;
   RefType destType;
   ResultType labelType;
   BaseNothingVector unused_values{};
-  if (!iter_.readBrOnCast(&onSuccess, &labelRelativeDepth, &destType,
-                          &labelType, &unused_values)) {
+  if (!iter_.readBrOnCast(&onSuccess, &labelRelativeDepth, &sourceType,
+                          &destType, &labelType, &unused_values)) {
     return false;
   }
 
@@ -7418,20 +7444,24 @@ bool BaseCompiler::emitBrOnCast() {
     return true;
   }
 
-  return emitBrOnCastCommon(onSuccess, labelRelativeDepth, labelType, destType);
+  return emitBrOnCastCommon(onSuccess, labelRelativeDepth, labelType,
+                            sourceType, destType);
 }
 
 bool BaseCompiler::emitBrOnCastV5(bool onSuccess) {
   MOZ_ASSERT(!hasLatentOp());
 
   uint32_t labelRelativeDepth;
+  RefType sourceType;
   uint32_t castTypeIndex;
   ResultType labelType;
   BaseNothingVector unused_values{};
-  if (onSuccess ? !iter_.readBrOnCastV5(&labelRelativeDepth, &castTypeIndex,
-                                        &labelType, &unused_values)
-                : !iter_.readBrOnCastFailV5(&labelRelativeDepth, &castTypeIndex,
-                                            &labelType, &unused_values)) {
+  if (onSuccess
+          ? !iter_.readBrOnCastV5(&labelRelativeDepth, &sourceType,
+                                  &castTypeIndex, &labelType, &unused_values)
+          : !iter_.readBrOnCastFailV5(&labelRelativeDepth, &sourceType,
+                                      &castTypeIndex, &labelType,
+                                      &unused_values)) {
     return false;
   }
 
@@ -7440,23 +7470,25 @@ bool BaseCompiler::emitBrOnCastV5(bool onSuccess) {
   }
 
   const TypeDef& typeDef = moduleEnv_.types->type(castTypeIndex);
-  const RefType& destType = RefType::fromTypeDef(&typeDef, false);
-  return emitBrOnCastCommon(onSuccess, labelRelativeDepth, labelType, destType);
+  RefType destType = RefType::fromTypeDef(&typeDef, false);
+  return emitBrOnCastCommon(onSuccess, labelRelativeDepth, labelType,
+                            sourceType, destType);
 }
 
 bool BaseCompiler::emitBrOnCastHeapV5(bool onSuccess, bool nullable) {
   MOZ_ASSERT(!hasLatentOp());
 
   uint32_t labelRelativeDepth;
+  RefType sourceType;
   RefType destType;
   ResultType labelType;
   BaseNothingVector unused_values{};
-  if (onSuccess
-          ? !iter_.readBrOnCastHeapV5(nullable, &labelRelativeDepth, &destType,
-                                      &labelType, &unused_values)
-          : !iter_.readBrOnCastFailHeapV5(nullable, &labelRelativeDepth,
-                                          &destType, &labelType,
-                                          &unused_values)) {
+  if (onSuccess ? !iter_.readBrOnCastHeapV5(nullable, &labelRelativeDepth,
+                                            &sourceType, &destType, &labelType,
+                                            &unused_values)
+                : !iter_.readBrOnCastFailHeapV5(nullable, &labelRelativeDepth,
+                                                &sourceType, &destType,
+                                                &labelType, &unused_values)) {
     return false;
   }
 
@@ -7464,7 +7496,8 @@ bool BaseCompiler::emitBrOnCastHeapV5(bool onSuccess, bool nullable) {
     return true;
   }
 
-  return emitBrOnCastCommon(onSuccess, labelRelativeDepth, labelType, destType);
+  return emitBrOnCastCommon(onSuccess, labelRelativeDepth, labelType,
+                            sourceType, destType);
 }
 
 bool BaseCompiler::emitRefAsStructV5() {
@@ -8471,23 +8504,23 @@ static void BitselectV128(MacroAssembler& masm, RegV128 rhs, RegV128 control,
 #  endif
 
 #  ifdef ENABLE_WASM_RELAXED_SIMD
-static void RelaxedFmaF32x4(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
-                            RegV128 rsd) {
+static void RelaxedMaddF32x4(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
+                             RegV128 rsd) {
   masm.fmaFloat32x4(rs1, rs2, rsd);
 }
 
-static void RelaxedFnmaF32x4(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
-                             RegV128 rsd) {
+static void RelaxedNmaddF32x4(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
+                              RegV128 rsd) {
   masm.fnmaFloat32x4(rs1, rs2, rsd);
 }
 
-static void RelaxedFmaF64x2(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
-                            RegV128 rsd) {
+static void RelaxedMaddF64x2(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
+                             RegV128 rsd) {
   masm.fmaFloat64x2(rs1, rs2, rsd);
 }
 
-static void RelaxedFnmaF64x2(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
-                             RegV128 rsd) {
+static void RelaxedNmaddF64x2(MacroAssembler& masm, RegV128 rs1, RegV128 rs2,
+                              RegV128 rsd) {
   masm.fnmaFloat64x2(rs1, rs2, rsd);
 }
 
@@ -10219,26 +10252,26 @@ bool BaseCompiler::emitBody() {
           case uint32_t(SimdOp::V128Store64Lane):
             CHECK_NEXT(emitStoreLane(8));
 #  ifdef ENABLE_WASM_RELAXED_SIMD
-          case uint32_t(SimdOp::F32x4RelaxedFma):
+          case uint32_t(SimdOp::F32x4RelaxedMadd):
             if (!moduleEnv_.v128RelaxedEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
-            CHECK_NEXT(dispatchTernary2(RelaxedFmaF32x4, ValType::V128));
-          case uint32_t(SimdOp::F32x4RelaxedFnma):
+            CHECK_NEXT(dispatchTernary2(RelaxedMaddF32x4, ValType::V128));
+          case uint32_t(SimdOp::F32x4RelaxedNmadd):
             if (!moduleEnv_.v128RelaxedEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
-            CHECK_NEXT(dispatchTernary2(RelaxedFnmaF32x4, ValType::V128));
-          case uint32_t(SimdOp::F64x2RelaxedFma):
+            CHECK_NEXT(dispatchTernary2(RelaxedNmaddF32x4, ValType::V128));
+          case uint32_t(SimdOp::F64x2RelaxedMadd):
             if (!moduleEnv_.v128RelaxedEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
-            CHECK_NEXT(dispatchTernary2(RelaxedFmaF64x2, ValType::V128));
-          case uint32_t(SimdOp::F64x2RelaxedFnma):
+            CHECK_NEXT(dispatchTernary2(RelaxedMaddF64x2, ValType::V128));
+          case uint32_t(SimdOp::F64x2RelaxedNmadd):
             if (!moduleEnv_.v128RelaxedEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
-            CHECK_NEXT(dispatchTernary2(RelaxedFnmaF64x2, ValType::V128));
+            CHECK_NEXT(dispatchTernary2(RelaxedNmaddF64x2, ValType::V128));
             break;
           case uint32_t(SimdOp::I8x16RelaxedLaneSelect):
           case uint32_t(SimdOp::I16x8RelaxedLaneSelect):
@@ -10908,9 +10941,10 @@ bool js::wasm::BaselinePlatformSupport() {
     return false;
   }
 #endif
-#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86) ||   \
-    defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
-    defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86) ||        \
+    defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) ||      \
+    defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
+    defined(JS_CODEGEN_RISCV64)
   return true;
 #else
   return false;

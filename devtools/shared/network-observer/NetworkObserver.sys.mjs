@@ -9,6 +9,11 @@
 
 // Enable logging all platform events this module listen to
 const DEBUG_PLATFORM_EVENTS = false;
+// Enables defining criteria to filter the logs
+const DEBUG_PLATFORM_EVENTS_FILTER = (eventName, channel) => {
+  // e.g return eventName == "HTTP_TRANSACTION:REQUEST_HEADER" && channel.URI.spec == "http://foo.com";
+  return true;
+};
 
 const lazy = {};
 
@@ -38,7 +43,11 @@ function logPlatformEvent(eventName, channel, message = "") {
   if (!DEBUG_PLATFORM_EVENTS) {
     return;
   }
-  dump(`[netmonitor] ${channel.channelId} - ${eventName} ${message}\n`);
+  if (DEBUG_PLATFORM_EVENTS_FILTER(eventName, channel)) {
+    dump(
+      `[netmonitor] ${channel.channelId} - ${eventName} ${message} - ${channel.URI.spec}\n`
+    );
+  }
 }
 
 // The maximum uint32 value.
@@ -325,10 +334,8 @@ export class NetworkObserver {
         this.#createNetworkEvent(subject, { inProgressRequest: true });
       } else {
         // Handles any early blockings e.g by Web Extensions or by CORS
-        const {
-          blockingExtension,
-          blockedReason,
-        } = lazy.NetworkUtils.getBlockedReason(channel);
+        const { blockingExtension, blockedReason } =
+          lazy.NetworkUtils.getBlockedReason(channel, httpActivity.fromCache);
         this.#createNetworkEvent(subject, { blockedReason, blockingExtension });
       }
     }
@@ -433,7 +440,10 @@ export class NetworkObserver {
           serverTimings
         );
       } else if (topic === "http-on-failed-opening-request") {
-        const { blockedReason } = lazy.NetworkUtils.getBlockedReason(channel);
+        const { blockedReason } = lazy.NetworkUtils.getBlockedReason(
+          channel,
+          httpActivity.fromCache
+        );
         this.#createNetworkEvent(channel, { blockedReason });
       }
 
@@ -548,7 +558,7 @@ export class NetworkObserver {
    * @param number extraSizeData
    * @param string extraStringData
    */
-  observeActivity = DevToolsInfaillibleUtils.makeInfallible(function(
+  observeActivity = DevToolsInfaillibleUtils.makeInfallible(function (
     channel,
     activityType,
     activitySubtype,
@@ -1172,10 +1182,8 @@ export class NetworkObserver {
     harTimings.connect = this.#getConnectTiming(timings);
     harTimings.ssl = this.#getSslTiming(timings);
 
-    let {
-      secureConnectionStartTime,
-      secureConnectionStartTimeRelative,
-    } = this.#getSecureConnectionStartTimeInfo(timings);
+    let { secureConnectionStartTime, secureConnectionStartTimeRelative } =
+      this.#getSecureConnectionStartTimeInfo(timings);
 
     // sometimes the connection information events are attached to a speculative
     // channel instead of this one, but necko might glue them back together in the
@@ -1235,10 +1243,8 @@ export class NetworkObserver {
     harTimings.send = this.#getSendTiming(timings);
     harTimings.wait = this.#getWaitTiming(timings);
     harTimings.receive = this.#getReceiveTiming(timings);
-    let {
-      startSendingTime,
-      startSendingTimeRelative,
-    } = this.#getStartSendingTimeInfo(timings, connectStartTimeTc);
+    let { startSendingTime, startSendingTimeRelative } =
+      this.#getStartSendingTimeInfo(timings, connectStartTimeTc);
 
     if (secureConnectionStartTimeRelative) {
       const time = Math.max(Math.round(secureConnectionStartTime / 1000), -1);
@@ -1271,11 +1277,8 @@ export class NetworkObserver {
     const serverTimings = new Array(channel.serverTiming.length);
 
     for (let i = 0; i < channel.serverTiming.length; ++i) {
-      const {
-        name,
-        duration,
-        description,
-      } = channel.serverTiming.queryElementAt(i, Ci.nsIServerTiming);
+      const { name, duration, description } =
+        channel.serverTiming.queryElementAt(i, Ci.nsIServerTiming);
       serverTimings[i] = { name, duration, description };
     }
 

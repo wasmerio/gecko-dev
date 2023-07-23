@@ -194,9 +194,8 @@ var gIdentityHandler = {
   },
   get _identityIconBox() {
     delete this._identityIconBox;
-    return (this._identityIconBox = document.getElementById(
-      "identity-icon-box"
-    ));
+    return (this._identityIconBox =
+      document.getElementById("identity-icon-box"));
   },
   get _identityPopupMultiView() {
     delete this._identityPopupMultiView;
@@ -230,9 +229,8 @@ var gIdentityHandler = {
   },
   get _identityPopupHttpsOnlyModeMenuListTempItem() {
     delete this._identityPopupHttpsOnlyModeMenuListTempItem;
-    return (this._identityPopupHttpsOnlyModeMenuListTempItem = document.getElementById(
-      "identity-popup-security-menulist-tempitem"
-    ));
+    return (this._identityPopupHttpsOnlyModeMenuListTempItem =
+      document.getElementById("identity-popup-security-menulist-tempitem"));
   },
   get _identityPopupSecurityEVContentOwner() {
     delete this._identityPopupSecurityEVContentOwner;
@@ -329,16 +327,6 @@ var gIdentityHandler = {
       "security.insecure_connection_text.pbmode.enabled"
     );
     return this._insecureConnectionTextPBModeEnabled;
-  },
-  get _protectionsPanelEnabled() {
-    delete this._protectionsPanelEnabled;
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "_protectionsPanelEnabled",
-      "browser.protections_panel.enabled",
-      false
-    );
-    return this._protectionsPanelEnabled;
   },
   get _httpsOnlyModeEnabled() {
     delete this._httpsOnlyModeEnabled;
@@ -519,10 +507,7 @@ var gIdentityHandler = {
     // be almost identical to the one in AboutHttpsOnlyErrorParent.sys.mjs)
     let newURI;
     if (this._isAboutHttpsOnlyErrorPage) {
-      newURI = gBrowser.currentURI
-        .mutate()
-        .setScheme("http")
-        .finalize();
+      newURI = gBrowser.currentURI.mutate().setScheme("http").finalize();
       principal = Services.scriptSecurityManager.createContentPrincipal(
         newURI,
         gBrowser.contentPrincipal.originAttributes
@@ -555,7 +540,8 @@ var gIdentityHandler = {
     // from HTTPS to HTTP. Otherwise we can just reload the page.
     if (this._isAboutHttpsOnlyErrorPage) {
       gBrowser.loadURI(newURI, {
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        triggeringPrincipal:
+          Services.scriptSecurityManager.getSystemPrincipal(),
         loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY,
       });
       if (this._popupInitialized) {
@@ -591,7 +577,7 @@ var gIdentityHandler = {
     // SubjectName fields, broken up for individual access
     if (cert.subjectName) {
       result.subjectNameFields = {};
-      cert.subjectName.split(",").forEach(function(v) {
+      cert.subjectName.split(",").forEach(function (v) {
         var field = v.split("=");
         this[field[0]] = field[1];
       }, result.subjectNameFields);
@@ -749,9 +735,10 @@ var gIdentityHandler = {
    */
   _hasCustomRoot() {
     let issuerCert = null;
-    issuerCert = this._secInfo.succeededCertChain[
-      this._secInfo.succeededCertChain.length - 1
-    ];
+    issuerCert =
+      this._secInfo.succeededCertChain[
+        this._secInfo.succeededCertChain.length - 1
+      ];
 
     return !issuerCert.isBuiltInRoot;
   },
@@ -1104,10 +1091,8 @@ var gIdentityHandler = {
       }
     );
 
-    this._identityPopupSecurityEVContentOwner.textContent = gNavigatorBundle.getFormattedString(
-      "identity.ev.contentOwner2",
-      [owner]
-    );
+    this._identityPopupSecurityEVContentOwner.textContent =
+      gNavigatorBundle.getFormattedString("identity.ev.contentOwner2", [owner]);
 
     this._identityPopupContentOwner.textContent = owner;
     this._identityPopupContentSupp.textContent = supplemental;

@@ -13,21 +13,6 @@ LINUX_WORKER_TYPES = {
 
 # windows worker types keyed by test-platform and virtualization
 WINDOWS_WORKER_TYPES = {
-    "windows7-32-qr": {
-        "virtual": "t-win7-32",
-        "virtual-with-gpu": "t-win7-32-gpu",
-        "hardware": "t-win10-64-1803-hw",
-    },
-    "windows7-32-shippable-qr": {
-        "virtual": "t-win7-32",
-        "virtual-with-gpu": "t-win7-32-gpu",
-        "hardware": "t-win10-64-1803-hw",
-    },
-    "windows7-32-devedition-qr": {  # build only, tests have no value
-        "virtual": "t-win7-32",
-        "virtual-with-gpu": "t-win7-32-gpu",
-        "hardware": "t-win10-64-1803-hw",
-    },
     "windows10-64": {  # source-test
         "virtual": "t-win10-64",
         "virtual-with-gpu": "t-win10-64-gpu-s",
@@ -107,7 +92,6 @@ WINDOWS_WORKER_TYPES = {
 
 # os x worker types keyed by test-platform
 MACOSX_WORKER_TYPES = {
-    "macosx1015-64-power": "t-osx-1015-power",
     "macosx1015-64": "t-osx-1015-r8",
     "macosx1100-64": "t-osx-1100-m1",
 }
@@ -122,15 +106,12 @@ def set_worker_type(config, tasks):
         # during the taskcluster migration, this is a bit tortured, but it
         # will get simpler eventually!
         test_platform = task["test-platform"]
-        if task.get("worker-type") and task.get("worker-type") != "default":
+        if task.get("worker-type", "default") != "default":
             # This test already has its worker type defined, so just use that (yields below)
             # Unless the value is set to "default", in that case ignore it.
             pass
         elif test_platform.startswith("macosx1015-64"):
-            if "--power-test" in task["mozharness"]["extra-options"]:
-                task["worker-type"] = MACOSX_WORKER_TYPES["macosx1015-64-power"]
-            else:
-                task["worker-type"] = MACOSX_WORKER_TYPES["macosx1015-64"]
+            task["worker-type"] = MACOSX_WORKER_TYPES["macosx1015-64"]
         elif test_platform.startswith("macosx1100-64"):
             task["worker-type"] = MACOSX_WORKER_TYPES["macosx1100-64"]
         elif test_platform.startswith("win"):
@@ -174,7 +155,9 @@ def set_worker_type(config, tasks):
         elif test_platform.startswith("android-em-7.0-x86"):
             task["worker-type"] = "t-linux-kvm"
         elif test_platform.startswith("linux") or test_platform.startswith("android"):
-            if task.get("suite", "") in ["talos", "raptor"] and not task[
+            if "wayland" in test_platform:
+                task["worker-type"] = "t-linux-wayland"
+            elif task.get("suite", "") in ["talos", "raptor"] and not task[
                 "build-platform"
             ].startswith("linux64-ccov"):
                 task["worker-type"] = "t-linux-talos-1804"
@@ -183,4 +166,17 @@ def set_worker_type(config, tasks):
         else:
             raise Exception(f"unknown test_platform {test_platform}")
 
+        yield task
+
+
+@transforms.add
+def set_wayland_env(config, tasks):
+    for task in tasks:
+        if task["worker-type"] != "t-linux-wayland":
+            yield task
+            continue
+
+        env = task.setdefault("worker", {}).setdefault("env", {})
+        env["MOZ_ENABLE_WAYLAND"] = "1"
+        env["WAYLAND_DISPLAY"] = "wayland-0"
         yield task

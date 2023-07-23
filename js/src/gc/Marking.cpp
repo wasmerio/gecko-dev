@@ -287,24 +287,24 @@ static inline bool ShouldMarkCrossCompartment(GCMarker* marker, JSObject* src,
     }
 
     return dstZone->isGCMarking();
-  } else {
-    // Check our sweep groups are correct as above.
-    MOZ_ASSERT_IF(!dst.isMarkedAny(), !dstZone->isGCSweeping());
-
-    if (dstZone->isGCMarkingBlackOnly()) {
-      /*
-       * The destination compartment is being not being marked gray now,
-       * but it will be later, so record the cell so it can be marked gray
-       * at the appropriate time.
-       */
-      if (!dst.isMarkedAny()) {
-        DelayCrossCompartmentGrayMarking(marker, src);
-      }
-      return false;
-    }
-
-    return dstZone->isGCMarkingBlackAndGray();
   }
+
+  // Check our sweep groups are correct as above.
+  MOZ_ASSERT_IF(!dst.isMarkedAny(), !dstZone->isGCSweeping());
+
+  if (dstZone->isGCMarkingBlackOnly()) {
+    /*
+     * The destination compartment is being not being marked gray now,
+     * but it will be later, so record the cell so it can be marked gray
+     * at the appropriate time.
+     */
+    if (!dst.isMarkedAny()) {
+      DelayCrossCompartmentGrayMarking(marker, src);
+    }
+    return false;
+  }
+
+  return dstZone->isGCMarkingBlackAndGray();
 }
 
 static bool ShouldTraceCrossCompartment(JSTracer* trc, JSObject* src,
@@ -394,8 +394,7 @@ DEFINE_UNSAFE_TRACE_ROOT_FUNCTION(SavedFrame*)
 
 #undef DEFINE_UNSAFE_TRACE_ROOT_FUNCTION
 
-namespace js {
-namespace gc {
+namespace js::gc {
 
 #define INSTANTIATE_INTERNAL_TRACE_FUNCTIONS(type)                     \
   template void TraceRangeInternal<type>(JSTracer*, size_t len, type*, \
@@ -411,8 +410,7 @@ INSTANTIATE_INTERNAL_TRACE_FUNCTIONS(TaggedProto)
 #undef INSTANTIATE_INTERNAL_TRACE_FUNCTIONS_FROM_TRACEKIND
 #undef INSTANTIATE_INTERNAL_TRACE_FUNCTIONS
 
-}  // namespace gc
-}  // namespace js
+}  // namespace js::gc
 
 // In debug builds, makes a note of the current compartment before calling a
 // trace hook or traceChildren() method on a GC thing.
@@ -584,11 +582,11 @@ void js::TraceManuallyBarrieredGenericPointerEdge(JSTracer* trc, Cell** thingp,
     return;
   }
 
-  auto traced = MapGCThingTyped(thing, thing->getTraceKind(),
-                                [trc, name](auto t) -> Cell* {
-                                  TraceManuallyBarrieredEdge(trc, &t, name);
-                                  return t;
-                                });
+  auto* traced = MapGCThingTyped(thing, thing->getTraceKind(),
+                                 [trc, name](auto t) -> Cell* {
+                                   TraceManuallyBarrieredEdge(trc, &t, name);
+                                   return t;
+                                 });
   if (traced != thing) {
     *thingp = traced;
   }
@@ -1201,8 +1199,8 @@ void js::GCMarker::markAndTraverseEdge(S source, T* target) {
 }
 
 template <uint32_t opts, typename S, typename T>
-void js::GCMarker::markAndTraverseEdge(S source, const T& thing) {
-  ApplyGCThingTyped(thing, [this, source](auto t) {
+void js::GCMarker::markAndTraverseEdge(S source, const T& target) {
+  ApplyGCThingTyped(target, [this, source](auto t) {
     this->markAndTraverseEdge<opts>(source, t);
   });
 }
@@ -1252,6 +1250,9 @@ static gcstats::PhaseKind GrayMarkingPhaseForCurrentPhase(
 }
 
 void GCMarker::moveWork(GCMarker* dst, GCMarker* src) {
+  MOZ_ASSERT(dst->stack.isEmpty());
+  MOZ_ASSERT(src->canDonateWork());
+
   MarkStack::moveWork(dst->stack, src->stack);
 }
 
@@ -1276,29 +1277,24 @@ bool GCMarker::doMarking(SliceBudget& budget, ShouldReportMarkTime reportTime) {
 
   // This method leaves the mark color as it found it.
 
-  while (!isDrained()) {
-    if (hasBlackEntries() && !markOneColor<opts, MarkColor::Black>(budget)) {
+  if (hasBlackEntries() && !markOneColor<opts, MarkColor::Black>(budget)) {
+    return false;
+  }
+
+  if (hasGrayEntries()) {
+    mozilla::Maybe<gcstats::AutoPhase> ap;
+    if (reportTime) {
+      auto& stats = runtime()->gc.stats();
+      ap.emplace(stats, GrayMarkingPhaseForCurrentPhase(stats));
+    }
+
+    if (!markOneColor<opts, MarkColor::Gray>(budget)) {
       return false;
     }
-
-    if (hasGrayEntries()) {
-      mozilla::Maybe<gcstats::AutoPhase> ap;
-      if (reportTime) {
-        auto& stats = runtime()->gc.stats();
-        ap.emplace(stats, GrayMarkingPhaseForCurrentPhase(stats));
-      }
-
-      if (!markOneColor<opts, MarkColor::Gray>(budget)) {
-        return false;
-      }
-    }
-
-    // All normal marking happens before any delayed marking.
-    MOZ_ASSERT(!hasBlackEntries() && !hasGrayEntries());
   }
 
   // Mark children of things that caused too deep recursion during the above
-  // tracing.
+  // tracing. All normal marking happens before any delayed marking.
   if (gc.hasDelayedMarking()) {
     gc.markAllDelayedChildren(reportTime);
   }
@@ -1314,7 +1310,7 @@ bool GCMarker::markOneColor(SliceBudget& budget) {
   AutoSetMarkColor setColor(*this, color);
 
   while (processMarkStackTop<opts>(budget)) {
-    if (!hasEntries(color)) {
+    if (stack.isEmpty()) {
       return true;
     }
   }
@@ -1323,29 +1319,18 @@ bool GCMarker::markOneColor(SliceBudget& budget) {
 }
 
 bool GCMarker::markCurrentColorInParallel(SliceBudget& budget) {
-  if (markColor() == MarkColor::Black) {
-    return markOneColorInParallel<MarkColor::Black>(budget);
-  }
-
-  return markOneColorInParallel<MarkColor::Gray>(budget);
-}
-
-template <MarkColor color>
-bool GCMarker::markOneColorInParallel(SliceBudget& budget) {
-  AutoSetMarkColor setColor(*this, color);
-
   ParallelMarker::AtomicCount& waitingTaskCount =
       parallelMarker_->waitingTaskCountRef();
 
   while (processMarkStackTop<MarkingOptions::ParallelMarking>(budget)) {
-    if (!hasEntries(color)) {
+    if (stack.isEmpty()) {
       return true;
     }
 
     // TODO: It might be better to only check this occasionally, possibly
     // combined with the slice budget check. Experiments with giving this its
     // own counter resulted in worse performance.
-    if (waitingTaskCount && stack.canDonateWork()) {
+    if (waitingTaskCount && canDonateWork()) {
       parallelMarker_->donateWorkFrom(this);
     }
   }
@@ -1391,7 +1376,7 @@ inline bool GCMarker::processMarkStackTop(SliceBudget& budget) {
    * stack.
    */
 
-  MOZ_ASSERT(hasEntries(markColor()));
+  MOZ_ASSERT(!stack.isEmpty());
   MOZ_ASSERT_IF(markColor() == MarkColor::Gray, !hasBlackEntries());
 
   JSObject* obj;             // The object being scanned.
@@ -1678,21 +1663,40 @@ inline MarkStack::TaggedPtr MarkStack::SlotsOrElementsRange::ptr() const {
   return ptr_;
 }
 
-MarkStack::MarkStack() : grayPosition_(0), markColor_(MarkColor::Black) {
-  MOZ_ASSERT(isEmpty());
+MarkStack::MarkStack() { MOZ_ASSERT(isEmpty()); }
+
+MarkStack::~MarkStack() { MOZ_ASSERT(isEmpty()); }
+
+MarkStack::MarkStack(const MarkStack& other) {
+  MOZ_CRASH("Compiler requires this but doesn't call it");
 }
 
-MarkStack::~MarkStack() {
-  MOZ_ASSERT(isEmpty());
-  MOZ_ASSERT(iteratorCount_ == 0);
+MarkStack& MarkStack::operator=(const MarkStack& other) {
+  new (this) MarkStack(other);
+  return *this;
 }
 
-bool MarkStack::init() {
-  MOZ_ASSERT(isEmpty());
-  return resetStackCapacity();
+MarkStack::MarkStack(MarkStack&& other) noexcept
+    : stack_(std::move(other.stack_.ref())),
+      topIndex_(other.topIndex_.ref())
+#ifdef JS_GC_ZEAL
+      ,
+      maxCapacity_(other.maxCapacity_)
+#endif
+{
+  other.topIndex_ = 0;
 }
+
+MarkStack& MarkStack::operator=(MarkStack&& other) noexcept {
+  new (this) MarkStack(std::move(other));
+  return *this;
+}
+
+bool MarkStack::init() { return resetStackCapacity(); }
 
 bool MarkStack::resetStackCapacity() {
+  MOZ_ASSERT(isEmpty());
+
   size_t capacity = MARK_STACK_BASE_CAPACITY;
 
 #ifdef JS_GC_ZEAL
@@ -1716,47 +1720,6 @@ void MarkStack::setMaxCapacity(size_t maxCapacity) {
 }
 #endif
 
-void MarkStack::setMarkColor(gc::MarkColor newColor) {
-  if (markColor_ == newColor) {
-    return;
-  }
-
-  MOZ_ASSERT(!hasBlackEntries());
-
-  markColor_ = newColor;
-  if (markColor_ == MarkColor::Black) {
-    grayPosition_ = position();
-  } else {
-    grayPosition_ = SIZE_MAX;
-  }
-
-  assertGrayPositionValid();
-}
-
-inline void MarkStack::assertGrayPositionValid() const {
-  // Check grayPosition_ is consistent with the current mark color. This ensures
-  // that anything pushed on to the stack will end up marked with the correct
-  // color.
-  MOZ_ASSERT((markColor() == MarkColor::Black) ==
-             (position() >= grayPosition_));
-}
-
-bool MarkStack::hasEntries(MarkColor color) const {
-  return color == MarkColor::Black ? hasBlackEntries() : hasGrayEntries();
-}
-
-bool MarkStack::canDonateWork() const {
-  // It's not worth the overhead of donating very few entries. For some
-  // (non-parallelizable) workloads this can lead to constantly interrupting
-  // marking work and makes parallel marking slower than single threaded.
-  constexpr size_t MinWordCount = 12;
-
-  static_assert(MinWordCount >= ValueRangeWords,
-                "We must always leave at least one stack entry.");
-
-  return wordCountForCurrentColor() > MinWordCount;
-}
-
 MOZ_ALWAYS_INLINE bool MarkStack::indexIsEntryBase(size_t index) const {
   // The mark stack holds both TaggedPtr and SlotsOrElementsRange entries, which
   // are one or two words long respectively. Determine whether |index| points to
@@ -1774,7 +1737,7 @@ MOZ_ALWAYS_INLINE bool MarkStack::indexIsEntryBase(size_t index) const {
   // startAndKind_ word can be interpreted as such, which is arranged by making
   // SlotsOrElementsRangeTag zero and all SlotsOrElementsKind tags non-zero.
 
-  MOZ_ASSERT(index >= basePositionForCurrentColor() && index < position());
+  MOZ_ASSERT(index < position());
   return stack()[index].tagUnchecked() != SlotsOrElementsRangeTag;
 }
 
@@ -1790,16 +1753,10 @@ void MarkStack::moveWork(MarkStack& dst, MarkStack& src) {
   // donating.
   static const size_t MaxWordsToMove = 4096;
 
-  MOZ_ASSERT(src.markColor() == dst.markColor());
-  MOZ_ASSERT(!dst.hasEntries(dst.markColor()));
-  MOZ_ASSERT(src.canDonateWork());
-
-  size_t base = src.basePositionForCurrentColor();
-  size_t totalWords = src.position() - base;
+  size_t totalWords = src.position();
   size_t wordsToMove = std::min(totalWords / 2, MaxWordsToMove);
 
   size_t targetPos = src.position() - wordsToMove;
-  MOZ_ASSERT(src.position() >= base);
 
   // Adjust the target position in case it points to the middle of a two word
   // entry.
@@ -1809,7 +1766,7 @@ void MarkStack::moveWork(MarkStack& dst, MarkStack& src) {
   }
   MOZ_ASSERT(src.indexIsEntryBase(targetPos));
   MOZ_ASSERT(targetPos < src.position());
-  MOZ_ASSERT(targetPos > base);
+  MOZ_ASSERT(targetPos > 0);
   MOZ_ASSERT(wordsToMove == src.position() - targetPos);
 
   if (!dst.ensureSpace(wordsToMove)) {
@@ -1832,30 +1789,24 @@ void MarkStack::moveWork(MarkStack& dst, MarkStack& src) {
   src.peekPtr().assertValid();
 }
 
-MOZ_ALWAYS_INLINE size_t MarkStack::basePositionForCurrentColor() const {
-  return markColor() == MarkColor::Black ? grayPosition_ : 0;
-}
-
-MOZ_ALWAYS_INLINE size_t MarkStack::wordCountForCurrentColor() const {
-  size_t base = basePositionForCurrentColor();
-  MOZ_ASSERT(position() >= base);
-  return position() - base;
-}
-
-void MarkStack::clear() {
+void MarkStack::clearAndResetCapacity() {
   // Fall back to the smaller initial capacity so we don't hold on to excess
   // memory between GCs.
+  stack().clear();
+  topIndex_ = 0;
+  (void)resetStackCapacity();
+}
+
+void MarkStack::clearAndFreeStack() {
+  // Free all stack memory so we don't hold on to excess memory between GCs.
   stack().clearAndFree();
   topIndex_ = 0;
-  std::ignore = resetStackCapacity();
 }
 
 inline MarkStack::TaggedPtr* MarkStack::topPtr() { return &stack()[topIndex_]; }
 
 template <typename T>
 inline bool MarkStack::push(T* ptr) {
-  assertGrayPositionValid();
-
   return push(TaggedPtr(MapTypeToMarkStackTag<T*>::value, ptr));
 }
 
@@ -1885,7 +1836,6 @@ inline bool MarkStack::push(JSObject* obj, SlotsOrElementsKind kind,
 
 inline bool MarkStack::push(const SlotsOrElementsRange& array) {
   array.assertValid();
-  assertGrayPositionValid();
 
   if (!ensureSpace(ValueRangeWords)) {
     return false;
@@ -1903,7 +1853,7 @@ inline void MarkStack::infalliblePush(const SlotsOrElementsRange& array) {
 }
 
 inline const MarkStack::TaggedPtr& MarkStack::peekPtr() const {
-  MOZ_ASSERT(hasEntries(markColor()));
+  MOZ_ASSERT(!isEmpty());
   return stack()[topIndex_ - 1];
 }
 
@@ -1913,7 +1863,7 @@ inline MarkStack::Tag MarkStack::peekTag() const {
 }
 
 inline MarkStack::TaggedPtr MarkStack::popPtr() {
-  MOZ_ASSERT(hasEntries(markColor()));
+  MOZ_ASSERT(!isEmpty());
   MOZ_ASSERT(!TagIsRangeTag(peekTag()));
   peekPtr().assertValid();
   topIndex_--;
@@ -1921,7 +1871,7 @@ inline MarkStack::TaggedPtr MarkStack::popPtr() {
 }
 
 inline MarkStack::SlotsOrElementsRange MarkStack::popSlotsOrElementsRange() {
-  MOZ_ASSERT(hasEntries(markColor()));
+  MOZ_ASSERT(!isEmpty());
   MOZ_ASSERT(TagIsRangeTag(peekTag()));
   MOZ_ASSERT(position() >= ValueRangeWords);
 
@@ -1990,6 +1940,8 @@ size_t MarkStack::sizeOfExcludingThis(
 GCMarker::GCMarker(JSRuntime* rt)
     : tracer_(mozilla::VariantType<MarkingTracer>(), rt, this),
       runtime_(rt),
+      haveSwappedStacks(false),
+      markColor_(MarkColor::Black),
       state(NotActive),
       incrementalWeakMapMarkingEnabled(
           TuningDefaults::IncrementalWeakMapMarkingEnabled)
@@ -2025,26 +1977,53 @@ static void ClearEphemeronEdges(JSRuntime* rt) {
 
 void GCMarker::stop() {
   MOZ_ASSERT(isDrained());
+  MOZ_ASSERT(markColor() == MarkColor::Black);
+  MOZ_ASSERT(!haveSwappedStacks);
 
   if (state == NotActive) {
     return;
   }
   state = NotActive;
 
-  stack.clear();
+  (void)stack.resetStackCapacity();
+  otherStack.clearAndFreeStack();
   ClearEphemeronEdges(runtime());
-
   unmarkGrayStack.clearAndFree();
 }
 
 void GCMarker::reset() {
-  stack.clear();
+  stack.clearAndResetCapacity();
+  otherStack.clearAndFreeStack();
   ClearEphemeronEdges(runtime());
   MOZ_ASSERT(isDrained());
 
   setMarkColor(MarkColor::Black);
+  MOZ_ASSERT(!haveSwappedStacks);
 
   unmarkGrayStack.clearAndFree();
+}
+
+void GCMarker::setMarkColor(gc::MarkColor newColor) {
+  if (markColor_ == newColor) {
+    return;
+  }
+
+  // We don't support gray marking while there is black marking work to do.
+  MOZ_ASSERT(!hasBlackEntries());
+
+  markColor_ = newColor;
+
+  // Switch stacks. We only need to do this if there are any stack entries (as
+  // empty stacks are interchangeable) or to swtich back to the original stack.
+  if (!isDrained() || haveSwappedStacks) {
+    std::swap(stack, otherStack);
+    haveSwappedStacks = !haveSwappedStacks;
+  }
+}
+
+bool GCMarker::hasEntries(MarkColor color) const {
+  const MarkStack& stackForColor = color == markColor() ? stack : otherStack;
+  return stackForColor.hasEntries();
 }
 
 template <typename T>
@@ -2095,6 +2074,18 @@ void GCMarker::leaveParallelMarkingMode() {
   MOZ_ASSERT(parallelMarker_);
   setMarkingStateAndTracer<MarkingTracer>(ParallelMarking, RegularMarking);
   parallelMarker_ = nullptr;
+}
+
+bool GCMarker::canDonateWork() const {
+  // It's not worth the overhead of donating very few entries. For some
+  // (non-parallelizable) workloads this can lead to constantly interrupting
+  // marking work and makes parallel marking slower than single threaded.
+  constexpr size_t MinWordCount = 12;
+
+  static_assert(MinWordCount >= ValueRangeWords,
+                "We must always leave at least one stack entry.");
+
+  return stack.position() > MinWordCount;
 }
 
 template <typename Tracer>
@@ -2261,7 +2252,7 @@ void GCRuntime::processDelayedMarkingList(MarkColor color) {
         markDelayedChildren(arena, color);
       }
     }
-    while (marker().hasEntries(color)) {
+    while (marker().hasEntriesForCurrentColor()) {
       SliceBudget budget = SliceBudget::unlimited();
       MOZ_ALWAYS_TRUE(
           marker().processMarkStackTop<NormalMarkingOptions>(budget));
@@ -2360,7 +2351,8 @@ void GCMarker::checkZone(void* p) {
 #endif
 
 size_t GCMarker::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
-  return mallocSizeOf(this) + stack.sizeOfExcludingThis(mallocSizeOf);
+  return mallocSizeOf(this) + stack.sizeOfExcludingThis(mallocSizeOf) +
+         otherStack.sizeOfExcludingThis(mallocSizeOf);
 }
 
 /*** IsMarked / IsAboutToBeFinalized ****************************************/
@@ -2495,8 +2487,7 @@ inline void SweepingTracer::onEdge(T** thingp, const char* name) {
   }
 }
 
-namespace js {
-namespace gc {
+namespace js::gc {
 
 template <typename T>
 JS_PUBLIC_API bool TraceWeakEdge(JSTracer* trc, JS::Heap<T>* thingp) {
@@ -2542,8 +2533,7 @@ JS_FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(
 #undef INSTANTIATE_INTERNAL_MARKING_FUNCTIONS_FROM_TRACEKIND
 #undef INSTANTIATE_IATBF_FUNCTION_FOR_TAGGED_POINTER
 
-} /* namespace gc */
-} /* namespace js */
+}  // namespace js::gc
 
 /*** Cycle Collector Barrier Implementation *********************************/
 
@@ -2730,8 +2720,7 @@ bool js::UnmarkGrayShapeRecursively(Shape* shape) {
 Cell* js::gc::UninlinedForwarded(const Cell* cell) { return Forwarded(cell); }
 #endif
 
-namespace js {
-namespace debug {
+namespace js::debug {
 
 MarkInfo GetMarkInfo(Cell* rawCell) {
   if (!rawCell->isTenured()) {
@@ -2776,5 +2765,4 @@ uintptr_t GetMarkMask(Cell* cell, uint32_t colorBit) {
   return mask;
 }
 
-}  // namespace debug
-}  // namespace js
+}  // namespace js::debug

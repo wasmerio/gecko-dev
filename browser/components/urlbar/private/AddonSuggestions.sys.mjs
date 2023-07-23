@@ -7,7 +7,12 @@ import { BaseFeature } from "resource:///modules/urlbar/private/BaseFeature.sys.
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
   QuickSuggest: "resource:///modules/QuickSuggest.sys.mjs",
+  QuickSuggestRemoteSettings:
+    "resource:///modules/urlbar/private/QuickSuggestRemoteSettings.sys.mjs",
+  SuggestionsMap:
+    "resource:///modules/urlbar/private/QuickSuggestRemoteSettings.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarResult: "resource:///modules/UrlbarResult.sys.mjs",
   UrlbarUtils: "resource:///modules/UrlbarUtils.sys.mjs",
@@ -22,6 +27,7 @@ const VIEW_TEMPLATE = {
     {
       name: "content",
       tag: "span",
+      overflowable: true,
       children: [
         {
           name: "icon",
@@ -116,45 +122,143 @@ export class AddonSuggestions extends BaseFeature {
   }
 
   get shouldEnable() {
-    return lazy.UrlbarPrefs.get("addons.featureGate");
+    return (
+      lazy.UrlbarPrefs.get("addonsFeatureGate") &&
+      lazy.UrlbarPrefs.get("suggest.addons") &&
+      lazy.UrlbarPrefs.get("suggest.quicksuggest.nonsponsored")
+    );
   }
 
   get enablingPreferences() {
-    return ["addons.featureGate"];
+    return ["suggest.addons", "suggest.quicksuggest.nonsponsored"];
   }
 
-  makeResult(queryContext, suggestion, searchString) {
-    if (!this.isEnabled || searchString.length < this.#minKeywordLength) {
-      return null;
+  get merinoProvider() {
+    return "amo";
+  }
+
+  enable(enabled) {
+    if (enabled) {
+      lazy.QuickSuggestRemoteSettings.register(this);
+    } else {
+      lazy.QuickSuggestRemoteSettings.unregister(this);
+    }
+  }
+
+  queryRemoteSettings(searchString) {
+    const suggestions = this.#suggestionsMap?.get(searchString);
+    if (!suggestions) {
+      return [];
     }
 
-    const payload = {
-      source: suggestion.source,
+    return suggestions.map(suggestion => ({
       icon: suggestion.icon,
       url: suggestion.url,
       title: suggestion.title,
       description: suggestion.description,
-      rating: Number(suggestion.custom_details.amo.rating),
-      reviews: Number(suggestion.custom_details.amo.number_of_ratings),
+      rating: suggestion.rating,
+      number_of_ratings: suggestion.number_of_ratings,
+      guid: suggestion.guid,
+      score: suggestion.score,
+      is_top_pick: suggestion.is_top_pick,
+    }));
+  }
+
+  async onRemoteSettingsSync(rs) {
+    const records = await rs.get({ filters: { type: "amo-suggestions" } });
+    if (rs != lazy.QuickSuggestRemoteSettings.rs) {
+      return;
+    }
+
+    const suggestionsMap = new lazy.SuggestionsMap();
+
+    for (const record of records) {
+      const { buffer } = await rs.attachments.download(record);
+      if (rs != lazy.QuickSuggestRemoteSettings.rs) {
+        return;
+      }
+
+      const results = JSON.parse(new TextDecoder("utf-8").decode(buffer));
+      await suggestionsMap.add(results, {
+        mapKeyword:
+          lazy.SuggestionsMap.MAP_KEYWORD_PREFIXES_STARTING_AT_FIRST_WORD,
+      });
+      if (rs != lazy.QuickSuggestRemoteSettings.rs) {
+        return;
+      }
+    }
+
+    this.#suggestionsMap = suggestionsMap;
+  }
+
+  async makeResult(queryContext, suggestion, searchString) {
+    if (!this.isEnabled) {
+      // The feature is disabled on the client, but Merino may still return
+      // addon suggestions anyway, and we filter them out here.
+      return null;
+    }
+
+    // If the user hasn't clicked the "Show less frequently" command, the
+    // suggestion can be shown. Otherwise, the suggestion can be shown if the
+    // user typed more than one word with at least `showLessFrequentlyCount`
+    // characters after the first word, including spaces.
+    if (this.showLessFrequentlyCount) {
+      let spaceIndex = searchString.search(/\s/);
+      if (
+        spaceIndex < 0 ||
+        searchString.length - spaceIndex < this.showLessFrequentlyCount
+      ) {
+        return null;
+      }
+    }
+
+    // If is_top_pick is not specified, handle it as top pick suggestion.
+    suggestion.is_top_pick = suggestion.is_top_pick ?? true;
+
+    const { guid, rating, number_of_ratings } =
+      suggestion.source === "remote-settings"
+        ? suggestion
+        : suggestion.custom_details.amo;
+
+    const addon = await lazy.AddonManager.getAddonByID(guid);
+    if (addon) {
+      // Addon suggested is already installed.
+      return null;
+    }
+
+    const payload = {
+      icon: suggestion.icon,
+      url: suggestion.url,
+      title: suggestion.title,
+      description: suggestion.description,
+      rating: Number(rating),
+      reviews: Number(number_of_ratings),
       helpUrl: lazy.QuickSuggest.HELP_URL,
       shouldNavigate: true,
       dynamicType: "addons",
-      telemetryType: "amo",
     };
 
-    return new lazy.UrlbarResult(
-      lazy.UrlbarUtils.RESULT_TYPE.DYNAMIC,
-      lazy.UrlbarUtils.RESULT_SOURCE.SEARCH,
-      ...lazy.UrlbarResult.payloadAndSimpleHighlights(
-        queryContext.tokens,
-        payload
-      )
+    return Object.assign(
+      new lazy.UrlbarResult(
+        lazy.UrlbarUtils.RESULT_TYPE.DYNAMIC,
+        lazy.UrlbarUtils.RESULT_SOURCE.SEARCH,
+        ...lazy.UrlbarResult.payloadAndSimpleHighlights(
+          queryContext.tokens,
+          payload
+        )
+      ),
+      { showFeedbackMenu: true }
     );
   }
 
   getViewUpdate(result) {
+    const treatment = lazy.UrlbarPrefs.get("addonsUITreatment");
     const rating = result.payload.rating;
+
     return {
+      content: {
+        attributes: { treatment },
+      },
       icon: {
         attributes: {
           src: result.payload.icon,
@@ -195,12 +299,15 @@ export class AddonSuggestions extends BaseFeature {
         },
       },
       reviews: {
-        l10n: {
-          id: "firefox-suggest-addons-reviews",
-          args: {
-            quantity: result.payload.reviews,
-          },
-        },
+        l10n:
+          treatment === "b"
+            ? { id: "firefox-suggest-addons-recommended" }
+            : {
+                id: "firefox-suggest-addons-reviews",
+                args: {
+                  quantity: result.payload.reviews,
+                },
+              },
       },
     };
   }
@@ -208,7 +315,7 @@ export class AddonSuggestions extends BaseFeature {
   getResultCommands(result) {
     const commands = [];
 
-    if (this.#canIncrementMinKeywordLength) {
+    if (this.canShowLessFrequently) {
       commands.push({
         name: RESULT_MENU_COMMAND.SHOW_LESS_FREQUENTLY,
         l10n: {
@@ -249,7 +356,7 @@ export class AddonSuggestions extends BaseFeature {
     return commands;
   }
 
-  handlePossibleCommand(queryContext, result, selType) {
+  handleCommand(queryContext, result, selType) {
     switch (selType) {
       case RESULT_MENU_COMMAND.HELP:
         // "help" is handled by UrlbarInput, no need to do anything here.
@@ -258,12 +365,12 @@ export class AddonSuggestions extends BaseFeature {
       case "dismiss":
       case RESULT_MENU_COMMAND.NOT_INTERESTED:
       case RESULT_MENU_COMMAND.NOT_RELEVANT:
-        lazy.UrlbarPrefs.set("addons.featureGate", false);
+        lazy.UrlbarPrefs.set("suggest.addons", false);
         queryContext.view.acknowledgeDismissal(result);
         break;
       case RESULT_MENU_COMMAND.SHOW_LESS_FREQUENTLY:
         queryContext.view.acknowledgeFeedback(result);
-        this.#incrementMinKeywordLength();
+        this.incrementShowLessFrequentlyCount();
         break;
     }
   }
@@ -283,25 +390,27 @@ export class AddonSuggestions extends BaseFeature {
     return "full";
   }
 
-  #incrementMinKeywordLength() {
-    if (this.#canIncrementMinKeywordLength) {
+  incrementShowLessFrequentlyCount() {
+    if (this.canShowLessFrequently) {
       lazy.UrlbarPrefs.set(
-        "addons.minKeywordLength",
-        this.#minKeywordLength + 1
+        "addons.showLessFrequentlyCount",
+        this.showLessFrequentlyCount + 1
       );
     }
   }
 
-  get #minKeywordLength() {
-    const minLength =
-      lazy.UrlbarPrefs.get("addons.minKeywordLength") ||
-      lazy.UrlbarPrefs.get("addonsKeywordsMinimumLength") ||
-      0;
-    return Math.max(minLength, 0);
+  get showLessFrequentlyCount() {
+    const count = lazy.UrlbarPrefs.get("addons.showLessFrequentlyCount") || 0;
+    return Math.max(count, 0);
   }
 
-  get #canIncrementMinKeywordLength() {
-    const cap = lazy.UrlbarPrefs.get("addonsKeywordsMinimumLengthCap") || 0;
-    return !cap || this.#minKeywordLength < cap;
+  get canShowLessFrequently() {
+    const cap =
+      lazy.UrlbarPrefs.get("addonsShowLessFrequentlyCap") ||
+      lazy.QuickSuggestRemoteSettings.config.show_less_frequently_cap ||
+      0;
+    return !cap || this.showLessFrequentlyCount < cap;
   }
+
+  #suggestionsMap = null;
 }

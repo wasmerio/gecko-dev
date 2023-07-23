@@ -76,6 +76,7 @@ inline bool IsSpaceCharacter(char aChar) {
   return aChar == ' ' || aChar == '\t' || aChar == '\n' || aChar == '\r' ||
          aChar == '\f';
 }
+class AbstractRange;
 class AccessibleNode;
 template <typename T>
 class AncestorsOfTypeIterator;
@@ -170,10 +171,12 @@ enum : uint32_t {
   // siblings are restyled.
   NODE_HAS_SLOW_SELECTOR_NTH_OF = NODE_FLAG_BIT(10),
 
-  NODE_ALL_SELECTOR_FLAGS = NODE_HAS_EMPTY_SELECTOR | NODE_HAS_SLOW_SELECTOR |
-                            NODE_HAS_EDGE_CHILD_SELECTOR |
-                            NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS |
-                            NODE_HAS_SLOW_SELECTOR_NTH_OF,
+  // Set of selector flags that may trigger a restyle as a result of DOM
+  // mutation.
+  NODE_RESTYLE_SELECTOR_FLAGS =
+      NODE_HAS_EMPTY_SELECTOR | NODE_HAS_SLOW_SELECTOR |
+      NODE_HAS_EDGE_CHILD_SELECTOR | NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS |
+      NODE_HAS_SLOW_SELECTOR_NTH_OF,
 
   // This node needs to go through frame construction to get a frame (or
   // undisplayed entry).
@@ -1345,7 +1348,7 @@ class nsINode : public mozilla::dom::EventTarget {
      * pushing DOMSlots up to the next allocation bucket size, at the cost of
      * some complexity.
      */
-    mozilla::UniquePtr<mozilla::LinkedList<nsRange>>
+    mozilla::UniquePtr<mozilla::LinkedList<mozilla::dom::AbstractRange>>
         mClosestCommonInclusiveAncestorRanges;
   };
 
@@ -2206,7 +2209,7 @@ class nsINode : public mozilla::dom::EventTarget {
   /**
    * See nsSlots::mClosestCommonInclusiveAncestorRanges.
    */
-  const mozilla::LinkedList<nsRange>*
+  const mozilla::LinkedList<mozilla::dom::AbstractRange>*
   GetExistingClosestCommonInclusiveAncestorRanges() const {
     if (!HasSlots()) {
       return nullptr;
@@ -2217,7 +2220,7 @@ class nsINode : public mozilla::dom::EventTarget {
   /**
    * See nsSlots::mClosestCommonInclusiveAncestorRanges.
    */
-  mozilla::LinkedList<nsRange>*
+  mozilla::LinkedList<mozilla::dom::AbstractRange>*
   GetExistingClosestCommonInclusiveAncestorRanges() {
     if (!HasSlots()) {
       return nullptr;
@@ -2228,7 +2231,7 @@ class nsINode : public mozilla::dom::EventTarget {
   /**
    * See nsSlots::mClosestCommonInclusiveAncestorRanges.
    */
-  mozilla::UniquePtr<mozilla::LinkedList<nsRange>>&
+  mozilla::UniquePtr<mozilla::LinkedList<mozilla::dom::AbstractRange>>&
   GetClosestCommonInclusiveAncestorRangesPtr() {
     return Slots()->mClosestCommonInclusiveAncestorRanges;
   }

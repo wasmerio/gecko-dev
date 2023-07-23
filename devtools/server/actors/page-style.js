@@ -106,7 +106,8 @@ class PageStyleActor extends Actor {
     this._observedRules = [];
     this._styleApplied = this._styleApplied.bind(this);
 
-    this.styleSheetsManager = this.inspector.targetActor.getStyleSheetsManager();
+    this.styleSheetsManager =
+      this.inspector.targetActor.getStyleSheetsManager();
 
     this._onStylesheetUpdated = this._onStylesheetUpdated.bind(this);
     this.styleSheetsManager.on("stylesheet-updated", this._onStylesheetUpdated);
@@ -398,16 +399,16 @@ class PageStyleActor extends Actor {
     }
 
     // @font-face fonts at the top, then alphabetically, then by weight
-    fontsArray.sort(function(a, b) {
+    fontsArray.sort(function (a, b) {
       return a.weight > b.weight ? 1 : -1;
     });
-    fontsArray.sort(function(a, b) {
+    fontsArray.sort(function (a, b) {
       if (a.CSSFamilyName == b.CSSFamilyName) {
         return 0;
       }
       return a.CSSFamilyName > b.CSSFamilyName ? 1 : -1;
     });
-    fontsArray.sort(function(a, b) {
+    fontsArray.sort(function (a, b) {
       if ((a.rule && b.rule) || (!a.rule && !b.rule)) {
         return 0;
       }
@@ -688,6 +689,9 @@ class PageStyleActor extends Actor {
       case "::first-line":
       case "::selection":
         return true;
+      // We don't want the method to throw, but we don't handle those yet (See Bug 1840872)
+      case "::highlight":
+        return false;
       case "::marker":
         return this._nodeIsListItem(node);
       case "::backdrop":
@@ -810,7 +814,7 @@ class PageStyleActor extends Actor {
    *     'ua': Include properties from user and user-agent sheets.
    *     Default value is 'ua'
    *   `inherited`: Include styles inherited from parent nodes.
-   *   `matchedSelectors`: Include an array of specific selectors that
+   *   `matchedSelectors`: Include an array of specific (desugared) selectors that
    *     caused this rule to match its node.
    *   `skipPseudo`: Exclude styles applied to pseudo elements of the provided node.
    * @param array entries
@@ -840,28 +844,26 @@ class PageStyleActor extends Actor {
         }
 
         const domRule = entry.rule.rawRule;
-        const selectors = CssLogic.getSelectors(domRule);
+        const desugaredSelectors = CssLogic.getSelectors(domRule, true);
         const element = entry.inherited
           ? entry.inherited.rawNode
           : node.rawNode;
 
-        const { bindingElement, pseudo } = CssLogic.getBindingElementAndPseudo(
-          element
-        );
+        const { bindingElement, pseudo } =
+          CssLogic.getBindingElementAndPseudo(element);
         const relevantLinkVisited = CssLogic.hasVisitedState(bindingElement);
-        entry.matchedSelectors = [];
+        entry.matchedDesugaredSelectors = [];
 
-        for (let i = 0; i < selectors.length; i++) {
+        for (let i = 0; i < desugaredSelectors.length; i++) {
           if (
-            InspectorUtils.selectorMatchesElement(
-              bindingElement,
-              domRule,
+            domRule.selectorMatchesElement(
               i,
+              bindingElement,
               pseudo,
               relevantLinkVisited
             )
           ) {
-            entry.matchedSelectors.push(selectors[i]);
+            entry.matchedDesugaredSelectors.push(desugaredSelectors[i]);
           }
         }
       }
@@ -1112,10 +1114,15 @@ class PageStyleActor extends Actor {
    * Call this method whenever a CSS rule is mutated:
    * - a CSS declaration is added/changed/disabled/removed
    * - a selector is added/changed/removed
+   *
+   * @param {Array<StyleRuleActor>} rulesToForceRefresh: An array of rules that,
+   *        if observed, should be refreshed even if the state of their declaration
+   *        didn't change.
    */
-  refreshObservedRules() {
+  refreshObservedRules(rulesToForceRefresh) {
     for (const rule of this._observedRules) {
-      rule.refresh();
+      const force = rulesToForceRefresh && rulesToForceRefresh.includes(rule);
+      rule.maybeRefresh(force);
     }
   }
 

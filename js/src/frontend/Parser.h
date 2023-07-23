@@ -183,8 +183,8 @@
 #include "frontend/SharedContext.h"
 #include "frontend/SyntaxParseHandler.h"
 #include "frontend/TokenStream.h"
+#include "js/CharacterEncoding.h"     // JS::ConstUTF8CharsZ
 #include "js/friend/ErrorMessages.h"  // JSErrNum, JSMSG_*
-#include "js/Stack.h"                 // JS::NativeStackLimit
 #include "vm/GeneratorAndAsyncKind.h"  // js::GeneratorKind, js::FunctionAsyncKind
 
 namespace js {
@@ -287,8 +287,6 @@ class MOZ_STACK_CLASS ParserBase : public ParserSharedBase,
   const bool foldConstants_ : 1;
 
  protected:
-  JS::NativeStackLimit stackLimit_;
-
 #if DEBUG
   /* Our fallible 'checkOptions' member function has been called. */
   bool checkOptionsCalled_ : 1;
@@ -323,14 +321,13 @@ class MOZ_STACK_CLASS ParserBase : public ParserSharedBase,
   template <class, typename>
   friend class AutoInParametersOfAsyncFunction;
 
-  ParserBase(FrontendContext* fc, JS::NativeStackLimit stackLimit,
-             const JS::ReadOnlyCompileOptions& options, bool foldConstants,
-             CompilationState& compilationState);
+  ParserBase(FrontendContext* fc, const JS::ReadOnlyCompileOptions& options,
+             bool foldConstants, CompilationState& compilationState);
   ~ParserBase();
 
   bool checkOptions();
 
-  const char* getFilename() const { return anyChars.getFilename(); }
+  JS::ConstUTF8CharsZ getFilename() const { return anyChars.getFilename(); }
   TokenPos pos() const { return anyChars.currentToken().pos; }
 
   // Determine whether |yield| is a valid name in the current context.
@@ -472,19 +469,19 @@ class MOZ_STACK_CLASS PerHandlerParser : public ParserBase {
   // NOTE: The argument ordering here is deliberately different from the
   //       public constructor so that typos calling the public constructor
   //       are less likely to select this overload.
-  PerHandlerParser(FrontendContext* fc, JS::NativeStackLimit stackLimit,
+  PerHandlerParser(FrontendContext* fc,
                    const JS::ReadOnlyCompileOptions& options,
                    bool foldConstants, CompilationState& compilationState,
                    void* internalSyntaxParser);
 
  protected:
   template <typename Unit>
-  PerHandlerParser(FrontendContext* fc, JS::NativeStackLimit stackLimit,
+  PerHandlerParser(FrontendContext* fc,
                    const JS::ReadOnlyCompileOptions& options,
                    bool foldConstants, CompilationState& compilationState,
                    GeneralParser<SyntaxParseHandler, Unit>* syntaxParser)
-      : PerHandlerParser(fc, stackLimit, options, foldConstants,
-                         compilationState, static_cast<void*>(syntaxParser)) {}
+      : PerHandlerParser(fc, options, foldConstants, compilationState,
+                         static_cast<void*>(syntaxParser)) {}
 
   static typename ParseHandler::NullNode null() { return ParseHandler::null(); }
 
@@ -926,9 +923,8 @@ class MOZ_STACK_CLASS GeneralParser : public PerHandlerParser<ParseHandler> {
   TokenStream tokenStream;
 
  public:
-  GeneralParser(FrontendContext* fc, JS::NativeStackLimit stackLimit,
-                const JS::ReadOnlyCompileOptions& options, const Unit* units,
-                size_t length, bool foldConstants,
+  GeneralParser(FrontendContext* fc, const JS::ReadOnlyCompileOptions& options,
+                const Unit* units, size_t length, bool foldConstants,
                 CompilationState& compilationState, SyntaxParser* syntaxParser);
 
   inline void setAwaitHandling(AwaitHandling awaitHandling);

@@ -5,12 +5,8 @@
 ChromeUtils.defineESModuleGetters(this, {
   AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.sys.mjs",
   NewTabUtils: "resource://gre/modules/NewTabUtils.sys.mjs",
+  PanelMultiView: "resource:///modules/PanelMultiView.sys.mjs",
 });
-ChromeUtils.defineModuleGetter(
-  this,
-  "PanelMultiView",
-  "resource:///modules/PanelMultiView.jsm"
-);
 ChromeUtils.defineModuleGetter(
   this,
   "ToolbarPanelHub",
@@ -117,7 +113,7 @@ const PanelUI = {
       // Need to do fresh let-bindings per iteration
       let getKey = k;
       let id = v;
-      this.__defineGetter__(getKey, function() {
+      this.__defineGetter__(getKey, function () {
         delete this[getKey];
         return (this[getKey] = document.getElementById(id));
       });
@@ -648,7 +644,7 @@ const PanelUI = {
       // their localization IDs are set on "appmenu-data-l10n-id" attributes.
       let l10nId = node.getAttribute("appmenu-data-l10n-id");
       if (l10nId) {
-        button.setAttribute("data-l10n-id", l10nId);
+        document.l10n.setAttributes(button, l10nId);
       }
 
       if (node.id) {
@@ -939,6 +935,12 @@ const PanelUI = {
     if (notification.options.popupIconURL) {
       popupnotification.setAttribute("icon", notification.options.popupIconURL);
       popupnotification.setAttribute("hasicon", true);
+    }
+    if (notification.options.learnMoreURL) {
+      popupnotification.setAttribute(
+        "learnmoreurl",
+        notification.options.learnMoreURL
+      );
     }
 
     popupnotification.notification = notification;

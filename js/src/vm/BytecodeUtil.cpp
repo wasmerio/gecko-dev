@@ -2735,11 +2735,17 @@ JSString* JS::GetPCCountScriptSummary(JSContext* cx, size_t index) {
 
   json.beginObject();
 
-  RootedString filename(cx, NewStringCopyZ<CanGC>(cx, script->filename()));
-  if (!filename) {
+  Rooted<JSString*> filenameStr(cx);
+  if (const char* filename = script->filename()) {
+    filenameStr =
+        JS_NewStringCopyUTF8N(cx, JS::UTF8Chars(filename, strlen(filename)));
+  } else {
+    filenameStr = JS_GetEmptyString(cx);
+  }
+  if (!filenameStr) {
     return nullptr;
   }
-  if (!JSONStringProperty(sp, json, "file", filename)) {
+  if (!JSONStringProperty(sp, json, "file", filenameStr)) {
     return nullptr;
   }
   json.property("line", script->lineno());
@@ -2917,7 +2923,7 @@ static bool GetPCCountJSON(JSContext* cx, const ScriptAndCounts& sac,
 
   json.endObject();
 
-  return true;
+  return !sp.hadOutOfMemory();
 }
 
 JSString* JS::GetPCCountScriptContents(JSContext* cx, size_t index) {

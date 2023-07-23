@@ -3,7 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include "jxl/decode.h"
+#include <jxl/decode.h>
+#include <jxl/types.h>
 
 #include <algorithm>
 #include <array>
@@ -12,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "jxl/types.h"
 #include "lib/jxl/base/byte_order.h"
 #include "lib/jxl/base/span.h"
 #include "lib/jxl/base/status.h"
@@ -670,14 +670,6 @@ bool CheckSizeLimit(JxlDecoder* dec, size_t xsize, size_t ysize) {
 
 }  // namespace
 
-// TODO(zond): Make this depend on the data loaded into the decoder.
-JxlDecoderStatus JxlDecoderDefaultPixelFormat(const JxlDecoder* dec,
-                                              JxlPixelFormat* format) {
-  if (!dec->got_basic_info) return JXL_DEC_NEED_MORE_INPUT;
-  *format = {4, JXL_TYPE_FLOAT, JXL_LITTLE_ENDIAN, 0};
-  return JXL_DEC_SUCCESS;
-}
-
 // Resets the state that must be reset for both Rewind and Reset
 void JxlDecoderRewindDecodingState(JxlDecoder* dec) {
   dec->stage = DecoderStage::kInited;
@@ -1112,7 +1104,10 @@ JxlDecoderStatus JxlDecoderProcessSections(JxlDecoder* dec) {
   std::vector<jxl::FrameDecoder::SectionInfo> section_info;
   std::vector<jxl::FrameDecoder::SectionStatus> section_status;
   for (size_t i = dec->next_section; i < toc.size(); ++i) {
-    if (dec->section_processed[i]) continue;
+    if (dec->section_processed[i]) {
+      pos += toc[i].size;
+      continue;
+    }
     size_t id = toc[i].id;
     size_t size = toc[i].size;
     if (OutOfBounds(pos, size, span.size())) {
@@ -1120,7 +1115,7 @@ JxlDecoderStatus JxlDecoderProcessSections(JxlDecoder* dec) {
     }
     auto br =
         new jxl::BitReader(jxl::Span<const uint8_t>(span.data() + pos, size));
-    section_info.emplace_back(jxl::FrameDecoder::SectionInfo{br, id});
+    section_info.emplace_back(jxl::FrameDecoder::SectionInfo{br, id, i});
     section_status.emplace_back();
     pos += size;
   }
@@ -1145,26 +1140,22 @@ JxlDecoderStatus JxlDecoderProcessSections(JxlDecoder* dec) {
   if (!status) {
     return JXL_API_ERROR("frame processing failed");
   }
-  bool found_skipped_section = false;
-  size_t num_done = 0;
-  size_t processed_bytes = 0;
   for (size_t i = 0; i < section_status.size(); ++i) {
     auto status = section_status[i];
     if (status == jxl::FrameDecoder::kDone) {
-      if (!found_skipped_section) {
-        processed_bytes += toc[dec->next_section + i].size;
-        ++num_done;
-      }
-      dec->section_processed[dec->next_section + i] = 1;
-    } else if (status == jxl::FrameDecoder::kSkipped) {
-      found_skipped_section = true;
-    } else {
+      dec->section_processed[section_info[i].index] = 1;
+    } else if (status != jxl::FrameDecoder::kSkipped) {
       return JXL_API_ERROR("unexpected section status");
     }
   }
-  dec->next_section += num_done;
-  dec->remaining_frame_size -= processed_bytes;
-  dec->AdvanceCodestream(processed_bytes);
+  size_t completed_prefix_bytes = 0;
+  while (dec->next_section < dec->section_processed.size() &&
+         dec->section_processed[dec->next_section] == 1) {
+    completed_prefix_bytes += toc[dec->next_section].size;
+    ++dec->next_section;
+  }
+  dec->remaining_frame_size -= completed_prefix_bytes;
+  dec->AdvanceCodestream(completed_prefix_bytes);
   return JXL_DEC_SUCCESS;
 }
 
@@ -1253,11 +1244,8 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec) {
       Span<const uint8_t> span;
       JXL_API_RETURN_IF_ERROR(dec->GetCodestreamInput(&span));
       auto reader = GetBitReader(span);
-      bool output_needed =
-          (dec->preview_frame ? (dec->events_wanted & JXL_DEC_PREVIEW_IMAGE)
-                              : (dec->events_wanted & JXL_DEC_FULL_IMAGE));
       jxl::Status status = dec->frame_dec->InitFrame(
-          reader.get(), dec->ib.get(), dec->preview_frame, output_needed);
+          reader.get(), dec->ib.get(), dec->preview_frame);
       if (!reader->AllReadsWithinBounds() ||
           status.code() == StatusCode::kNotEnoughBytes) {
         return dec->RequestMoreInput();
@@ -1270,6 +1258,12 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec) {
       if (!CheckSizeLimit(dec, frame_dim.xsize_upsampled_padded,
                           frame_dim.ysize_upsampled_padded)) {
         return JXL_API_ERROR("frame is too large");
+      }
+      bool output_needed =
+          (dec->preview_frame ? (dec->events_wanted & JXL_DEC_PREVIEW_IMAGE)
+                              : (dec->events_wanted & JXL_DEC_FULL_IMAGE));
+      if (output_needed) {
+        JXL_API_RETURN_IF_ERROR(dec->frame_dec->InitFrameOutput());
       }
       if (dec->cpu_limit_base != 0) {
         // No overflow, checked in CheckSizeLimit.
@@ -2222,8 +2216,8 @@ JxlDecoderStatus GetColorEncodingForTarget(
 }  // namespace
 
 JxlDecoderStatus JxlDecoderGetColorAsEncodedProfile(
-    const JxlDecoder* dec, const JxlPixelFormat* unused_format,
-    JxlColorProfileTarget target, JxlColorEncoding* color_encoding) {
+    const JxlDecoder* dec, JxlColorProfileTarget target,
+    JxlColorEncoding* color_encoding) {
   const jxl::ColorEncoding* jxl_color_encoding = nullptr;
   JxlDecoderStatus status =
       GetColorEncodingForTarget(dec, target, &jxl_color_encoding);
@@ -2239,9 +2233,9 @@ JxlDecoderStatus JxlDecoderGetColorAsEncodedProfile(
   return JXL_DEC_SUCCESS;
 }
 
-JxlDecoderStatus JxlDecoderGetICCProfileSize(
-    const JxlDecoder* dec, const JxlPixelFormat* unused_format,
-    JxlColorProfileTarget target, size_t* size) {
+JxlDecoderStatus JxlDecoderGetICCProfileSize(const JxlDecoder* dec,
+                                             JxlColorProfileTarget target,
+                                             size_t* size) {
   const jxl::ColorEncoding* jxl_color_encoding = nullptr;
   JxlDecoderStatus status =
       GetColorEncodingForTarget(dec, target, &jxl_color_encoding);
@@ -2267,13 +2261,14 @@ JxlDecoderStatus JxlDecoderGetICCProfileSize(
   return JXL_DEC_SUCCESS;
 }
 
-JxlDecoderStatus JxlDecoderGetColorAsICCProfile(
-    const JxlDecoder* dec, const JxlPixelFormat* unused_format,
-    JxlColorProfileTarget target, uint8_t* icc_profile, size_t size) {
+JxlDecoderStatus JxlDecoderGetColorAsICCProfile(const JxlDecoder* dec,
+                                                JxlColorProfileTarget target,
+                                                uint8_t* icc_profile,
+                                                size_t size) {
   size_t wanted_size;
   // This also checks the NEED_MORE_INPUT and the unknown/xyb cases
   JxlDecoderStatus status =
-      JxlDecoderGetICCProfileSize(dec, nullptr, target, &wanted_size);
+      JxlDecoderGetICCProfileSize(dec, target, &wanted_size);
   if (status != JXL_DEC_SUCCESS) return status;
   if (size < wanted_size) return JXL_API_ERROR("ICC profile output too small");
 
@@ -2773,21 +2768,14 @@ namespace {
 template <typename T>
 JxlDecoderStatus VerifyOutputBitDepth(JxlBitDepth bit_depth, const T& metadata,
                                       JxlPixelFormat format) {
-  if ((format.data_type == JXL_TYPE_FLOAT ||
-       format.data_type == JXL_TYPE_FLOAT16) &&
-      bit_depth.type != JXL_BIT_DEPTH_FROM_PIXEL_FORMAT) {
-    return JXL_API_ERROR(
-        "Only JXL_BIT_DEPTH_FROM_PIXEL_FORMAT is implemented "
-        "for float types.");
-  }
   uint32_t bits_per_sample = GetBitDepth(bit_depth, metadata, format);
   if (format.data_type == JXL_TYPE_UINT8 &&
       (bits_per_sample == 0 || bits_per_sample > 8)) {
-    return JXL_API_ERROR("Inavlid bit depth %u for uint8 output",
+    return JXL_API_ERROR("Invalid bit depth %u for uint8 output",
                          bits_per_sample);
   } else if (format.data_type == JXL_TYPE_UINT16 &&
              (bits_per_sample == 0 || bits_per_sample > 16)) {
-    return JXL_API_ERROR("Inavlid bit depth %u for uint16 output",
+    return JXL_API_ERROR("Invalid bit depth %u for uint16 output",
                          bits_per_sample);
   }
   return JXL_DEC_SUCCESS;

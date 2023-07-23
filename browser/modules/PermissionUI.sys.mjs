@@ -68,18 +68,10 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
 
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "AddonManager",
-  "resource://gre/modules/AddonManager.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "SitePermissions",
-  "resource:///modules/SitePermissions.jsm"
-);
 ChromeUtils.defineESModuleGetters(lazy, {
+  AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+  SitePermissions: "resource:///modules/SitePermissions.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -94,7 +86,7 @@ XPCOMUtils.defineLazyServiceGetter(
   "@mozilla.org/content-pref/service;1",
   "nsIContentPrefService2"
 );
-XPCOMUtils.defineLazyGetter(lazy, "gBrowserBundle", function() {
+XPCOMUtils.defineLazyGetter(lazy, "gBrowserBundle", function () {
   return Services.strings.createBundle(
     "chrome://browser/locale/browser.properties"
   );
@@ -919,9 +911,8 @@ class XRPermissionPrompt extends PermissionPromptForRequest {
     };
 
     if (options.checkbox.show) {
-      options.checkbox.label = lazy.gBrowserBundle.GetStringFromName(
-        "xr.remember"
-      );
+      options.checkbox.label =
+        lazy.gBrowserBundle.GetStringFromName("xr.remember");
     }
 
     return options;
@@ -1239,9 +1230,8 @@ class MIDIPermissionPrompt extends SitePermsAddonInstallRequest {
     };
 
     if (options.checkbox.show) {
-      options.checkbox.label = lazy.gBrowserBundle.GetStringFromName(
-        "midi.remember"
-      );
+      options.checkbox.label =
+        lazy.gBrowserBundle.GetStringFromName("midi.remember");
     }
 
     return options;
@@ -1308,20 +1298,33 @@ class MIDIPermissionPrompt extends SitePermsAddonInstallRequest {
 }
 
 class StorageAccessPermissionPrompt extends PermissionPromptForRequest {
+  #permissionKey;
+
   constructor(request) {
     super();
     this.request = request;
     this.siteOption = null;
+    this.#permissionKey = `3rdPartyStorage${lazy.SitePermissions.PERM_KEY_DELIMITER}${this.principal.origin}`;
 
     let types = this.request.types.QueryInterface(Ci.nsIArray);
     let perm = types.queryElementAt(0, Ci.nsIContentPermissionType);
     let options = perm.options.QueryInterface(Ci.nsIArray);
-    // If we have an option, we are in a call from requestStorageAccessUnderSite
-    // which means that the embedding principal is not the current top-level.
-    // Instead we have to grab the Site string out of the option and use that
-    // in the UI.
-    if (options.length) {
-      this.siteOption = options.queryElementAt(0, Ci.nsISupportsString).data;
+    // If we have an option, the permission request is different in some way.
+    // We may be in a call from requestStorageAccessUnderSite or a frame-scoped
+    // request, which means that the embedding principal is not the current top-level
+    // or the permission key is different.
+    if (options.length != 2) {
+      return;
+    }
+
+    let topLevelOption = options.queryElementAt(0, Ci.nsISupportsString).data;
+    if (topLevelOption) {
+      this.siteOption = topLevelOption;
+    }
+    let frameOption = options.queryElementAt(1, Ci.nsISupportsString).data;
+    if (frameOption) {
+      // We replace the permission key with a frame-specific one that only has a site after the delimiter
+      this.#permissionKey = `3rdPartyFrameStorage${lazy.SitePermissions.PERM_KEY_DELIMITER}${this.principal.siteOrigin}`;
     }
   }
 
@@ -1335,7 +1338,7 @@ class StorageAccessPermissionPrompt extends PermissionPromptForRequest {
 
   get permissionKey() {
     // Make sure this name is unique per each third-party tracker
-    return `3rdPartyStorage${lazy.SitePermissions.PERM_KEY_DELIMITER}${this.principal.origin}`;
+    return this.#permissionKey;
   }
 
   get temporaryPermissionURI() {

@@ -618,20 +618,23 @@ bool shell::enableTestWasmAwaitTier2 = false;
 bool shell::enableSourcePragmas = true;
 bool shell::enableAsyncStacks = false;
 bool shell::enableAsyncStackCaptureDebuggeeOnly = false;
+bool shell::enableStreams = false;
+bool shell::enableReadableByteStreams = false;
+bool shell::enableBYOBStreamReaders = false;
+bool shell::enableWritableStreams = false;
+bool shell::enableReadableStreamPipeTo = false;
 bool shell::enableWeakRefs = false;
 bool shell::enableToSource = false;
 bool shell::enablePropertyErrorMessageFix = false;
 bool shell::enableIteratorHelpers = false;
 bool shell::enableShadowRealms = false;
+bool shell::enableArrayFromAsync = true;
 #ifdef NIGHTLY_BUILD
 bool shell::enableArrayGrouping = false;
-bool shell::enableArrayFromAsync = false;
 // Pref for String.prototype.{is,to}WellFormed() methods.
 bool shell::enableWellFormedUnicodeStrings = false;
 #endif
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
 bool shell::enableChangeArrayByCopy = false;
-#endif
 #ifdef ENABLE_NEW_SET_METHODS
 bool shell::enableNewSetMethods = true;
 #endif
@@ -826,6 +829,10 @@ static bool TraceGrayRoots(JSTracer* trc, SliceBudget& budget, void* data) {
   return true;
 }
 
+static inline JSString* NewStringCopyUTF8(JSContext* cx, const char* chars) {
+  return JS_NewStringCopyUTF8N(cx, JS::UTF8Chars(chars, strlen(chars)));
+}
+
 static mozilla::UniqueFreePtr<char[]> GetLine(FILE* file, const char* prompt) {
 #ifdef EDITLINE
   /*
@@ -1011,7 +1018,7 @@ static bool RegisterScriptPathWithModuleLoader(JSContext* cx,
   // script's filename so that the module loader can use it to resolve
   // relative imports.
 
-  RootedString path(cx, JS_NewStringCopyZ(cx, filename));
+  RootedString path(cx, NewStringCopyUTF8(cx, filename));
   if (!path) {
     return false;
   }
@@ -1112,7 +1119,7 @@ enum class CompileUtf8 {
                                     bool compileOnly) {
   ShellContext* sc = GetShellContext(cx);
 
-  RootedString path(cx, JS_NewStringCopyZ(cx, filename));
+  RootedString path(cx, NewStringCopyUTF8(cx, filename));
   if (!path) {
     return false;
   }
@@ -1587,11 +1594,9 @@ static bool AddIntlExtras(JSContext* cx, unsigned argc, Value* vp) {
           GetLine(in, startline == lineno ? "js> " : "");
       if (!line) {
         if (errno) {
-          /*
-           * Use Latin1 variant here because strerror(errno)'s
-           * encoding depends on the user's C locale.
-           */
-          JS_ReportErrorLatin1(cx, "%s", strerror(errno));
+          if (UniqueChars error = SystemErrorMessage(cx, errno)) {
+            JS_ReportErrorUTF8(cx, "%s", error.get());
+          }
           return false;
         }
         hitEOF = true;
@@ -1654,31 +1659,14 @@ enum FileKind {
   FileModule,
 };
 
-static void ReportCantOpenErrorUnknownEncoding(JSContext* cx,
-                                               const char* filename) {
-  /*
-   * Filenames are in some random system encoding.  *Probably* it's UTF-8,
-   * but no guarantees.
-   *
-   * strerror(errno)'s encoding, in contrast, depends on the user's C locale.
-   *
-   * Latin-1 is possibly wrong for both of these -- but at least if it's
-   * wrong it'll produce mojibake *safely*.  Run with Latin-1 til someone
-   * complains.
-   */
-  JS_ReportErrorNumberLatin1(cx, my_GetErrorMessage, nullptr, JSSMSG_CANT_OPEN,
-                             filename, strerror(errno));
-}
-
 [[nodiscard]] static bool Process(JSContext* cx, const char* filename,
                                   bool forceTTY, FileKind kind) {
   FILE* file;
   if (forceTTY || !filename || strcmp(filename, "-") == 0) {
     file = stdin;
   } else {
-    file = fopen(filename, "rb");
+    file = OpenFile(cx, filename, "rb");
     if (!file) {
-      ReportCantOpenErrorUnknownEncoding(cx, filename);
       return false;
     }
   }
@@ -1795,11 +1783,12 @@ static bool CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
   // I need a file at a known location, and the only good way I know of to do
   // that right now is to include it in the repo alongside the test script.
   // Bug 944164 would introduce an alternative.
-  JSString* filenameStr = ResolvePath(cx, rawFilenameStr, ScriptRelative);
+  Rooted<JSString*> filenameStr(
+      cx, ResolvePath(cx, rawFilenameStr, ScriptRelative));
   if (!filenameStr) {
     return false;
   }
-  UniqueChars filename = JS_EncodeStringToLatin1(cx, filenameStr);
+  UniqueChars filename = JS_EncodeStringToUTF8(cx, filenameStr);
   if (!filename) {
     return false;
   }
@@ -1825,9 +1814,8 @@ static bool CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  FILE* file = fopen(filename.get(), "rb");
+  FILE* file = OpenFile(cx, filename.get(), "rb");
   if (!file) {
-    ReportCantOpenErrorUnknownEncoding(cx, filename.get());
     return false;
   }
   AutoCloseFile autoClose(file);
@@ -2003,7 +1991,7 @@ static bool LoadScript(JSContext* cx, unsigned argc, Value* vp,
       return false;
     }
 
-    UniqueChars filename = JS_EncodeStringToLatin1(cx, str);
+    UniqueChars filename = JS_EncodeStringToUTF8(cx, str);
     if (!filename) {
       return false;
     }
@@ -2567,16 +2555,13 @@ static bool Evaluate(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 JSString* js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr) {
-  UniqueChars pathname = JS_EncodeStringToLatin1(cx, pathnameStr);
+  UniqueChars pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
   if (!pathname) {
     return nullptr;
   }
 
-  FILE* file;
-
-  file = fopen(pathname.get(), "rb");
+  FILE* file = OpenFile(cx, pathname.get(), "rb");
   if (!file) {
-    ReportCantOpenErrorUnknownEncoding(cx, pathname.get());
     return nullptr;
   }
 
@@ -2593,28 +2578,8 @@ JSString* js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr) {
     return nullptr;
   }
 
-  if (fseek(file, 0, SEEK_END) != 0) {
-    pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
-    if (!pathname) {
-      return nullptr;
-    }
-    JS_ReportErrorUTF8(cx, "can't seek end of %s", pathname.get());
-    return nullptr;
-  }
-
-  long endPos = ftell(file);
-  if (endPos < 0) {
-    JS_ReportErrorUTF8(cx, "can't read length of %s", pathname.get());
-    return nullptr;
-  }
-
-  size_t len = endPos;
-  if (fseek(file, 0, SEEK_SET) != 0) {
-    pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
-    if (!pathname) {
-      return nullptr;
-    }
-    JS_ReportErrorUTF8(cx, "can't seek start of %s", pathname.get());
+  size_t len;
+  if (!FileSize(cx, pathname.get(), file, &len)) {
     return nullptr;
   }
 
@@ -2624,17 +2589,7 @@ JSString* js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr) {
     return nullptr;
   }
 
-  size_t cc = fread(buf.get(), 1, len, file);
-  if (cc != len) {
-    if (ptrdiff_t(cc) < 0) {
-      ReportCantOpenErrorUnknownEncoding(cx, pathname.get());
-    } else {
-      pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
-      if (!pathname) {
-        return nullptr;
-      }
-      JS_ReportErrorUTF8(cx, "can't read %s: short read", pathname.get());
-    }
+  if (!ReadFile(cx, pathname.get(), file, buf.get(), len)) {
     return nullptr;
   }
 
@@ -2643,10 +2598,6 @@ JSString* js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr) {
                                            &len, js::MallocArena)
           .get());
   if (!ucbuf) {
-    pathname = JS_EncodeStringToUTF8(cx, pathnameStr);
-    if (!pathname) {
-      return nullptr;
-    }
     JS_ReportErrorUTF8(cx, "Invalid UTF-8 in file '%s'", pathname.get());
     return nullptr;
   }
@@ -2691,8 +2642,7 @@ static bool Run(JSContext* cx, unsigned argc, Value* vp) {
   RootedScript script(cx);
   int64_t startClock = PRMJ_Now();
   {
-    /* FIXME: This should use UTF-8 (bug 987069). */
-    UniqueChars filename = JS_EncodeStringToLatin1(cx, str);
+    UniqueChars filename = JS_EncodeStringToUTF8(cx, str);
     if (!filename) {
       return false;
     }
@@ -3372,11 +3322,12 @@ static bool DisassFile(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   // We should change DisassembleOptionParser to store CallArgs.
-  JSString* str = JS::ToString(cx, HandleValue::fromMarkedLocation(&p.argv[0]));
+  Rooted<JSString*> str(
+      cx, JS::ToString(cx, HandleValue::fromMarkedLocation(&p.argv[0])));
   if (!str) {
     return false;
   }
-  UniqueChars filename = JS_EncodeStringToLatin1(cx, str);
+  UniqueChars filename = JS_EncodeStringToUTF8(cx, str);
   if (!filename) {
     return false;
   }
@@ -3436,10 +3387,8 @@ static bool DisassWithSrc(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    FILE* file = fopen(script->filename(), "rb");
+    FILE* file = OpenFile(cx, script->filename(), "rb");
     if (!file) {
-      /* FIXME: script->filename() should become UTF-8 (bug 987069). */
-      ReportCantOpenErrorUnknownEncoding(cx, script->filename());
       return false;
     }
     auto closeFile = MakeScopeExit([file] { fclose(file); });
@@ -3457,8 +3406,7 @@ static bool DisassWithSrc(JSContext* cx, unsigned argc, Value* vp) {
     for (line1 = 0; line1 < line2 - 1; line1++) {
       char* tmp = fgets(linebuf, lineBufLen, file);
       if (!tmp) {
-        /* FIXME: This should use UTF-8 (bug 987069). */
-        JS_ReportErrorLatin1(cx, "failed to read %s fully", script->filename());
+        JS_ReportErrorUTF8(cx, "failed to read %s fully", script->filename());
         return false;
       }
     }
@@ -3483,13 +3431,8 @@ static bool DisassWithSrc(JSContext* cx, unsigned argc, Value* vp) {
         bupline = 0;
         while (line1 < line2) {
           if (!fgets(linebuf, lineBufLen, file)) {
-            /*
-             * FIXME: script->filename() should become UTF-8
-             *        (bug 987069).
-             */
-            JS_ReportErrorNumberLatin1(cx, my_GetErrorMessage, nullptr,
-                                       JSSMSG_UNEXPECTED_EOF,
-                                       script->filename());
+            JS_ReportErrorNumberUTF8(cx, my_GetErrorMessage, nullptr,
+                                     JSSMSG_UNEXPECTED_EOF, script->filename());
             return false;
           }
           line1++;
@@ -3946,6 +3889,7 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(enableSharedMemory)
       .setCoopAndCoepEnabled(false)
+      .setStreamsEnabled(enableStreams)
       .setWeakRefsEnabled(enableWeakRefs
                               ? JS::WeakRefSpecifier::EnabledWithCleanupSome
                               : JS::WeakRefSpecifier::Disabled)
@@ -3953,14 +3897,12 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
       .setPropertyErrorMessageFixEnabled(enablePropertyErrorMessageFix)
       .setIteratorHelpersEnabled(enableIteratorHelpers)
       .setShadowRealmsEnabled(enableShadowRealms)
+      .setArrayFromAsyncEnabled(enableArrayFromAsync)
 #ifdef NIGHTLY_BUILD
       .setArrayGroupingEnabled(enableArrayGrouping)
-      .setArrayFromAsyncEnabled(enableArrayFromAsync)
       .setWellFormedUnicodeStringsEnabled(enableWellFormedUnicodeStrings)
 #endif
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
       .setChangeArrayByCopyEnabled(enableChangeArrayByCopy)
-#endif
 #ifdef ENABLE_NEW_SET_METHODS
       .setNewSetMethodsEnabled(enableNewSetMethods)
 #endif
@@ -4763,6 +4705,19 @@ static bool SetJitCompilerOption(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
+  // Changing code memory protection settings at runtime is not supported. Don't
+  // throw if not changing the setting because some jit-tests depend on that.
+  if (opt == JSJITCOMPILER_WRITE_PROTECT_CODE) {
+    uint32_t writeProtect;
+    MOZ_ALWAYS_TRUE(JS_GetGlobalJitCompilerOption(
+        cx, JSJITCOMPILER_WRITE_PROTECT_CODE, &writeProtect));
+    if (bool(number) != writeProtect) {
+      JS_ReportErrorASCII(cx, "Can't change code write protection at runtime");
+      return false;
+    }
+    return true;
+  }
+
   // Throw if trying to disable all the Wasm compilers.  The logic here is that
   // if we're trying to disable a compiler that is currently enabled and that is
   // the last compiler enabled then we must throw.
@@ -4939,7 +4894,7 @@ static bool ParseModule(JSContext* cx, unsigned argc, Value* vp) {
     }
 
     RootedString str(cx, args[1].toString());
-    filename = JS_EncodeStringToLatin1(cx, str);
+    filename = JS_EncodeStringToUTF8(cx, str);
     if (!filename) {
       return false;
     }
@@ -4961,9 +4916,7 @@ static bool ParseModule(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   AutoReportFrontendContext fc(cx);
-  RootedObject module(
-      cx, frontend::CompileModule(cx, &fc, cx->stackLimitForCurrentPrincipal(),
-                                  options, srcBuf));
+  RootedObject module(cx, frontend::CompileModule(cx, &fc, options, srcBuf));
   if (!module) {
     return false;
   }
@@ -5419,10 +5372,10 @@ static bool DumpAST(JSContext* cx, const JS::ReadOnlyCompileOptions& options,
   using namespace js::frontend;
 
   AutoReportFrontendContext fc(cx);
-  Parser<FullParseHandler, Unit> parser(
-      &fc, cx->stackLimitForCurrentPrincipal(), options, units, length,
-      /* foldConstants = */ false, compilationState,
-      /* syntaxParser = */ nullptr);
+  Parser<FullParseHandler, Unit> parser(&fc, options, units, length,
+                                        /* foldConstants = */ false,
+                                        compilationState,
+                                        /* syntaxParser = */ nullptr);
   if (!parser.checkOptions()) {
     return false;
   }
@@ -5475,12 +5428,10 @@ template <typename Unit>
   UniquePtr<frontend::ExtensibleCompilationStencil> stencil;
   if (goal == frontend::ParseGoal::Script) {
     stencil = frontend::CompileGlobalScriptToExtensibleStencil(
-        cx, &fc, cx->stackLimitForCurrentPrincipal(), input.get(), &scopeCache,
-        srcBuf, ScopeKind::Global);
+        cx, &fc, input.get(), &scopeCache, srcBuf, ScopeKind::Global);
   } else {
     stencil = frontend::ParseModuleToExtensibleStencil(
-        cx, &fc, cx->stackLimitForCurrentPrincipal(), cx->tempLifoAlloc(),
-        input.get(), &scopeCache, srcBuf);
+        cx, &fc, cx->tempLifoAlloc(), input.get(), &scopeCache, srcBuf);
   }
 
   if (!stencil) {
@@ -5648,8 +5599,7 @@ static bool FrontendTest(JSContext* cx, unsigned argc, Value* vp,
               cx, frontend::CompilationInput(options));
           UniquePtr<frontend::ExtensibleCompilationStencil> stencil;
           if (!Smoosh::tryCompileGlobalScriptToExtensibleStencil(
-                  cx, &fc, cx->stackLimitForCurrentPrincipal(), input.get(),
-                  srcBuf, stencil)) {
+                  cx, &fc, input.get(), srcBuf, stencil)) {
             return false;
           }
           if (!stencil) {
@@ -5794,7 +5744,7 @@ static bool SyntaxParse(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   Parser<frontend::SyntaxParseHandler, char16_t> parser(
-      &fc, cx->stackLimitForCurrentPrincipal(), options, chars, length,
+      &fc, options, chars, length,
       /* foldConstants = */ false, compilationState,
       /* syntaxParser = */ nullptr);
   if (!parser.checkOptions()) {
@@ -5946,10 +5896,12 @@ static bool OffThreadCompileModuleToStencil(JSContext* cx, unsigned argc,
                                             Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() != 1 || !args[0].isString()) {
-    JS_ReportErrorNumberASCII(cx, my_GetErrorMessage, nullptr,
-                              JSSMSG_INVALID_ARGS,
-                              "offThreadCompileModuleToStencil");
+  if (!args.requireAtLeast(cx, "offThreadCompileModuleToStencil", 1)) {
+    return false;
+  }
+  if (!args[0].isString()) {
+    const char* typeName = InformalValueTypeName(args[0]);
+    JS_ReportErrorASCII(cx, "expected string to parse, got %s", typeName);
     return false;
   }
 
@@ -5957,6 +5909,23 @@ static bool OffThreadCompileModuleToStencil(JSContext* cx, unsigned argc,
   CompileOptions options(cx);
   options.setIntroductionType("js shell offThreadCompileModuleToStencil")
       .setFileAndLine("<string>", 1);
+
+  if (args.length() >= 2) {
+    if (!args[1].isObject()) {
+      JS_ReportErrorASCII(cx,
+                          "offThreadCompileModuleToStencil: The 2nd argument "
+                          "must be an object");
+      return false;
+    }
+
+    // Offthread compilation requires that the debug metadata be set when the
+    // script is collected from offthread, rather than when compiled.
+    RootedObject opts(cx, &args[1].toObject());
+    if (!js::ParseCompileOptions(cx, options, opts, &fileNameBytes)) {
+      return false;
+    }
+  }
+
   options.setIsRunOnce(true).setSourceIsLazy(false);
   options.forceAsync = true;
 
@@ -6550,7 +6519,7 @@ static bool ThisFilename(JSContext* cx, unsigned argc, Value* vp) {
     return true;
   }
 
-  JSString* str = JS_NewStringCopyZ(cx, filename.get());
+  JSString* str = NewStringCopyUTF8(cx, filename.get());
   if (!str) {
     return false;
   }
@@ -6710,11 +6679,18 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
       creationOptions.setDefineSharedArrayBufferConstructor(v.toBoolean());
     }
 
-    if (!JS_GetProperty(cx, opts, "shouldResistFingerprinting", &v)) {
+    if (!JS_GetProperty(cx, opts, "forceUTC", &v)) {
       return false;
     }
     if (v.isBoolean()) {
-      behaviors.setShouldResistFingerprinting(v.toBoolean());
+      creationOptions.setForceUTC(v.toBoolean());
+    }
+
+    if (!JS_GetProperty(cx, opts, "alwaysUseFdlibm", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      creationOptions.setAlwaysUseFdlibm(v.toBoolean());
     }
   }
 
@@ -6907,9 +6883,14 @@ class ShellSourceHook : public SourceHook {
     MOZ_ASSERT((twoByteSource != nullptr) != (utf8Source != nullptr),
                "must be called requesting only one of UTF-8 or UTF-16 source");
 
-    RootedString str(cx, JS_NewStringCopyZ(cx, filename));
-    if (!str) {
-      return false;
+    RootedString str(cx);
+    if (filename) {
+      str = NewStringCopyUTF8(cx, filename);
+      if (!str) {
+        return false;
+      }
+    } else {
+      str = JS_GetEmptyString(cx);
     }
     RootedValue filenameValue(cx, StringValue(str));
 
@@ -7711,24 +7692,6 @@ done:
   }
 }
 
-static bool EnsureLatin1CharsLinearString(JSContext* cx, HandleValue value,
-                                          UniqueChars* result) {
-  if (!value.isString()) {
-    result->reset(nullptr);
-    return true;
-  }
-  RootedString str(cx, value.toString());
-  if (!str->isLinear() || !str->hasLatin1Chars()) {
-    JS_ReportErrorASCII(cx,
-                        "only latin1 chars and linear strings are expected");
-    return false;
-  }
-
-  // Use JS_EncodeStringToLatin1 to null-terminate.
-  *result = JS_EncodeStringToLatin1(cx, str);
-  return !!*result;
-}
-
 static bool ConsumeBufferSource(JSContext* cx, JS::HandleObject obj,
                                 JS::MimeType, JS::StreamConsumer* consumer) {
   {
@@ -7737,8 +7700,12 @@ static bool ConsumeBufferSource(JSContext* cx, JS::HandleObject obj,
       return false;
     }
     UniqueChars urlChars;
-    if (!EnsureLatin1CharsLinearString(cx, url, &urlChars)) {
-      return false;
+    if (url.isString()) {
+      Rooted<JSString*> str(cx, url.toString());
+      urlChars = JS_EncodeStringToUTF8(cx, str);
+      if (!urlChars) {
+        return false;
+      }
     }
 
     RootedValue mapUrl(cx);
@@ -7746,8 +7713,12 @@ static bool ConsumeBufferSource(JSContext* cx, JS::HandleObject obj,
       return false;
     }
     UniqueChars mapUrlChars;
-    if (!EnsureLatin1CharsLinearString(cx, mapUrl, &mapUrlChars)) {
-      return false;
+    if (mapUrl.isString()) {
+      Rooted<JSString*> str(cx, mapUrl.toString());
+      mapUrlChars = JS_EncodeStringToUTF8(cx, str);
+      if (!mapUrlChars) {
+        return false;
+      }
     }
 
     consumer->noteResponseURLs(urlChars.get(), mapUrlChars.get());
@@ -8130,7 +8101,7 @@ class ShellAutoEntryMonitor : JS::dbg::AutoEntryMonitor {
 
     for (size_t i = 0; i < log.length(); i++) {
       char* name = log[i].get();
-      RootedString string(cx, Atomize(cx, name, strlen(name)));
+      RootedString string(cx, AtomizeUTF8Chars(cx, name, strlen(name)));
       if (!string) {
         return false;
       }
@@ -9044,7 +9015,7 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "  Check the syntax of a string, returning success value"),
 
     JS_FN_HELP("offThreadCompileModuleToStencil", OffThreadCompileModuleToStencil, 1, 0,
-"offThreadCompileModuleToStencil(code)",
+"offThreadCompileModuleToStencil(code[, options])",
 "  Compile |code| on a helper thread, returning a job ID. To wait for the\n"
 "  compilation to finish and and get the module stencil object call\n"
 "  |finishOffThreadStencil| passing the job ID."),
@@ -10467,16 +10438,24 @@ static bool BindScriptArgs(JSContext* cx, OptionParser* op) {
 
   for (size_t i = 0; !msr.empty(); msr.popFront(), ++i) {
     const char* scriptArg = msr.front();
-    JS::RootedString str(cx, JS_NewStringCopyZ(cx, scriptArg));
+    UniqueChars scriptArgUtf8 = JS::EncodeNarrowToUtf8(cx, scriptArg);
+    if (!scriptArgUtf8) {
+      return false;
+    }
+    RootedString str(cx, NewStringCopyUTF8(cx, scriptArgUtf8.get()));
     if (!str || !JS_DefineElement(cx, scriptArgs, i, str, JSPROP_ENUMERATE)) {
       return false;
     }
   }
 
-  const char* scriptPath = op->getStringArg("script");
   RootedValue scriptPathValue(cx);
-  if (scriptPath) {
-    RootedString scriptPathString(cx, JS_NewStringCopyZ(cx, scriptPath));
+  if (const char* scriptPath = op->getStringArg("script")) {
+    UniqueChars scriptPathUtf8 = JS::EncodeNarrowToUtf8(cx, scriptPath);
+    if (!scriptPathUtf8) {
+      return false;
+    }
+    RootedString scriptPathString(cx,
+                                  NewStringCopyUTF8(cx, scriptPathUtf8.get()));
     if (!scriptPathString) {
       return false;
     }
@@ -10550,8 +10529,11 @@ auto minVal(T a, Ts... args) {
     size_t minArgno = minVal(ppArgno, fpArgno, ufpArgno, ccArgno, mpArgno);
 
     if (ppArgno == minArgno) {
-      char* path = preludePaths.front();
-      if (!Process(cx, path, false, PreludeScript)) {
+      UniqueChars path = JS::EncodeNarrowToUtf8(cx, preludePaths.front());
+      if (!path) {
+        return false;
+      }
+      if (!Process(cx, path.get(), false, PreludeScript)) {
         return false;
       }
 
@@ -10560,8 +10542,11 @@ auto minVal(T a, Ts... args) {
     }
 
     if (fpArgno == minArgno) {
-      char* path = filePaths.front();
-      if (!Process(cx, path, false, FileScript)) {
+      UniqueChars path = JS::EncodeNarrowToUtf8(cx, filePaths.front());
+      if (!path) {
+        return false;
+      }
+      if (!Process(cx, path.get(), false, FileScript)) {
         return false;
       }
 
@@ -10570,8 +10555,11 @@ auto minVal(T a, Ts... args) {
     }
 
     if (ufpArgno == minArgno) {
-      char* path = utf16FilePaths.front();
-      if (!Process(cx, path, false, FileScriptUtf16)) {
+      UniqueChars path = JS::EncodeNarrowToUtf8(cx, utf16FilePaths.front());
+      if (!path) {
+        return false;
+      }
+      if (!Process(cx, path.get(), false, FileScriptUtf16)) {
         return false;
       }
 
@@ -10580,7 +10568,10 @@ auto minVal(T a, Ts... args) {
     }
 
     if (ccArgno == minArgno) {
-      const char* code = codeChunks.front();
+      UniqueChars code = JS::EncodeNarrowToUtf8(cx, codeChunks.front());
+      if (!code) {
+        return false;
+      }
 
       // Command line scripts are always parsed with full-parse to evaluate
       // conditions which might filter code coverage conditions.
@@ -10588,7 +10579,8 @@ auto minVal(T a, Ts... args) {
       opts.setFileAndLine("-e", 1).setForceFullParse();
 
       JS::SourceText<Utf8Unit> srcBuf;
-      if (!srcBuf.init(cx, code, strlen(code), JS::SourceOwnership::Borrowed)) {
+      if (!srcBuf.init(cx, code.get(), strlen(code.get()),
+                       JS::SourceOwnership::Borrowed)) {
         return false;
       }
 
@@ -10607,8 +10599,11 @@ auto minVal(T a, Ts... args) {
 
     MOZ_ASSERT(mpArgno == minArgno);
 
-    char* path = modulePaths.front();
-    if (!Process(cx, path, false, FileModule)) {
+    UniqueChars path = JS::EncodeNarrowToUtf8(cx, modulePaths.front());
+    if (!path) {
+      return false;
+    }
+    if (!Process(cx, path.get(), false, FileModule)) {
       return false;
     }
 
@@ -10621,7 +10616,11 @@ auto minVal(T a, Ts... args) {
 
   /* The |script| argument is processed after all options. */
   if (const char* path = op->getStringArg("script")) {
-    if (!Process(cx, path, false, FileScript)) {
+    UniqueChars pathUtf8 = JS::EncodeNarrowToUtf8(cx, path);
+    if (!pathUtf8) {
+      return false;
+    }
+    if (!Process(cx, pathUtf8.get(), false, FileScript)) {
       return false;
     }
   }
@@ -11412,6 +11411,20 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "less-debug-code",
                         "Emit less machine code for "
                         "checking assertions under DEBUG.") ||
+      !op.addBoolOption('\0', "enable-streams",
+                        "Enable WHATWG Streams (default)") ||
+      !op.addBoolOption('\0', "no-streams", "Disable WHATWG Streams") ||
+      !op.addBoolOption('\0', "enable-readable-byte-streams",
+                        "Enable support for WHATWG ReadableStreams of type "
+                        "'bytes'") ||
+      !op.addBoolOption('\0', "enable-byob-stream-readers",
+                        "Enable support for getting BYOB readers for WHATWG "
+                        "ReadableStreams of type \"bytes\"") ||
+      !op.addBoolOption('\0', "enable-writable-streams",
+                        "Enable support for WHATWG WritableStreams") ||
+      !op.addBoolOption('\0', "enable-readablestream-pipeto",
+                        "Enable support for "
+                        "WHATWG ReadableStream.prototype.pipeTo") ||
       !op.addBoolOption('\0', "disable-weak-refs", "Disable weak references") ||
       !op.addBoolOption('\0', "disable-tosource", "Disable toSource/uneval") ||
       !op.addBoolOption('\0', "disable-property-error-message-fix",
@@ -11421,21 +11434,16 @@ bool InitOptionParser(OptionParser& op) {
                         "Enable iterator helpers") ||
       !op.addBoolOption('\0', "enable-shadow-realms", "Enable ShadowRealms") ||
       !op.addBoolOption('\0', "enable-array-grouping",
-                        "Enable Array.fromAsync") ||
+                        "Enable Array.grouping") ||
       !op.addBoolOption('\0', "enable-array-from-async",
-                        "Enable Array Grouping") ||
+                        "Enable Array.fromAsync") ||
       !op.addBoolOption('\0', "enable-well-formed-unicode-strings",
                         "Enable String.prototype.{is,to}WellFormed() methods"
                         "(Well-Formed Unicode Strings)") ||
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
       !op.addBoolOption('\0', "enable-change-array-by-copy",
                         "Enable change-array-by-copy methods") ||
       !op.addBoolOption('\0', "disable-change-array-by-copy",
                         "Disable change-array-by-copy methods") ||
-#else
-      !op.addBoolOption('\0', "enable-change-array-by-copy", "no-op") ||
-      !op.addBoolOption('\0', "disable-change-array-by-copy", "no-op") ||
-#endif
 #ifdef ENABLE_NEW_SET_METHODS
       !op.addBoolOption('\0', "enable-new-set-methods",
                         "Enable New Set methods") ||
@@ -11462,6 +11470,11 @@ bool InitOptionParser(OptionParser& op) {
       !op.addStringOption('\0', "spectre-mitigations", "on/off",
                           "Whether Spectre mitigations are enabled (default: "
                           "off, on to enable)") ||
+      !op.addStringOption('\0', "write-protect-code", "on/off",
+                          "Whether the W^X policy is enforced to mark JIT code "
+                          "pages as either writable or executable but never "
+                          "both at the same time (default: on, off to "
+                          "disable)") ||
       !op.addStringOption('\0', "cache-ir-stubs", "on/off/call",
                           "Use CacheIR stubs (default: on, off to disable, "
                           "call to enable work-in-progress call ICs)") ||
@@ -11953,15 +11966,13 @@ bool SetContextOptions(JSContext* cx, const OptionParser& op) {
       !op.getBoolOption("disable-property-error-message-fix");
   enableIteratorHelpers = op.getBoolOption("enable-iterator-helpers");
   enableShadowRealms = op.getBoolOption("enable-shadow-realms");
+  enableArrayFromAsync = op.getBoolOption("enable-array-from-async");
 #ifdef NIGHTLY_BUILD
   enableArrayGrouping = op.getBoolOption("enable-array-grouping");
-  enableArrayFromAsync = op.getBoolOption("enable-array-from-async");
   enableWellFormedUnicodeStrings =
       op.getBoolOption("enable-well-formed-unicode-strings");
 #endif
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
-  enableChangeArrayByCopy = op.getBoolOption("enable-change-array-by-copy");
-#endif
+  enableChangeArrayByCopy = !op.getBoolOption("disable-change-array-by-copy");
 #ifdef ENABLE_NEW_SET_METHODS
   enableNewSetMethods = op.getBoolOption("enable-new-set-methods");
 #endif
@@ -12074,6 +12085,11 @@ bool SetContextWasmOptions(JSContext* cx, const OptionParser& op) {
 
   enableWasmVerbose = op.getBoolOption("wasm-verbose");
   enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
+  enableStreams = !op.getBoolOption("no-streams");
+  enableReadableByteStreams = op.getBoolOption("enable-readable-byte-streams");
+  enableBYOBStreamReaders = op.getBoolOption("enable-byob-stream-readers");
+  enableWritableStreams = op.getBoolOption("enable-writable-streams");
+  enableReadableStreamPipeTo = op.getBoolOption("enable-readablestream-pipeto");
 
   JS::ContextOptionsRef(cx)
       .setAsmJS(enableAsmJS)
@@ -12188,6 +12204,16 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
       jit::JitOptions.spectreJitToCxxCalls = false;
     } else {
       return OptionFailure("spectre-mitigations", str);
+    }
+  }
+
+  if (const char* str = op.getStringOption("write-protect-code")) {
+    if (strcmp(str, "on") == 0) {
+      jit::JitOptions.maybeSetWriteProtectCode(true);
+    } else if (strcmp(str, "off") == 0) {
+      jit::JitOptions.maybeSetWriteProtectCode(false);
+    } else {
+      return OptionFailure("write-protect-code", str);
     }
   }
 
@@ -12629,25 +12655,32 @@ bool SetContextGCOptions(JSContext* cx, const OptionParser& op) {
 bool InitModuleLoader(JSContext* cx, const OptionParser& op) {
   RootedString moduleLoadPath(cx);
   if (const char* option = op.getStringOption("module-load-path")) {
-    RootedString jspath(cx, JS_NewStringCopyZ(cx, option));
+    UniqueChars pathUtf8 = JS::EncodeNarrowToUtf8(cx, option);
+    if (!pathUtf8) {
+      return false;
+    }
+
+    Rooted<JSString*> jspath(cx, NewStringCopyUTF8(cx, pathUtf8.get()));
     if (!jspath) {
       return false;
     }
 
     moduleLoadPath = js::shell::ResolvePath(cx, jspath, RootRelative);
+
+    processWideModuleLoadPath = JS_EncodeStringToUTF8(cx, moduleLoadPath);
+    if (!processWideModuleLoadPath) {
+      return false;
+    }
   } else {
-    UniqueChars cwd = js::shell::GetCWD();
-    moduleLoadPath = JS_NewStringCopyZ(cx, cwd.get());
-  }
+    processWideModuleLoadPath = js::shell::GetCWD(cx);
+    if (!processWideModuleLoadPath) {
+      return false;
+    }
 
-  if (!moduleLoadPath) {
-    return false;
-  }
-
-  processWideModuleLoadPath = JS_EncodeStringToUTF8(cx, moduleLoadPath);
-  if (!processWideModuleLoadPath) {
-    MOZ_ASSERT(cx->isExceptionPending());
-    return false;
+    moduleLoadPath = NewStringCopyUTF8(cx, processWideModuleLoadPath.get());
+    if (!moduleLoadPath) {
+      return false;
+    }
   }
 
   ShellContext* sc = GetShellContext(cx);

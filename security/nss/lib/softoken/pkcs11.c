@@ -447,6 +447,18 @@ static const struct mechanismList mechanisms[] = {
     { CKM_SHA512, { 0, 0, CKF_DIGEST }, PR_FALSE },
     { CKM_SHA512_HMAC, { 1, 128, CKF_SN_VR }, PR_TRUE },
     { CKM_SHA512_HMAC_GENERAL, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_224, { 0, 0, CKF_DIGEST }, PR_FALSE },
+    { CKM_SHA3_224_HMAC, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_224_HMAC_GENERAL, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_256, { 0, 0, CKF_DIGEST }, PR_FALSE },
+    { CKM_SHA3_256_HMAC, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_256_HMAC_GENERAL, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_384, { 0, 0, CKF_DIGEST }, PR_FALSE },
+    { CKM_SHA3_384_HMAC, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_384_HMAC_GENERAL, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_512, { 0, 0, CKF_DIGEST }, PR_FALSE },
+    { CKM_SHA3_512_HMAC, { 1, 128, CKF_SN_VR }, PR_TRUE },
+    { CKM_SHA3_512_HMAC_GENERAL, { 1, 128, CKF_SN_VR }, PR_TRUE },
     { CKM_TLS_PRF_GENERAL, { 0, 512, CKF_SN_VR }, PR_FALSE },
     { CKM_TLS_MAC, { 0, 512, CKF_SN_VR }, PR_FALSE },
     { CKM_NSS_TLS_PRF_GENERAL_SHA256,
@@ -1714,7 +1726,7 @@ sftk_handleObject(SFTKObject *object, SFTKSession *session)
      * token objects and will have a token object handle assigned to
      * them by a call to sftk_mkHandle in the handler for each object
      * class, invoked below.
-     *  
+     *
      * It may be helpful to note/remember that
      * sftk_narrowToXxxObject uses sftk_isToken,
      * sftk_isToken examines the sign bit of the object's handle, but
@@ -2568,7 +2580,7 @@ sftk_getDefTokName(CK_SLOT_ID slotID)
         default:
             break;
     }
-    sprintf(buf, "NSS Application Token %08x  ", (unsigned int)slotID);
+    snprintf(buf, sizeof(buf), "NSS Application Token %08x  ", (unsigned int)slotID);
     return buf;
 }
 
@@ -2587,9 +2599,9 @@ sftk_getDefSlotName(CK_SLOT_ID slotID)
         default:
             break;
     }
-    sprintf(buf,
-            "NSS Application Slot %08x                                   ",
-            (unsigned int)slotID);
+    snprintf(buf, sizeof(buf),
+             "NSS Application Slot %08x                                   ",
+             (unsigned int)slotID);
     return buf;
 }
 

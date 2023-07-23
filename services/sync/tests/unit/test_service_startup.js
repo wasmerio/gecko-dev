@@ -5,15 +5,16 @@ const { AppConstants } = ChromeUtils.importESModule(
   "resource://gre/modules/AppConstants.sys.mjs"
 );
 
-// Svc.Prefs.set("services.sync.log.appender.dump", "All");
-Svc.Prefs.set("registerEngines", "Tab,Bookmarks,Form,History");
+// Svc.PrefBranch.setCharPref("services.sync.log.appender.dump", "All");
+Svc.PrefBranch.setCharPref("registerEngines", "Tab,Bookmarks,Form,History");
 
 add_task(async function run_test() {
   validate_all_future_pings();
   _("When imported, Service.onStartup is called");
 
-  let xps = Cc["@mozilla.org/weave/service;1"].getService(Ci.nsISupports)
-    .wrappedJSObject;
+  let xps = Cc["@mozilla.org/weave/service;1"].getService(
+    Ci.nsISupports
+  ).wrappedJSObject;
   Assert.ok(!xps.enabled);
 
   // Test fixtures
@@ -51,7 +52,9 @@ add_task(async function run_test() {
   }
 
   // Clean up.
-  Svc.Prefs.resetBranch("");
+  for (const pref of Svc.PrefBranch.getChildList("")) {
+    Svc.PrefBranch.clearUserPref(pref);
+  }
 
   do_test_finished();
 });

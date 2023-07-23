@@ -3,7 +3,13 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 import { getSelectedLocation } from "./selected-location";
+import { getSource } from "../selectors";
 
+/**
+ * Note that arguments can be created via `createLocation`.
+ * But they can also be created via `createPendingLocation` in reducer/pending-breakpoints.js.
+ * Both will have similar line and column attributes.
+ */
 export function comparePosition(a, b) {
   return a && b && a.line == b.line && a.column == b.column;
 }
@@ -15,21 +21,27 @@ export function createLocation({
   // Line 0 represents no specific line chosen for action
   line = 0,
   column,
-
-  sourceUrl = "",
 }) {
   return {
     source,
     sourceActor,
-    // Alias which should probably be migrate to query source and sourceActor?
-    sourceId: source.id,
     sourceActorId: sourceActor?.id,
 
     line,
     column,
+  };
+}
 
-    // Is this still used anywhere??
-    sourceUrl,
+/**
+ * Convert location objects created via `createLocation` into
+ * the format used by the Source Map Loader/Worker.
+ * It only needs sourceId, line and column attributes.
+ */
+export function debuggerToSourceMapLocation(location) {
+  return {
+    sourceId: location.source.id,
+    line: location.line,
+    column: location.column,
   };
 }
 
@@ -77,5 +89,30 @@ export function sortSelectedLocations(locations, selectedSource) {
     }
 
     return aSelected.column < bSelected.column ? -1 : 1;
+  });
+}
+
+/**
+ * Source map Loader/Worker and debugger frontend don't use the same objects for locations.
+ * Worker uses 'sourceId' attributes whereas the frontend has 'source' attribute.
+ */
+export function sourceMapToDebuggerLocation(state, location) {
+  // From MapScopes modules, we might re-process the exact same location objects
+  // for which we would already have computed the source object,
+  // and which would lack sourceId attribute.
+  if (location.source) {
+    return location;
+  }
+
+  // SourceMapLoader doesn't known about debugger's source objects
+  // so that we have to fetch it from here
+  const source = getSource(state, location.sourceId);
+  if (!source) {
+    throw new Error(`Could not find source-map source ${location.sourceId}`);
+  }
+
+  return createLocation({
+    ...location,
+    source,
   });
 }

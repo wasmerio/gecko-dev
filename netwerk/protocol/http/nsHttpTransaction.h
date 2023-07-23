@@ -88,7 +88,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   void MakeNonSticky() override { mCaps &= ~NS_HTTP_STICKY_CONNECTION; }
   void MakeRestartable() override { mCaps |= NS_HTTP_CONNECTION_RESTARTABLE; }
   void MakeNonRestartable() { mCaps &= ~NS_HTTP_CONNECTION_RESTARTABLE; }
-
+  void RemoveConnection();
   void SetIsHttp2Websocket(bool h2ws) override { mIsHttp2Websocket = h2ws; }
   bool IsHttp2Websocket() override { return mIsHttp2Websocket; }
 
@@ -244,6 +244,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   // in mRecordsForRetry. Returns true when mRecordsForRetry is not empty,
   // otherwise returns false.
   bool PrepareSVCBRecordsForRetry(const nsACString& aFailedDomainName,
+                                  const nsACString& aFailedAlpn,
                                   bool& aAllRecordsHaveEchConfig);
   // This function setups a new connection info for restarting this transaction.
   void PrepareConnInfoForRetry(nsresult aReason);
@@ -564,7 +565,6 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   nsTArray<RefPtr<nsISVCBRecord>> mRecordsForRetry;
   bool mDontRetryWithDirectRoute = false;
   bool mFastFallbackTriggered = false;
-  bool mAllRecordsInH3ExcludedListBefore = false;
   bool mHttp3BackupTimerCreated = false;
   nsCOMPtr<nsITimer> mFastFallbackTimer;
   nsCOMPtr<nsITimer> mHttp3BackupTimer;

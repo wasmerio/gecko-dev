@@ -22,7 +22,6 @@ const TEST_URL =
   "<body><h1>Testing reload from devtools</h1></body></html>";
 
 const { Toolbox } = require("resource://devtools/client/framework/toolbox.js");
-const { LocalizationHelper } = require("resource://devtools/shared/l10n.js");
 const L10N = new LocalizationHelper(
   "devtools/client/locales/toolbox.properties"
 );
@@ -30,7 +29,7 @@ const L10N = new LocalizationHelper(
 // Track how many page reloads we've sent to the page.
 var reloadsSent = 0;
 
-add_task(async function() {
+add_task(async function () {
   await addTab(TEST_URL);
   const tab = gBrowser.selectedTab;
   const toolIDs = await getSupportedToolIds(tab);

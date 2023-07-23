@@ -18,7 +18,7 @@ const {
 const TEST_URL = `data:text/html;charset=utf-8,<div id="test"></div>`;
 
 // Test against Tab targets
-add_task(async function() {
+add_task(async function () {
   const tab = await addTab(TEST_URL);
 
   const client = await setupDebuggerClient();
@@ -50,7 +50,7 @@ add_task(async function() {
 });
 
 // Test against Process targets
-add_task(async function() {
+add_task(async function () {
   const client = await setupDebuggerClient();
   const mainRoot = client.mainRoot;
 
@@ -70,7 +70,7 @@ add_task(async function() {
 });
 
 // Test against Webextension targets
-add_task(async function() {
+add_task(async function () {
   const client = await setupDebuggerClient();
 
   const mainRoot = client.mainRoot;
@@ -91,7 +91,7 @@ add_task(async function() {
 });
 
 // Test against worker targets on parent process
-add_task(async function() {
+add_task(async function () {
   const client = await setupDebuggerClient();
 
   const mainRoot = client.mainRoot;
@@ -125,7 +125,8 @@ add_task(async function() {
     );
     // Check that accessing descriptor#name getter doesn't throw (See Bug 1714974).
     ok(
-      workerDescriptorFront.name.includes(".js"),
+      workerDescriptorFront.name.includes(".js") ||
+        workerDescriptorFront.name.includes(".mjs"),
       `worker descriptor front holds the worker file name (${workerDescriptorFront.name})`
     );
     is(

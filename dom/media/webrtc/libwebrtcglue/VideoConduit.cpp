@@ -240,8 +240,7 @@ bool operator!=(
          aThis.protected_by_flexfec != aOther.protected_by_flexfec ||
          aThis.rtx_associated_payload_types !=
              aOther.rtx_associated_payload_types ||
-         aThis.raw_payload_types != aOther.raw_payload_types ||
-         aThis.extensions != aOther.extensions;
+         aThis.raw_payload_types != aOther.raw_payload_types;
 }
 
 #ifdef DEBUG
@@ -374,14 +373,20 @@ WebrtcVideoConduit::~WebrtcVideoConduit() {
              "Call DeleteStreams prior to ~WebrtcVideoConduit.");
 }
 
-#define CONNECT(aCanonical, aMirror)                                          \
-  do {                                                                        \
-    (aMirror).Connect(aCanonical);                                            \
-    mWatchManager.Watch(aMirror, &WebrtcVideoConduit::OnControlConfigChange); \
+#define CONNECT(aCanonical, aMirror)                                       \
+  do {                                                                     \
+    /* Ensure the watchmanager is wired up before the mirror receives its  \
+     * initial mirrored value. */                                          \
+    mCall->mCallThread->DispatchStateChange(                               \
+        NS_NewRunnableFunction(__func__, [this, self = RefPtr(this)] {     \
+          mWatchManager.Watch(aMirror,                                     \
+                              &WebrtcVideoConduit::OnControlConfigChange); \
+        }));                                                               \
+    (aCanonical).ConnectMirror(&(aMirror));                                \
   } while (0)
 
 void WebrtcVideoConduit::InitControl(VideoConduitControlInterface* aControl) {
-  MOZ_ASSERT(mCallThread->IsOnCurrentThread());
+  MOZ_ASSERT(NS_IsMainThread());
 
   CONNECT(aControl->CanonicalReceiving(), mControl.mReceiving);
   CONNECT(aControl->CanonicalTransmitting(), mControl.mTransmitting);
@@ -426,11 +431,6 @@ void WebrtcVideoConduit::OnControlConfigChange() {
 
   if (mControl.mSyncGroup.Ref() != mRecvStreamConfig.sync_group) {
     mRecvStreamConfig.sync_group = mControl.mSyncGroup;
-  }
-
-  if (mControl.mLocalRecvRtpExtensions.Ref() !=
-      mRecvStreamConfig.rtp.extensions) {
-    mRecvStreamConfig.rtp.extensions = mControl.mLocalRecvRtpExtensions;
   }
 
   if (const auto [codecConfigList, rtpRtcpConfig] = std::make_pair(
@@ -844,6 +844,16 @@ Maybe<Ssrc> WebrtcVideoConduit::GetAssociatedLocalRtxSSRC(Ssrc aSsrc) const {
   return Nothing();
 }
 
+Maybe<VideoSessionConduit::Resolution> WebrtcVideoConduit::GetLastResolution()
+    const {
+  MutexAutoLock lock(mMutex);
+  if (mLastWidth || mLastHeight) {
+    return Some(VideoSessionConduit::Resolution{.width = mLastWidth,
+                                                .height = mLastHeight});
+  }
+  return Nothing();
+}
+
 void WebrtcVideoConduit::DeleteSendStream() {
   MOZ_ASSERT(mCallThread->IsOnCurrentThread());
   mMutex.AssertCurrentThreadOwns();
@@ -921,6 +931,8 @@ void WebrtcVideoConduit::CreateRecvStream() {
 
   mRecvStream =
       mCall->Call()->CreateVideoReceiveStream(mRecvStreamConfig.Copy());
+  // Ensure that we set the jitter buffer target on this stream.
+  mRecvStream->SetBaseMinimumPlayoutDelayMs(mJitterBufferTargetMs);
 
   CSFLogDebug(LOGTAG, "Created VideoReceiveStream %p for SSRC %u (0x%x)",
               mRecvStream, mRecvStreamConfig.rtp.remote_ssrc,
@@ -1740,6 +1752,20 @@ bool WebrtcVideoConduit::AddFrameHistory(
     return false;
   }
   return true;
+}
+
+void WebrtcVideoConduit::SetJitterBufferTarget(DOMHighResTimeStamp aTargetMs) {
+  MOZ_RELEASE_ASSERT(aTargetMs <= std::numeric_limits<uint16_t>::max());
+  MOZ_RELEASE_ASSERT(aTargetMs >= 0);
+
+  MOZ_ALWAYS_SUCCEEDS(mCallThread->Dispatch(NS_NewRunnableFunction(
+      __func__,
+      [this, self = RefPtr<WebrtcVideoConduit>(this), targetMs = aTargetMs] {
+        mJitterBufferTargetMs = static_cast<uint16_t>(targetMs);
+        if (mRecvStream) {
+          mRecvStream->SetBaseMinimumPlayoutDelayMs(targetMs);
+        }
+      })));
 }
 
 void WebrtcVideoConduit::DumpCodecDB() const {

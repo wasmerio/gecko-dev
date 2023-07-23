@@ -14,11 +14,9 @@
  */
 
 const PDFJS_EVENT_ID = "pdf.js.message";
-const PREF_PREFIX = "pdfjs";
 const PDF_VIEWER_ORIGIN = "resource://pdf.js";
 const PDF_VIEWER_WEB_PAGE = "resource://pdf.js/web/viewer.html";
 const MAX_NUMBER_OF_PREFS = 50;
-const MAX_STRING_PREF_LENGTH = 128;
 const PDF_CONTENT_TYPE = "application/pdf";
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
@@ -26,18 +24,13 @@ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  AsyncPrefs: "resource://gre/modules/AsyncPrefs.sys.mjs",
+  NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   NetworkManager: "resource://pdf.js/PdfJsNetwork.sys.mjs",
   PdfJs: "resource://pdf.js/PdfJs.sys.mjs",
   PdfJsTelemetry: "resource://pdf.js/PdfJsTelemetry.sys.mjs",
   PdfSandbox: "resource://pdf.js/PdfSandbox.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
 });
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "NetUtil",
-  "resource://gre/modules/NetUtil.jsm"
-);
 
 var Svc = {};
 XPCOMUtils.defineLazyServiceGetter(
@@ -67,32 +60,8 @@ XPCOMUtils.defineLazyGetter(lazy, "gOurBinary", () => {
   return file;
 });
 
-function getBoolPref(pref, def) {
-  try {
-    return Services.prefs.getBoolPref(pref);
-  } catch (ex) {
-    return def;
-  }
-}
-
-function getIntPref(pref, def) {
-  try {
-    return Services.prefs.getIntPref(pref);
-  } catch (ex) {
-    return def;
-  }
-}
-
-function getStringPref(pref, def) {
-  try {
-    return Services.prefs.getStringPref(pref);
-  } catch (ex) {
-    return def;
-  }
-}
-
 function log(aMsg) {
-  if (!getBoolPref(PREF_PREFIX + ".pdfBugEnabled", false)) {
+  if (!Services.prefs.getBoolPref("pdfjs.pdfBugEnabled", false)) {
     return;
   }
   var msg = "PdfStreamConverter.js: " + (aMsg.join ? aMsg.join("") : aMsg);
@@ -250,7 +219,7 @@ class ChromeActions {
       return res;
     }
 
-    if (!getBoolPref(PREF_PREFIX + ".enableScripting", false)) {
+    if (!Services.prefs.getBoolPref("pdfjs.enableScripting", false)) {
       return sendResp(false);
     }
 
@@ -348,24 +317,29 @@ class ChromeActions {
   }
 
   supportsDocumentFonts() {
-    var prefBrowser = getIntPref("browser.display.use_document_fonts", 1);
-    var prefGfx = getBoolPref("gfx.downloadable_fonts.enabled", true);
+    const prefBrowser = Services.prefs.getIntPref(
+      "browser.display.use_document_fonts"
+    );
+    const prefGfx = Services.prefs.getBoolPref(
+      "gfx.downloadable_fonts.enabled"
+    );
     return !!prefBrowser && prefGfx;
   }
 
   supportsPinchToZoom() {
-    return getBoolPref("apz.allow_zooming", true);
+    return Services.prefs.getBoolPref("apz.allow_zooming");
   }
 
   supportedMouseWheelZoomModifierKeys() {
     return {
-      ctrlKey: getIntPref("mousewheel.with_control.action", 3) === 3,
-      metaKey: getIntPref("mousewheel.with_meta.action", 1) === 3,
+      ctrlKey:
+        Services.prefs.getIntPref("mousewheel.with_control.action") === 3,
+      metaKey: Services.prefs.getIntPref("mousewheel.with_meta.action") === 3,
     };
   }
 
   getCanvasMaxArea() {
-    return getIntPref("gfx.max-alloc-size", 500000000);
+    return Services.prefs.getIntPref("gfx.max-alloc-size");
   }
 
   isInAutomation() {
@@ -377,12 +351,29 @@ class ChromeActions {
   }
 
   getNimbusExperimentData(_data, sendResponse) {
-    sendResponse(null);
+    if (!this.isMobile()) {
+      sendResponse(null);
+      return;
+    }
+    const actor = getActor(this.domWindow);
+    actor.sendAsyncMessage("PDFJS:Parent:getNimbus");
+    Services.obs.addObserver(
+      {
+        observe(aSubject, aTopic, aData) {
+          if (aTopic === "pdfjs-getNimbus") {
+            Services.obs.removeObserver(this, aTopic);
+            sendResponse(aSubject && JSON.stringify(aSubject.wrappedJSObject));
+          }
+        },
+      },
+      "pdfjs-getNimbus"
+    );
   }
 
   reportTelemetry(data) {
-    var probeInfo = JSON.parse(data);
-    switch (probeInfo.type) {
+    const probeInfo = JSON.parse(data);
+    const { type } = probeInfo;
+    switch (type) {
       case "pageInfo":
         lazy.PdfJsTelemetry.onTimeToView(probeInfo.timestamp);
         break;
@@ -390,11 +381,16 @@ class ChromeActions {
         lazy.PdfJsTelemetry.onEditing(probeInfo.data.type);
         break;
       case "buttons":
+      case "gv-buttons":
         const id = probeInfo.data.id.replace(
           /([A-Z])/g,
           c => `_${c.toLowerCase()}`
         );
-        lazy.PdfJsTelemetry.onButtons(id);
+        if (type === "buttons") {
+          lazy.PdfJsTelemetry.onButtons(id);
+        } else {
+          lazy.PdfJsTelemetry.onGeckoview(id);
+        }
         break;
     }
   }
@@ -457,51 +453,10 @@ class ChromeActions {
     actor?.sendAsyncMessage("PDFJS:Parent:updateMatchesCount", data);
   }
 
-  setPreferences(prefs, sendResponse) {
-    var defaultBranch = Services.prefs.getDefaultBranch(PREF_PREFIX + ".");
-    var numberOfPrefs = 0;
-    var prefValue, prefName;
-    for (var key in prefs) {
-      if (++numberOfPrefs > MAX_NUMBER_OF_PREFS) {
-        log(
-          "setPreferences - Exceeded the maximum number of preferences " +
-            "that is allowed to be set at once."
-        );
-        break;
-      } else if (!defaultBranch.getPrefType(key)) {
-        continue;
-      }
-      prefValue = prefs[key];
-      prefName = PREF_PREFIX + "." + key;
-      switch (typeof prefValue) {
-        case "boolean":
-          lazy.AsyncPrefs.set(prefName, prefValue);
-          break;
-        case "number":
-          lazy.AsyncPrefs.set(prefName, prefValue);
-          break;
-        case "string":
-          if (prefValue.length > MAX_STRING_PREF_LENGTH) {
-            log(
-              "setPreferences - Exceeded the maximum allowed length " +
-                "for a string preference."
-            );
-          } else {
-            lazy.AsyncPrefs.set(prefName, prefValue);
-          }
-          break;
-      }
-    }
-    if (sendResponse) {
-      sendResponse(true);
-    }
-  }
-
   getPreferences(prefs, sendResponse) {
-    var defaultBranch = Services.prefs.getDefaultBranch(PREF_PREFIX + ".");
+    var defaultBranch = Services.prefs.getDefaultBranch("pdfjs.");
     var currentPrefs = {},
       numberOfPrefs = 0;
-    var prefValue, prefName;
     for (var key in prefs) {
       if (++numberOfPrefs > MAX_NUMBER_OF_PREFS) {
         log(
@@ -512,25 +467,22 @@ class ChromeActions {
       } else if (!defaultBranch.getPrefType(key)) {
         continue;
       }
-      prefValue = prefs[key];
-      prefName = PREF_PREFIX + "." + key;
+      const prefName = `pdfjs.${key}`,
+        prefValue = prefs[key];
       switch (typeof prefValue) {
         case "boolean":
-          currentPrefs[key] = getBoolPref(prefName, prefValue);
+          currentPrefs[key] = Services.prefs.getBoolPref(prefName, prefValue);
           break;
         case "number":
-          currentPrefs[key] = getIntPref(prefName, prefValue);
+          currentPrefs[key] = Services.prefs.getIntPref(prefName, prefValue);
           break;
         case "string":
-          currentPrefs[key] = getStringPref(prefName, prefValue);
+          currentPrefs[key] = Services.prefs.getStringPref(prefName, prefValue);
           break;
       }
     }
-    let result = JSON.stringify(currentPrefs);
-    if (sendResponse) {
-      sendResponse(result);
-    }
-    return result;
+    sendResponse?.(currentPrefs);
+    return currentPrefs;
   }
 
   /**
@@ -984,7 +936,7 @@ PdfStreamConverter.prototype = {
       if (
         !isPDF ||
         !toplevelOctetStream ||
-        !getBoolPref(PREF_PREFIX + ".handleOctetStream", false)
+        !Services.prefs.getBoolPref("pdfjs.handleOctetStream", false)
       ) {
         throw new Components.Exception(
           "Ignore PDF.js for this download.",
@@ -994,10 +946,8 @@ PdfStreamConverter.prototype = {
       // fall through, this appears to be a pdf.
     }
 
-    let {
-      alwaysAskBeforeHandling,
-      shouldOpen,
-    } = this._validateAndMaybeUpdatePDFPrefs();
+    let { alwaysAskBeforeHandling, shouldOpen } =
+      this._validateAndMaybeUpdatePDFPrefs();
 
     if (shouldOpen) {
       return HTML;
@@ -1064,17 +1014,20 @@ PdfStreamConverter.prototype = {
       } catch (e) {}
 
       var hash = aRequest.URI.ref;
-      var isPDFBugEnabled = getBoolPref(PREF_PREFIX + ".pdfBugEnabled", false);
+      const isPDFBugEnabled = Services.prefs.getBoolPref(
+        "pdfjs.pdfBugEnabled",
+        false
+      );
       rangeRequest =
         contentEncoding === "identity" &&
         acceptRanges === "bytes" &&
         aRequest.contentLength >= 0 &&
-        !getBoolPref(PREF_PREFIX + ".disableRange", false) &&
+        !Services.prefs.getBoolPref("pdfjs.disableRange", false) &&
         (!isPDFBugEnabled || !hash.toLowerCase().includes("disablerange=true"));
       streamRequest =
         contentEncoding === "identity" &&
         aRequest.contentLength >= 0 &&
-        !getBoolPref(PREF_PREFIX + ".disableStream", false) &&
+        !Services.prefs.getBoolPref("pdfjs.disableStream", false) &&
         (!isPDFBugEnabled ||
           !hash.toLowerCase().includes("disablestream=true"));
     }
@@ -1174,7 +1127,7 @@ PdfStreamConverter.prototype = {
         var requestListener = new RequestListener(actions);
         domWindow.document.addEventListener(
           PDFJS_EVENT_ID,
-          function(event) {
+          function (event) {
             requestListener.receive(event);
           },
           false,
@@ -1197,14 +1150,14 @@ PdfStreamConverter.prototype = {
     // e.g. useful for NoScript. Make make sure we reuse the origin attributes
     // from the request channel to keep isolation consistent.
     var uri = lazy.NetUtil.newURI(PDF_VIEWER_WEB_PAGE);
-    var resourcePrincipal = Services.scriptSecurityManager.createContentPrincipal(
-      uri,
-      aRequest.loadInfo.originAttributes
-    );
+    var resourcePrincipal =
+      Services.scriptSecurityManager.createContentPrincipal(
+        uri,
+        aRequest.loadInfo.originAttributes
+      );
     // Remember the principal we would have had before we mess with it.
-    let originalPrincipal = Services.scriptSecurityManager.getChannelResultPrincipal(
-      aRequest
-    );
+    let originalPrincipal =
+      Services.scriptSecurityManager.getChannelResultPrincipal(aRequest);
     aRequest.owner = resourcePrincipal;
     aRequest.setProperty("noPDFJSPrincipal", originalPrincipal);
 

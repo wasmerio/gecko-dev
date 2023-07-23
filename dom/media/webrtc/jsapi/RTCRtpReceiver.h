@@ -75,6 +75,13 @@ class RTCRtpReceiver : public nsISupports,
   nsPIDOMWindowInner* GetParentObject() const;
   nsTArray<RefPtr<RTCStatsPromise>> GetStatsInternal(
       bool aSkipIceStats = false);
+  Nullable<DOMHighResTimeStamp> GetJitterBufferTarget(
+      ErrorResult& aError) const {
+    return mJitterBufferTarget.isSome() ? Nullable(mJitterBufferTarget.value())
+                                        : Nullable<DOMHighResTimeStamp>();
+  }
+  void SetJitterBufferTarget(const Nullable<DOMHighResTimeStamp>& aTargetMs,
+                             ErrorResult& aError);
 
   void Shutdown();
   void BreakCycles();
@@ -121,23 +128,23 @@ class RTCRtpReceiver : public nsISupports,
   void UpdateUnmuteBlockingState();
   void UpdateReceiveTrackMute();
 
-  AbstractCanonical<Ssrc>* CanonicalSsrc() { return &mSsrc; }
-  AbstractCanonical<Ssrc>* CanonicalVideoRtxSsrc() { return &mVideoRtxSsrc; }
-  AbstractCanonical<RtpExtList>* CanonicalLocalRtpExtensions() {
-    return &mLocalRtpExtensions;
+  Canonical<Ssrc>& CanonicalSsrc() { return mSsrc; }
+  Canonical<Ssrc>& CanonicalVideoRtxSsrc() { return mVideoRtxSsrc; }
+  Canonical<RtpExtList>& CanonicalLocalRtpExtensions() {
+    return mLocalRtpExtensions;
   }
 
-  AbstractCanonical<std::vector<AudioCodecConfig>>* CanonicalAudioCodecs() {
-    return &mAudioCodecs;
+  Canonical<std::vector<AudioCodecConfig>>& CanonicalAudioCodecs() {
+    return mAudioCodecs;
   }
 
-  AbstractCanonical<std::vector<VideoCodecConfig>>* CanonicalVideoCodecs() {
-    return &mVideoCodecs;
+  Canonical<std::vector<VideoCodecConfig>>& CanonicalVideoCodecs() {
+    return mVideoCodecs;
   }
-  AbstractCanonical<Maybe<RtpRtcpConfig>>* CanonicalVideoRtpRtcpConfig() {
-    return &mVideoRtpRtcpConfig;
+  Canonical<Maybe<RtpRtcpConfig>>& CanonicalVideoRtpRtcpConfig() {
+    return mVideoRtpRtcpConfig;
   }
-  AbstractCanonical<bool>* CanonicalReceiving() override { return &mReceiving; }
+  Canonical<bool>& CanonicalReceiving() override { return mReceiving; }
 
  private:
   virtual ~RTCRtpReceiver();
@@ -170,6 +177,8 @@ class RTCRtpReceiver : public nsISupports,
   // This corresponds to the [[Receptive]] slot on RTCRtpTransceiver.
   // Its only purpose is suppressing unmute events if true.
   bool mReceptive = false;
+  // This is the [[JitterBufferTarget]] internal slot.
+  Maybe<DOMHighResTimeStamp> mJitterBufferTarget;
 
   MediaEventListener mRtcpByeListener;
   MediaEventListener mRtcpTimeoutListener;

@@ -33,12 +33,14 @@ let AVAILABLE_PIP_OVERRIDES;
 
     tests: {
       // FOR TESTS ONLY!
-      "https://mochitest.youtube.com/*browser/browser/extensions/pictureinpicture/tests/browser/test-mock-wrapper.html": {
-        videoWrapperScriptPath: "video-wrappers/mock-wrapper.js",
-      },
-      "https://mochitest.youtube.com/*browser/browser/extensions/pictureinpicture/tests/browser/test-toggle-visibility.html": {
-        videoWrapperScriptPath: "video-wrappers/mock-wrapper.js",
-      },
+      "https://mochitest.youtube.com/*browser/browser/extensions/pictureinpicture/tests/browser/test-mock-wrapper.html":
+        {
+          videoWrapperScriptPath: "video-wrappers/mock-wrapper.js",
+        },
+      "https://mochitest.youtube.com/*browser/browser/extensions/pictureinpicture/tests/browser/test-toggle-visibility.html":
+        {
+          videoWrapperScriptPath: "video-wrappers/mock-wrapper.js",
+        },
     },
 
     abcnews: {
@@ -56,6 +58,12 @@ let AVAILABLE_PIP_OVERRIDES;
     aol: {
       "https://*.aol.com/*": {
         videoWrapperScriptPath: "video-wrappers/yahoo.js",
+      },
+    },
+
+    arte: {
+      "https://*.arte.tv/*": {
+        videoWrapperScriptPath: "video-wrappers/arte.js",
       },
     },
 
@@ -165,6 +173,12 @@ let AVAILABLE_PIP_OVERRIDES;
       "https://*.netflix.com/search*": { policy: TOGGLE_POLICIES.HIDDEN },
     },
 
+    nytimes: {
+      "https://*.nytimes.com/*": {
+        videoWrapperScriptPath: "video-wrappers/nytimes.js",
+      },
+    },
+
     pbs: {
       "https://*.pbs.org/*": {
         videoWrapperScriptPath: "video-wrappers/videojsWrapper.js",
@@ -236,7 +250,10 @@ let AVAILABLE_PIP_OVERRIDES;
     },
 
     udemy: {
-      "https://*.udemy.com/*": { policy: TOGGLE_POLICIES.ONE_QUARTER },
+      "https://*.udemy.com/*": {
+        videoWrapperScriptPath: "video-wrappers/udemy.js",
+        policy: TOGGLE_POLICIES.ONE_QUARTER,
+      },
     },
 
     voot: {

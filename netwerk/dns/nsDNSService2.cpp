@@ -55,7 +55,6 @@ static const char kPrefDnsCacheExpiration[] = "network.dnsCacheExpiration";
 static const char kPrefDnsCacheGrace[] =
     "network.dnsCacheExpirationGracePeriod";
 static const char kPrefIPv4OnlyDomains[] = "network.dns.ipv4OnlyDomains";
-static const char kPrefDisableIPv6[] = "network.dns.disableIPv6";
 static const char kPrefBlockDotOnion[] = "network.dns.blockDotOnion";
 static const char kPrefDnsLocalDomains[] = "network.dns.localDomains";
 static const char kPrefDnsForceResolve[] = "network.dns.forceResolve";
@@ -128,9 +127,7 @@ NS_IMETHODIMP
 nsDNSRecord::IsTRR(bool* retval) {
   MutexAutoLock lock(mHostRecord->addr_info_lock);
   if (mHostRecord->addr_info) {
-    // TODO: Let the consumers of nsIDNSRecord be unaware of the difference of
-    // TRR and ODoH. Will let them know the truth when needed.
-    *retval = mHostRecord->addr_info->IsTRROrODoH();
+    *retval = mHostRecord->addr_info->IsTRR();
   } else {
     *retval = false;
   }
@@ -146,7 +143,7 @@ nsDNSRecord::ResolvedInSocketProcess(bool* retval) {
 NS_IMETHODIMP
 nsDNSRecord::GetTrrFetchDuration(double* aTime) {
   MutexAutoLock lock(mHostRecord->addr_info_lock);
-  if (mHostRecord->addr_info && mHostRecord->addr_info->IsTRROrODoH()) {
+  if (mHostRecord->addr_info && mHostRecord->addr_info->IsTRR()) {
     *aTime = mHostRecord->addr_info->GetTrrFetchDuration();
   } else {
     *aTime = 0;
@@ -157,7 +154,7 @@ nsDNSRecord::GetTrrFetchDuration(double* aTime) {
 NS_IMETHODIMP
 nsDNSRecord::GetTrrFetchDurationNetworkOnly(double* aTime) {
   MutexAutoLock lock(mHostRecord->addr_info_lock);
-  if (mHostRecord->addr_info && mHostRecord->addr_info->IsTRROrODoH()) {
+  if (mHostRecord->addr_info && mHostRecord->addr_info->IsTRR()) {
     *aTime = mHostRecord->addr_info->GetTrrFetchDurationNetworkOnly();
   } else {
     *aTime = 0;
@@ -790,11 +787,6 @@ void nsDNSService::ReadPrefs(const char* name) {
   }
 
   // DNSservice prefs
-  if (!name || !strcmp(name, kPrefDisableIPv6)) {
-    if (NS_SUCCEEDED(Preferences::GetBool(kPrefDisableIPv6, &tmpbool))) {
-      mDisableIPv6 = tmpbool;
-    }
-  }
   if (!name || !strcmp(name, kPrefDnsOfflineLocalhost)) {
     if (NS_SUCCEEDED(
             Preferences::GetBool(kPrefDnsOfflineLocalhost, &tmpbool))) {
@@ -847,7 +839,6 @@ nsDNSService::Init() {
     observerService->AddObserver(this, "last-pb-context-exited", false);
     observerService->AddObserver(this, NS_NETWORK_LINK_TOPIC, false);
     observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
-    observerService->AddObserver(this, "odoh-service-activated", false);
   }
 
   RefPtr<nsHostResolver> res;
@@ -868,7 +859,6 @@ nsDNSService::Init() {
     prefs->AddObserver(kPrefIPv4OnlyDomains, this, false);
     prefs->AddObserver(kPrefDnsLocalDomains, this, false);
     prefs->AddObserver(kPrefDnsForceResolve, this, false);
-    prefs->AddObserver(kPrefDisableIPv6, this, false);
     prefs->AddObserver(kPrefDnsOfflineLocalhost, this, false);
     prefs->AddObserver(kPrefBlockDotOnion, this, false);
     prefs->AddObserver(kPrefDnsNotifyResolution, this, false);
@@ -1304,14 +1294,6 @@ nsDNSService::GetMyHostName(nsACString& result) {
 }
 
 NS_IMETHODIMP
-nsDNSService::GetODoHActivated(bool* aResult) {
-  NS_ENSURE_ARG(aResult);
-
-  *aResult = mODoHActivated;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDNSService::Observe(nsISupports* subject, const char* topic,
                       const char16_t* data) {
   bool flushCache = false;
@@ -1333,8 +1315,6 @@ nsDNSService::Observe(nsISupports* subject, const char* topic,
     }
   } else if (!strcmp(topic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
     Shutdown();
-  } else if (!strcmp(topic, "odoh-service-activated")) {
-    mODoHActivated = u"true"_ns.Equals(data);
   }
 
   if (flushCache && resolver) {
@@ -1347,7 +1327,8 @@ nsDNSService::Observe(nsISupports* subject, const char* topic,
 
 uint16_t nsDNSService::GetAFForLookup(const nsACString& host,
                                       nsIDNSService::DNSFlags flags) {
-  if (mDisableIPv6 || (flags & RESOLVE_DISABLE_IPV6)) {
+  if (StaticPrefs::network_dns_disableIPv6() ||
+      (flags & RESOLVE_DISABLE_IPV6)) {
     return PR_AF_INET;
   }
 
@@ -1504,6 +1485,11 @@ nsDNSService::GetTrrDomain(nsACString& aTRRDomain) {
     return NS_OK;
   }
   return uri->GetHost(aTRRDomain);
+}
+
+nsresult nsDNSService::GetTRRDomainKey(nsACString& aTRRDomain) {
+  aTRRDomain = TRRService::ProviderKey();
+  return NS_OK;
 }
 
 size_t nsDNSService::SizeOfIncludingThis(

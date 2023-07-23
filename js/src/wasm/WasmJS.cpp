@@ -396,6 +396,13 @@ static bool ThrowBadImportType(JSContext* cx, const CacheableName& field,
   return false;
 }
 
+// For now reject cross-compartment wrappers. These have more complicated realm
+// semantics (we use nonCCWRealm in a few places) and may require unwrapping to
+// test for specific function types.
+static bool IsCallableNonCCW(const Value& v) {
+  return IsCallable(v) && !IsCrossCompartmentWrapper(&v.toObject());
+}
+
 bool js::wasm::GetImports(JSContext* cx, const Module& module,
                           HandleObject importObj, ImportValues* imports) {
   if (!module.imports().empty() && !importObj) {
@@ -439,10 +446,7 @@ bool js::wasm::GetImports(JSContext* cx, const Module& module,
 
     switch (import.kind) {
       case DefinitionKind::Function: {
-        // For now reject cross-compartment wrappers. These have more
-        // complicated realm semantics (we use nonCCWRealm in a few places) and
-        // may require unwrapping to test for specific function types.
-        if (!IsCallable(v) || IsCrossCompartmentWrapper(&v.toObject())) {
+        if (!IsCallableNonCCW(v)) {
           return ThrowBadImportType(cx, import.field, "Function");
         }
 
@@ -4237,11 +4241,13 @@ bool WasmFunctionType(JSContext* cx, unsigned argc, Value* vp) {
   return CallNonGenericMethod<IsWasmFunction, WasmFunctionTypeImpl>(cx, args);
 }
 
-JSFunction* WasmFunctionCreate(JSContext* cx, HandleFunction func,
-                               wasm::ValTypeVector&& params,
-                               wasm::ValTypeVector&& results,
-                               HandleObject proto) {
-  MOZ_RELEASE_ASSERT(!IsWasmExportedFunction(func));
+static JSFunction* WasmFunctionCreate(JSContext* cx, HandleObject func,
+                                      wasm::ValTypeVector&& params,
+                                      wasm::ValTypeVector&& results,
+                                      HandleObject proto) {
+  MOZ_ASSERT(IsCallableNonCCW(ObjectValue(*func)));
+  MOZ_RELEASE_ASSERT(!func->is<JSFunction>() ||
+                     !IsWasmExportedFunction(&func->as<JSFunction>()));
 
   // We want to import the function to a wasm module and then export it again so
   // that it behaves exactly like a normal wasm function and can be used like
@@ -4366,13 +4372,12 @@ bool WasmFunctionConstruct(JSContext* cx, unsigned argc, Value* vp) {
 
   // Get the target function
 
-  if (!args[1].isObject() || !args[1].toObject().is<JSFunction>() ||
-      IsWasmFunction(args[1])) {
+  if (!IsCallableNonCCW(args[1]) || IsWasmFunction(args[1])) {
     JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                              JSMSG_WASM_BAD_FUNCTION_VALUE);
     return false;
   }
-  RootedFunction func(cx, &args[1].toObject().as<JSFunction>());
+  RootedObject func(cx, &args[1].toObject());
 
   RootedObject proto(
       cx, GetWasmConstructorPrototype(cx, args, JSProto_WasmFunction));
@@ -4455,9 +4460,14 @@ static bool Reject(JSContext* cx, const CompileArgs& args,
   }
 
   RootedObject stack(cx, promise->allocationSite());
-  RootedString filename(
-      cx, JS_NewStringCopyZ(cx, args.scriptedCaller.filename.get()));
-  if (!filename) {
+  RootedString fileName(cx);
+  if (const char* filename = args.scriptedCaller.filename.get()) {
+    fileName =
+        JS_NewStringCopyUTF8N(cx, JS::UTF8Chars(filename, strlen(filename)));
+  } else {
+    fileName = JS_GetEmptyString(cx);
+  }
+  if (!fileName) {
     return false;
   }
 
@@ -4481,7 +4491,7 @@ static bool Reject(JSContext* cx, const CompileArgs& args,
   auto cause = JS::NothingHandleValue;
 
   RootedObject errorObj(
-      cx, ErrorObject::create(cx, JSEXN_WASMCOMPILEERROR, stack, filename, 0,
+      cx, ErrorObject::create(cx, JSEXN_WASMCOMPILEERROR, stack, fileName, 0,
                               line, 0, nullptr, message, cause));
   if (!errorObj) {
     return false;

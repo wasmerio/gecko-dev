@@ -1879,7 +1879,7 @@ void MacroAssemblerRiscv64Compat::handleFailureWithHandlerTail(
   mv(a0, StackPointer);  // Use a0 since it is a first function argument
 
   // Call the handler.
-  using Fn = void (*)(ResumeFromException * rfe);
+  using Fn = void (*)(ResumeFromException* rfe);
   asMasm().setupUnalignedABICall(a1);
   asMasm().passABIArg(a0);
   asMasm().callWithABI<Fn, HandleException>(
@@ -2125,7 +2125,8 @@ CodeOffset MacroAssembler::nopPatchableToCall() {
 CodeOffset MacroAssembler::wasmTrapInstruction() {
   CodeOffset offset(currentOffset());
   BlockTrampolinePoolScope block_trampoline_pool(this, 2);
-  break_(kWasmTrapCode);  // TODO: teq(zero, zero, WASM_TRAP)
+  illegal_trap(kWasmTrapCode);
+  ebreak();
   return offset;
 }
 size_t MacroAssembler::PushRegsInMaskSizeInBytes(LiveRegisterSet set) {
@@ -4285,7 +4286,12 @@ void MacroAssembler::widenInt32(Register r) {
 // modified by UpdateLoad64Value, either during compilation (eg.
 // Assembler::bind), or during execution (eg. jit::PatchJump).
 void MacroAssemblerRiscv64::ma_liPatchable(Register dest, Imm32 imm) {
-  return ma_liPatchable(dest, ImmWord(uintptr_t(imm.value)));
+  m_buffer.ensureSpace(2 * sizeof(uint32_t));
+  int64_t value = imm.value;
+  int64_t high_20 = ((value + 0x800) >> 12);
+  int64_t low_12 = value << 52 >> 52;
+  lui(dest, high_20);
+  addi(dest, dest, low_12);
 }
 
 void MacroAssemblerRiscv64::ma_liPatchable(Register dest, ImmPtr imm) {
@@ -4450,6 +4456,7 @@ bool MacroAssemblerRiscv64::BranchShortHelper(int32_t offset, Label* L,
     MOZ_ASSERT(rt.is_reg());
     scratch = rt.rm();
   }
+  BlockTrampolinePoolScope block_trampoline_pool(this, 2);
   {
     switch (cond) {
       case Always:
@@ -5903,7 +5910,6 @@ void MacroAssemblerRiscv64::Ctz32(Register rd, Register rs) {
 void MacroAssemblerRiscv64::Ctz64(Register rd, Register rs) {
   // Convert trailing zeroes to trailing ones, and bits to their left
   // to zeroes.
-  BlockTrampolinePoolScope block_trampoline_pool(this, 40);
   {
     UseScratchRegisterScope temps(this);
     Register scratch = temps.Acquire();

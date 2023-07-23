@@ -4,6 +4,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TestUtils: "resource://testing-common/TestUtils.sys.mjs",
 });
 
+ChromeUtils.defineLazyGetter(lazy, "PlacesFrecencyRecalculator", () => {
+  return Cc["@mozilla.org/places/frecency-recalculator;1"].getService(
+    Ci.nsIObserver
+  ).wrappedJSObject;
+});
+
 export var PlacesTestUtils = Object.freeze({
   /**
    * Asynchronously adds visits to a page.
@@ -36,6 +42,7 @@ export var PlacesTestUtils = Object.freeze({
     }
 
     // Create a PageInfo for each entry.
+    let seenUrls = new Set();
     let lastStoredVisit;
     for (let obj of places) {
       let place;
@@ -83,6 +90,7 @@ export var PlacesTestUtils = Object.freeze({
           referrer,
         },
       ];
+      seenUrls.add(info.url);
       infos.push(info);
       if (
         !place.transition ||
@@ -92,6 +100,11 @@ export var PlacesTestUtils = Object.freeze({
       }
     }
     await lazy.PlacesUtils.history.insertMany(infos);
+    if (seenUrls.size > 1) {
+      // If there's only one URL then history has updated frecency already,
+      // otherwise we must force a recalculation.
+      await lazy.PlacesFrecencyRecalculator.recalculateAnyOutdatedFrecencies();
+    }
     if (lastStoredVisit) {
       await lazy.TestUtils.waitForCondition(
         () => lazy.PlacesUtils.history.fetch(lastStoredVisit.url),
@@ -203,7 +216,7 @@ export var PlacesTestUtils = Object.freeze({
   promiseAsyncUpdates() {
     return lazy.PlacesUtils.withConnectionWrapper(
       "promiseAsyncUpdates",
-      async function(db) {
+      async function (db) {
         try {
           await db.executeCached("BEGIN EXCLUSIVE");
           await db.executeCached("COMMIT");
@@ -264,8 +277,8 @@ export var PlacesTestUtils = Object.freeze({
   markBookmarksAsSynced() {
     return lazy.PlacesUtils.withConnectionWrapper(
       "PlacesTestUtils: markBookmarksAsSynced",
-      function(db) {
-        return db.executeTransaction(async function() {
+      function (db) {
+        return db.executeTransaction(async function () {
           await db.executeCached(
             `WITH RECURSIVE
            syncedItems(id) AS (
@@ -305,8 +318,8 @@ export var PlacesTestUtils = Object.freeze({
   setBookmarkSyncFields(...aFieldInfos) {
     return lazy.PlacesUtils.withConnectionWrapper(
       "PlacesTestUtils: setBookmarkSyncFields",
-      function(db) {
-        return db.executeTransaction(async function() {
+      function (db) {
+        return db.executeTransaction(async function () {
           for (let info of aFieldInfos) {
             if (!lazy.PlacesUtils.isValidGuid(info.guid)) {
               throw new Error(`Invalid GUID: ${info.guid}`);
@@ -527,14 +540,8 @@ export var PlacesTestUtils = Object.freeze({
     if (url2.protocol != "place:") {
       throw new Error("Expected a place: uri, got " + url2.href);
     }
-    let tokens1 = url1.pathname
-      .split("&")
-      .sort()
-      .join("&");
-    let tokens2 = url2.pathname
-      .split("&")
-      .sort()
-      .join("&");
+    let tokens1 = url1.pathname.split("&").sort().join("&");
+    let tokens2 = url2.pathname.split("&").sort().join("&");
     if (tokens1 != tokens2) {
       dump(`Failed comparison between:\n${tokens1}\n${tokens2}\n`);
       return false;
@@ -568,21 +575,22 @@ export var PlacesTestUtils = Object.freeze({
   },
 
   /**
-   * Updates a specified field in a database table, based on the given
+   * Updates specified fields in a database table, based on the given
    * conditions.
    * @param {string} table - The name of the database table to add to.
-   * @param {string} field - The name of the field to update the value for.
-   * @param {string} value - The value to set.
-   * @param {Object} conditions - An object containing the conditions to filter
+   * @param {string} fields - an object with field, value pairs
+   * @param {Object} [conditions] - An object containing the conditions to filter
    * the query results. The keys represent the names of the columns to filter
    * by, and the values represent the filter values.
    * @return {Promise} A Promise that resolves to the number of affected rows.
    * @throws If no rows were affected.
    */
-  async updateDatabaseValue(table, field, value, conditions) {
+  async updateDatabaseValues(table, fields, conditions = {}) {
     let { fragment: where, params } = this._buildWhereClause(table, conditions);
-    let query = `UPDATE ${table} SET ${field} = :val ${where} RETURNING rowid`;
-    params.val = value;
+    let query = `UPDATE ${table} SET ${Object.keys(fields)
+      .map(f => f + " = :" + f)
+      .join()} ${where} RETURNING rowid`;
+    params = Object.assign(fields, params);
     return lazy.PlacesUtils.withConnectionWrapper(
       "setDatabaseValue",
       async conn => {
@@ -592,6 +600,26 @@ export var PlacesTestUtils = Object.freeze({
         }
         return rows.length;
       }
+    );
+  },
+
+  async promiseItemId(guid) {
+    return this.getDatabaseValue("moz_bookmarks", "id", { guid });
+  },
+
+  async promiseItemGuid(id) {
+    return this.getDatabaseValue("moz_bookmarks", "guid", { id });
+  },
+
+  async promiseManyItemIds(guids) {
+    let conn = await lazy.PlacesUtils.promiseDBConnection();
+    let rows = await conn.executeCached(`
+      SELECT guid, id FROM moz_bookmarks WHERE guid IN (${guids
+        .map(guid => "'" + guid + "'")
+        .join()}
+      )`);
+    return new Map(
+      rows.map(r => [r.getResultByName("guid"), r.getResultByName("id")])
     );
   },
 

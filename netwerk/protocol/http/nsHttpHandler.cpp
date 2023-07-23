@@ -301,25 +301,6 @@ static const char* gCallbackPrefs[] = {
     nullptr,
 };
 
-static void GetFirefoxVersionForUserAgent(nsACString& aVersion) {
-  // If the "network.http.useragent.forceVersion" pref has a non-zero value,
-  // then override the User-Agent string's Firefox version. The value 0 means
-  // use the default Firefox version. If enterprise users rely on sites that
-  // aren't compatible with Firefox version 100's three-digit version number,
-  // enterprise admins can set this pref to a known-good version (like 99) in an
-  // enterprise policy file.
-  uint32_t forceVersion =
-      mozilla::StaticPrefs::network_http_useragent_forceVersion();
-  if (forceVersion == 0) {
-    // Use the default Firefox version.
-    aVersion.AssignLiteral(MOZILLA_UAVERSION);
-  } else {
-    // Use the pref's version.
-    aVersion.AppendInt(forceVersion);
-    aVersion.AppendLiteral(".0");
-  }
-}
-
 nsresult nsHttpHandler::Init() {
   nsresult rv;
 
@@ -391,11 +372,7 @@ nsresult nsHttpHandler::Init() {
   Telemetry::ScalarSet(Telemetry::ScalarID::NETWORKING_HTTP3_ENABLED,
                        StaticPrefs::network_http_http3_enable());
 
-  nsAutoCString uaVersion;
-  GetFirefoxVersionForUserAgent(uaVersion);
-
-  mCompatFirefox.AssignLiteral("Firefox/");
-  mCompatFirefox.Append(uaVersion);
+  mCompatFirefox.AssignLiteral("Firefox/" MOZILLA_UAVERSION);
 
   nsCOMPtr<nsIXULAppInfo> appInfo =
       do_GetService("@mozilla.org/xre/app-info;1");
@@ -420,7 +397,7 @@ nsresult nsHttpHandler::Init() {
   if (forceVersion && (isFirefox || mCompatFirefoxEnabled)) {
     mMisc.Append(nsPrintfCString("%u.0", forceVersion));
   } else {
-    mMisc.Append(uaVersion);
+    mMisc.AppendLiteral(MOZILLA_UAVERSION);
   }
 
   // Generate the spoofed User Agent for fingerprinting resistance.
@@ -437,7 +414,7 @@ nsresult nsHttpHandler::Init() {
   mRequestContextService = RequestContextService::GetOrCreate();
 
 #if defined(ANDROID)
-  mProductSub.Assign(uaVersion);
+  mProductSub.AssignLiteral(MOZILLA_UAVERSION);
 #else
   mProductSub.AssignLiteral(LEGACY_UA_GECKO_TRAIL);
 #endif
@@ -941,15 +918,7 @@ void nsHttpHandler::InitUserAgentComponents() {
     mOscpu = buf.get();
   }
 #elif defined(XP_MACOSX)
-  SInt32 majorVersion = nsCocoaFeatures::macOSVersionMajor();
-  SInt32 minorVersion = nsCocoaFeatures::macOSVersionMinor();
-
-  // Cap the reported macOS version at 10.15 (like Safari) to avoid breaking
-  // sites that assume the UA's macOS version always begins with "10.".
-  int uaVersion = (majorVersion >= 11 || minorVersion > 15) ? 15 : minorVersion;
-
-  // Always return an "Intel" UA string, even on ARM64 macOS like Safari does.
-  mOscpu = nsPrintfCString("Intel Mac OS X 10.%d", uaVersion);
+  mOscpu.AssignLiteral("Intel Mac OS X 10.15");
 #elif defined(XP_UNIX)
   struct utsname name {};
   int ret = uname(&name);
@@ -2141,18 +2110,15 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
       mAltSvcCache->ClearAltServiceMappings();
     }
   } else if (!strcmp(topic, NS_NETWORK_LINK_TOPIC)) {
-    nsAutoCString converted = NS_ConvertUTF16toUTF8(data);
-    if (!strcmp(converted.get(), NS_NETWORK_LINK_DATA_CHANGED)) {
-      if (mConnMgr) {
-        rv = mConnMgr->PruneDeadConnections();
-        if (NS_FAILED(rv)) {
-          LOG(("    PruneDeadConnections failed (%08x)\n",
-               static_cast<uint32_t>(rv)));
-        }
-        rv = mConnMgr->VerifyTraffic();
-        if (NS_FAILED(rv)) {
-          LOG(("    VerifyTraffic failed (%08x)\n", static_cast<uint32_t>(rv)));
-        }
+    if (mConnMgr) {
+      rv = mConnMgr->PruneDeadConnections();
+      if (NS_FAILED(rv)) {
+        LOG(("    PruneDeadConnections failed (%08x)\n",
+             static_cast<uint32_t>(rv)));
+      }
+      rv = mConnMgr->VerifyTraffic();
+      if (NS_FAILED(rv)) {
+        LOG(("    VerifyTraffic failed (%08x)\n", static_cast<uint32_t>(rv)));
       }
     }
   } else if (!strcmp(topic, "application-background")) {
@@ -2204,36 +2170,18 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
 // nsISpeculativeConnect
 
 nsresult nsHttpHandler::SpeculativeConnectInternal(
-    nsIURI* aURI, nsIPrincipal* aPrincipal, nsIInterfaceRequestor* aCallbacks,
-    bool anonymous) {
+    nsIURI* aURI, nsIPrincipal* aPrincipal,
+    Maybe<OriginAttributes>&& aOriginAttributes,
+    nsIInterfaceRequestor* aCallbacks, bool anonymous) {
   if (IsNeckoChild()) {
-    gNeckoChild->SendSpeculativeConnect(aURI, aPrincipal, anonymous);
+    gNeckoChild->SendSpeculativeConnect(
+        aURI, aPrincipal, std::move(aOriginAttributes), anonymous);
     return NS_OK;
   }
 
   if (!mHandlerActive) return NS_OK;
 
   MOZ_ASSERT(NS_IsMainThread());
-  nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
-  if (mDebugObservations && obsService) {
-    // this is basically used for test coverage of an otherwise 'hintable'
-    // feature
-
-    // This is used to test if the `crossOrigin` attribute is parsed correctly.
-    nsPrintfCString debugURL("%s%s", aURI->GetSpecOrDefault().get(),
-                             anonymous ? "anonymous" : "use-credentials");
-    obsService->NotifyObservers(nullptr, "speculative-connect-request",
-                                NS_ConvertUTF8toUTF16(debugURL).get());
-    for (auto* cp :
-         dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
-      PNeckoParent* neckoParent =
-          SingleManagedOrNull(cp->ManagedPNeckoParent());
-      if (!neckoParent) {
-        continue;
-      }
-      Unused << neckoParent->SendSpeculativeConnectRequest();
-    }
-  }
 
   nsISiteSecurityService* sss = gHttpHandler->GetSSService();
   bool isStsHost = false;
@@ -2243,14 +2191,17 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
   OriginAttributes originAttributes;
   // If the principal is given, we use the originAttributes from this
   // principal. Otherwise, we use the originAttributes from the loadContext.
-  if (aPrincipal) {
+  if (aOriginAttributes) {
+    originAttributes = std::move(aOriginAttributes.ref());
+  } else if (aPrincipal) {
     originAttributes = aPrincipal->OriginAttributesRef();
+    StoragePrincipalHelper::UpdateOriginAttributesForNetworkState(
+        aURI, originAttributes);
   } else if (loadContext) {
     loadContext->GetOriginAttributes(originAttributes);
+    StoragePrincipalHelper::UpdateOriginAttributesForNetworkState(
+        aURI, originAttributes);
   }
-
-  StoragePrincipalHelper::UpdateOriginAttributesForNetworkState(
-      aURI, originAttributes);
 
   nsCOMPtr<nsIURI> clone;
   if (NS_SUCCEEDED(sss->IsSecureURI(aURI, originAttributes, &isStsHost)) &&
@@ -2297,20 +2248,62 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
   if (originAttributes.mPrivateBrowsingId > 0) {
     ci->SetPrivate(true);
   }
+
+  if (mDebugObservations) {
+    // this is basically used for test coverage of an otherwise 'hintable'
+    // feature
+
+    nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+    if (obsService) {
+      // This is used to test if the speculative connection has the right
+      // connection info.
+      nsPrintfCString debugHashKey("%s", ci->HashKey().get());
+      obsService->NotifyObservers(nullptr, "speculative-connect-request",
+                                  NS_ConvertUTF8toUTF16(debugHashKey).get());
+      for (auto* cp :
+           dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
+        PNeckoParent* neckoParent =
+            SingleManagedOrNull(cp->ManagedPNeckoParent());
+        if (!neckoParent) {
+          continue;
+        }
+        Unused << neckoParent->SendSpeculativeConnectRequest();
+      }
+    }
+  }
+
   return SpeculativeConnect(ci, aCallbacks);
 }
 
 NS_IMETHODIMP
 nsHttpHandler::SpeculativeConnect(nsIURI* aURI, nsIPrincipal* aPrincipal,
-                                  nsIInterfaceRequestor* aCallbacks) {
-  return SpeculativeConnectInternal(aURI, aPrincipal, aCallbacks, false);
+                                  nsIInterfaceRequestor* aCallbacks,
+                                  bool aAnonymous) {
+  return SpeculativeConnectInternal(aURI, aPrincipal, Nothing(), aCallbacks,
+                                    aAnonymous);
 }
 
-NS_IMETHODIMP
-nsHttpHandler::SpeculativeAnonymousConnect(nsIURI* aURI,
-                                           nsIPrincipal* aPrincipal,
-                                           nsIInterfaceRequestor* aCallbacks) {
-  return SpeculativeConnectInternal(aURI, aPrincipal, aCallbacks, true);
+NS_IMETHODIMP nsHttpHandler::SpeculativeConnectWithOriginAttributes(
+    nsIURI* aURI, JS::Handle<JS::Value> aOriginAttributes,
+    nsIInterfaceRequestor* aCallbacks, bool aAnonymous, JSContext* aCx) {
+  OriginAttributes attrs;
+  if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  SpeculativeConnectWithOriginAttributesNative(aURI, std::move(attrs),
+                                               aCallbacks, aAnonymous);
+  return NS_OK;
+}
+
+NS_IMETHODIMP_(void)
+nsHttpHandler::SpeculativeConnectWithOriginAttributesNative(
+    nsIURI* aURI, OriginAttributes&& aOriginAttributes,
+    nsIInterfaceRequestor* aCallbacks, bool aAnonymous) {
+  Maybe<OriginAttributes> originAttributes;
+  originAttributes.emplace(aOriginAttributes);
+  Unused << SpeculativeConnectInternal(
+      aURI, nullptr, std::move(originAttributes), aCallbacks, aAnonymous);
 }
 
 void nsHttpHandler::TickleWifi(nsIInterfaceRequestor* cb) {

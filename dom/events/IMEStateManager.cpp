@@ -306,7 +306,7 @@ void IMEStateManager::MaybeStartOffsetUpdatedInChild(nsIWidget* aWidget,
     return;
   }
 
-  RefPtr<TextComposition> composition = GetTextCompositionFor(aWidget);
+  TextComposition* const composition = GetTextCompositionFor(aWidget);
   if (NS_WARN_IF(!composition)) {
     MOZ_LOG(sISMLog, LogLevel::Warning,
             ("MaybeStartOffsetUpdatedInChild(aWidget=0x%p, aStartOffset=%u), "
@@ -871,6 +871,9 @@ void IMEStateManager::OnClickInEditor(nsPresContext& aPresContext,
 }
 
 // static
+Element* IMEStateManager::GetFocusedElement() { return sFocusedElement; }
+
+// static
 bool IMEStateManager::IsFocusedElement(const nsPresContext& aPresContext,
                                        const Element* aFocusedElement) {
   if (!sFocusedPresContext || &aPresContext != sFocusedPresContext) {
@@ -1416,23 +1419,6 @@ IMEState IMEStateManager::GetNewIMEState(const nsPresContext& aPresContext,
   return newIMEState;
 }
 
-static bool MayBeIMEUnawareWebApp(nsINode* aNode) {
-  bool haveKeyEventsListener = false;
-
-  while (aNode) {
-    EventListenerManager* const mgr = aNode->GetExistingListenerManager();
-    if (mgr) {
-      if (mgr->MayHaveInputOrCompositionEventListener()) {
-        return false;
-      }
-      haveKeyEventsListener |= mgr->MayHaveKeyEventListener();
-    }
-    aNode = aNode->GetParentNode();
-  }
-
-  return haveKeyEventsListener;
-}
-
 // static
 void IMEStateManager::ResetActiveChildInputContext() {
   sActiveChildInputContext.mIMEState.mEnabled = IMEEnabled::Unknown;
@@ -1600,8 +1586,7 @@ MOZ_CAN_RUN_SCRIPT static void GetActionHint(const IMEState& aState,
   }
 
   // XXX This is old compatibility, but we might be able to remove this.
-  aContent.AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::moz_action_hint,
-                                aActionHint);
+  aContent.AsElement()->GetAttr(nsGkAtoms::moz_action_hint, aActionHint);
 
   if (!aActionHint.IsEmpty()) {
     ToLowerCase(aActionHint);
@@ -1669,8 +1654,7 @@ static void GetInputMode(const IMEState& aState, const nsIContent& aContent,
   if (aState.IsEditable() &&
       (StaticPrefs::dom_forms_inputmode() ||
        nsContentUtils::IsChromeDoc(aContent.OwnerDoc()))) {
-    aContent.AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::inputmode,
-                                  aInputMode);
+    aContent.AsElement()->GetAttr(nsGkAtoms::inputmode, aInputMode);
     if (aContent.IsHTMLElement(nsGkAtoms::input) &&
         aInputMode.EqualsLiteral("mozAwesomebar")) {
       if (!nsContentUtils::IsChromeDoc(aContent.OwnerDoc())) {
@@ -1743,11 +1727,6 @@ void IMEStateManager::SetIMEState(const IMEState& aState,
     }
   }
   context.mOrigin = aOrigin;
-  context.mMayBeIMEUnaware =
-      context.mIMEState.IsEditable() &&
-      StaticPrefs::
-          intl_ime_hack_on_ime_unaware_apps_fire_key_events_for_composition() &&
-      MayBeIMEUnawareWebApp(aElement);
 
   context.mHasHandledUserInput =
       aPresContext && aPresContext->PresShell()->HasHandledUserInput();
@@ -2347,36 +2326,24 @@ nsresult IMEStateManager::GetFocusSelectionAndRootElement(
 }
 
 // static
-already_AddRefed<TextComposition> IMEStateManager::GetTextCompositionFor(
-    nsIWidget* aWidget) {
-  if (!sTextCompositions) {
-    return nullptr;
-  }
-  RefPtr<TextComposition> textComposition =
-      sTextCompositions->GetCompositionFor(aWidget);
-  return textComposition.forget();
+TextComposition* IMEStateManager::GetTextCompositionFor(nsIWidget* aWidget) {
+  return sTextCompositions ? sTextCompositions->GetCompositionFor(aWidget)
+                           : nullptr;
 }
 
 // static
-already_AddRefed<TextComposition> IMEStateManager::GetTextCompositionFor(
+TextComposition* IMEStateManager::GetTextCompositionFor(
     const WidgetCompositionEvent* aCompositionEvent) {
-  if (!sTextCompositions) {
-    return nullptr;
-  }
-  RefPtr<TextComposition> textComposition =
-      sTextCompositions->GetCompositionFor(aCompositionEvent);
-  return textComposition.forget();
+  return sTextCompositions
+             ? sTextCompositions->GetCompositionFor(aCompositionEvent)
+             : nullptr;
 }
 
 // static
-already_AddRefed<TextComposition> IMEStateManager::GetTextCompositionFor(
+TextComposition* IMEStateManager::GetTextCompositionFor(
     nsPresContext* aPresContext) {
-  if (!sTextCompositions) {
-    return nullptr;
-  }
-  RefPtr<TextComposition> textComposition =
-      sTextCompositions->GetCompositionFor(aPresContext);
-  return textComposition.forget();
+  return sTextCompositions ? sTextCompositions->GetCompositionFor(aPresContext)
+                           : nullptr;
 }
 
 }  // namespace mozilla

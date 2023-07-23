@@ -63,7 +63,9 @@ add_task(async function setup() {
 });
 
 async function cleanup() {
-  Svc.Prefs.resetBranch("");
+  for (const pref of Svc.PrefBranch.getChildList("")) {
+    Svc.PrefBranch.clearUserPref(pref);
+  }
   await engine._tracker.clearChangedIDs();
   await engine._resetClient();
   // un-cleanup the logs (the resetBranch will have reset their levels), since
@@ -216,7 +218,10 @@ add_task(async function test_bad_hmac() {
 add_task(async function test_properties() {
   _("Test lastRecordUpload property");
   try {
-    equal(Svc.Prefs.get("clients.lastRecordUpload"), undefined);
+    equal(
+      Svc.PrefBranch.getPrefType("clients.lastRecordUpload"),
+      Ci.nsIPrefBranch.PREF_INVALID
+    );
     equal(engine.lastRecordUpload, 0);
 
     let now = Date.now();
@@ -273,10 +278,7 @@ add_task(async function test_full_sync() {
     ok(engine.lastRecordUpload > 0);
     ok(!engine.isFirstSync);
     deepEqual(
-      user
-        .collection("clients")
-        .keys()
-        .sort(),
+      user.collection("clients").keys().sort(),
       [activeID, deletedID, engine.localID].sort(),
       "Our record should be uploaded on first sync"
     );
@@ -652,7 +654,7 @@ add_task(async function test_process_incoming_commands() {
   let ev = "weave:service:logout:finish";
 
   let logoutPromise = new Promise(resolve => {
-    var handler = function() {
+    var handler = function () {
       Svc.Obs.remove(ev, handler);
 
       resolve();
@@ -733,10 +735,7 @@ add_task(async function test_filter_duplicate_names() {
     ok(engine.lastRecordUpload > 0);
     ok(!engine.isFirstSync);
     deepEqual(
-      user
-        .collection("clients")
-        .keys()
-        .sort(),
+      user.collection("clients").keys().sort(),
       [recentID, dupeID, oldID, engine.localID].sort(),
       "Our record should be uploaded on first sync"
     );
@@ -921,7 +920,7 @@ add_task(async function test_command_sync() {
 
     notEqual(clientWBO(remoteId).payload, undefined);
 
-    Svc.Prefs.set("client.GUID", remoteId);
+    Svc.PrefBranch.setCharPref("client.GUID", remoteId);
     await engine._resetClient();
     equal(engine.localID, remoteId);
     _("Performing sync on resetted client.");

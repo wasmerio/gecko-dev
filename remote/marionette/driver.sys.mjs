@@ -4,12 +4,6 @@
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-import {
-  element,
-  ShadowRoot,
-  WebElement,
-} from "chrome://remote/content/marionette/element.sys.mjs";
-
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -24,6 +18,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   DebounceCallback: "chrome://remote/content/marionette/sync.sys.mjs",
   disableEventsActor:
     "chrome://remote/content/marionette/actors/MarionetteEventsParent.sys.mjs",
+  dom: "chrome://remote/content/shared/DOM.sys.mjs",
   enableEventsActor:
     "chrome://remote/content/marionette/actors/MarionetteEventsParent.sys.mjs",
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
@@ -44,6 +39,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   registerCommandsActor:
     "chrome://remote/content/marionette/actors/MarionetteCommandsParent.sys.mjs",
   RemoteAgent: "chrome://remote/content/components/RemoteAgent.sys.mjs",
+  ShadowRoot: "chrome://remote/content/marionette/web-reference.sys.mjs",
   TabManager: "chrome://remote/content/shared/TabManager.sys.mjs",
   TimedPromise: "chrome://remote/content/marionette/sync.sys.mjs",
   Timeouts: "chrome://remote/content/shared/webdriver/Capabilities.sys.mjs",
@@ -55,6 +51,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "chrome://remote/content/shared/Navigate.sys.mjs",
   waitForObserverTopic: "chrome://remote/content/marionette/sync.sys.mjs",
   WebDriverSession: "chrome://remote/content/shared/webdriver/Session.sys.mjs",
+  WebElement: "chrome://remote/content/marionette/web-reference.sys.mjs",
   windowManager: "chrome://remote/content/shared/WindowManager.sys.mjs",
   WindowState: "chrome://remote/content/marionette/browser.sys.mjs",
 });
@@ -65,16 +62,21 @@ XPCOMUtils.defineLazyGetter(lazy, "logger", () =>
 
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
-const SUPPORTED_STRATEGIES = new Set([
-  element.Strategy.ClassName,
-  element.Strategy.Selector,
-  element.Strategy.ID,
-  element.Strategy.Name,
-  element.Strategy.LinkText,
-  element.Strategy.PartialLinkText,
-  element.Strategy.TagName,
-  element.Strategy.XPath,
-]);
+XPCOMUtils.defineLazyGetter(
+  lazy,
+  "supportedStrategies",
+  () =>
+    new Set([
+      lazy.dom.Strategy.ClassName,
+      lazy.dom.Strategy.Selector,
+      lazy.dom.Strategy.ID,
+      lazy.dom.Strategy.Name,
+      lazy.dom.Strategy.LinkText,
+      lazy.dom.Strategy.PartialLinkText,
+      lazy.dom.Strategy.TagName,
+      lazy.dom.Strategy.XPath,
+    ])
+);
 
 // Timeout used to abort fullscreen, maximize, and minimize
 // commands if no window manager is present.
@@ -197,7 +199,7 @@ GeckoDriver.prototype.QueryInterface = ChromeUtils.generateQI([
  * Callback used to observe the creation of new modal or tab modal dialogs
  * during the session's lifetime.
  */
-GeckoDriver.prototype.handleModalDialog = function(action, dialog) {
+GeckoDriver.prototype.handleModalDialog = function (action, dialog) {
   if (!this.currentSession) {
     return;
   }
@@ -213,7 +215,7 @@ GeckoDriver.prototype.handleModalDialog = function(action, dialog) {
 /**
  * Get the current visible URL.
  */
-GeckoDriver.prototype._getCurrentURL = function() {
+GeckoDriver.prototype._getCurrentURL = function () {
   const browsingContext = this.getBrowsingContext({ top: true });
   return new URL(browsingContext.currentURI.spec);
 };
@@ -229,7 +231,7 @@ GeckoDriver.prototype._getCurrentURL = function() {
  * @returns {MarionetteCommandsParent}
  *     The parent actor.
  */
-GeckoDriver.prototype.getActor = function(options = {}) {
+GeckoDriver.prototype.getActor = function (options = {}) {
   return lazy.getMarionetteCommandsActorProxy(() =>
     this.getBrowsingContext(options)
   );
@@ -252,7 +254,7 @@ GeckoDriver.prototype.getActor = function(options = {}) {
  * @returns {BrowsingContext}
  *     The browsing context, or `null` if none is available
  */
-GeckoDriver.prototype.getBrowsingContext = function(options = {}) {
+GeckoDriver.prototype.getBrowsingContext = function (options = {}) {
   const { context = this.context, parent = false, top = false } = options;
 
   let browsingContext = null;
@@ -290,7 +292,7 @@ GeckoDriver.prototype.getBrowsingContext = function(options = {}) {
  * @returns {ChromeWindow}
  *     The current top-level browsing context.
  */
-GeckoDriver.prototype.getCurrentWindow = function(options = {}) {
+GeckoDriver.prototype.getCurrentWindow = function (options = {}) {
   const { context = this.context } = options;
 
   let win = null;
@@ -311,7 +313,7 @@ GeckoDriver.prototype.getCurrentWindow = function(options = {}) {
   return win;
 };
 
-GeckoDriver.prototype.isReftestBrowser = function(element) {
+GeckoDriver.prototype.isReftestBrowser = function (element) {
   return (
     this._reftest &&
     element &&
@@ -330,7 +332,7 @@ GeckoDriver.prototype.isReftestBrowser = function(element) {
  * @returns {string}
  *     Returns the unique server-assigned ID of the window.
  */
-GeckoDriver.prototype.addBrowser = function(win) {
+GeckoDriver.prototype.addBrowser = function (win) {
   let context = new lazy.browser.Context(win, this);
   let winId = lazy.windowManager.getIdForWindow(win);
 
@@ -346,7 +348,7 @@ GeckoDriver.prototype.addBrowser = function(win) {
  * @param {Array.<string>} lines
  *      Array that holds the text lines.
  */
-GeckoDriver.prototype.getVisibleText = function(el, lines) {
+GeckoDriver.prototype.getVisibleText = function (el, lines) {
   try {
     if (lazy.atom.isElementDisplayed(el, this.getCurrentWindow())) {
       if (el.value) {
@@ -369,7 +371,7 @@ GeckoDriver.prototype.getVisibleText = function(el, lines) {
  *
  * @param {XULBrowser} browserElement
  */
-GeckoDriver.prototype.registerBrowser = function(browserElement) {
+GeckoDriver.prototype.registerBrowser = function (browserElement) {
   // We want to ignore frames that are XUL browsers that aren't in the "main"
   // tabbrowser, but accept things on Fennec (which doesn't have a
   // xul:tabbrowser), and accept HTML iframes (because tests depend on it),
@@ -399,7 +401,7 @@ GeckoDriver.prototype.registerBrowser = function(browserElement) {
  * @throws {SessionNotCreatedError}
  *     If, for whatever reason, a session could not be created.
  */
-GeckoDriver.prototype.newSession = async function(cmd) {
+GeckoDriver.prototype.newSession = async function (cmd) {
   if (this.currentSession) {
     throw new lazy.error.SessionNotCreatedError(
       "Maximum number of active sessions"
@@ -430,7 +432,8 @@ GeckoDriver.prototype.newSession = async function(cmd) {
       lazy.logger.debug(`Waiting for initial application window`);
       await lazy.Marionette.browserStartupFinished;
 
-      const appWin = await lazy.windowManager.waitForInitialApplicationWindowLoaded();
+      const appWin =
+        await lazy.windowManager.waitForInitialApplicationWindowLoaded();
 
       if (lazy.MarionettePrefs.clickToStart) {
         Services.prompt.alert(
@@ -454,7 +457,8 @@ GeckoDriver.prototype.newSession = async function(cmd) {
       }
 
       if (this.mainFrame) {
-        this.currentSession.chromeBrowsingContext = this.mainFrame.browsingContext;
+        this.currentSession.chromeBrowsingContext =
+          this.mainFrame.browsingContext;
         this.mainFrame.focus();
       }
 
@@ -462,8 +466,17 @@ GeckoDriver.prototype.newSession = async function(cmd) {
         const browsingContext = this.curBrowser.contentBrowser.browsingContext;
         this.currentSession.contentBrowsingContext = browsingContext;
 
+        // Bug 1838381 - Only use a longer unload timeout for desktop, because
+        // on Android only the initial document is loaded, and loading a
+        // specific page during startup doesn't succeed.
+        const options = {};
+        if (!lazy.AppInfo.isAndroid) {
+          options.unloadTimeout = 5000;
+        }
+
         await lazy.waitForInitialNavigationCompleted(
-          browsingContext.webProgress
+          browsingContext.webProgress,
+          options
         );
 
         this.curBrowser.contentBrowser.focus();
@@ -473,7 +486,7 @@ GeckoDriver.prototype.newSession = async function(cmd) {
       this.dialog = lazy.modal.findModalDialogs(this.curBrowser);
     }
 
-    lazy.registerCommandsActor();
+    lazy.registerCommandsActor(this.currentSession.id);
     lazy.enableEventsActor();
 
     Services.obs.addObserver(this, TOPIC_BROWSER_READY);
@@ -496,7 +509,7 @@ GeckoDriver.prototype.newSession = async function(cmd) {
  * @param {boolean=} options.registerBrowsers
  *     If true, register all content browsers of found tabs. Defaults to false.
  */
-GeckoDriver.prototype.registerWindow = function(win, options = {}) {
+GeckoDriver.prototype.registerWindow = function (win, options = {}) {
   const { registerBrowsers = false } = options;
   const tabBrowser = lazy.TabManager.getTabBrowser(win);
 
@@ -517,13 +530,13 @@ GeckoDriver.prototype.registerWindow = function(win, options = {}) {
  * @param {ChromeWindow} win
  *     Chrome window to unregister event listeners for.
  */
-GeckoDriver.prototype.stopObservingWindow = function(win) {
+GeckoDriver.prototype.stopObservingWindow = function (win) {
   const tabBrowser = lazy.TabManager.getTabBrowser(win);
 
   tabBrowser?.removeEventListener("XULFrameLoaderCreated", this);
 };
 
-GeckoDriver.prototype.handleEvent = function({ target, type }) {
+GeckoDriver.prototype.handleEvent = function ({ target, type }) {
   switch (type) {
     case "XULFrameLoaderCreated":
       if (target === this.curBrowser.contentBrowser) {
@@ -538,7 +551,7 @@ GeckoDriver.prototype.handleEvent = function({ target, type }) {
   }
 };
 
-GeckoDriver.prototype.observe = function(subject, topic, data) {
+GeckoDriver.prototype.observe = function (subject, topic, data) {
   switch (topic) {
     case TOPIC_BROWSER_READY:
       this.registerWindow(subject);
@@ -557,7 +570,7 @@ GeckoDriver.prototype.observe = function(subject, topic, data) {
  * ("capabilities") to values, which may be of types boolean,
  * numerical or string.
  */
-GeckoDriver.prototype.getSessionCapabilities = function() {
+GeckoDriver.prototype.getSessionCapabilities = function () {
   return { capabilities: this.currentSession.capabilities };
 };
 
@@ -578,7 +591,7 @@ GeckoDriver.prototype.getSessionCapabilities = function() {
  * @throws {WebDriverError}
  *     If <var>value</var> is not a valid browsing context.
  */
-GeckoDriver.prototype.setContext = function(cmd) {
+GeckoDriver.prototype.setContext = function (cmd) {
   let value = lazy.assert.string(cmd.parameters.value);
 
   this.context = value;
@@ -595,7 +608,7 @@ GeckoDriver.prototype.setContext = function(cmd) {
  * @returns {Context}
  *     Current context.
  */
-GeckoDriver.prototype.getContext = function() {
+GeckoDriver.prototype.getContext = function () {
   return this.context;
 };
 
@@ -648,7 +661,7 @@ GeckoDriver.prototype.getContext = function() {
  *     If an element that was passed as part of <var>args</var> or that is
  *     returned as result has gone stale.
  */
-GeckoDriver.prototype.executeScript = function(cmd) {
+GeckoDriver.prototype.executeScript = function (cmd) {
   let { script, args } = cmd.parameters;
   let opts = {
     script: cmd.parameters.script,
@@ -721,7 +734,7 @@ GeckoDriver.prototype.executeScript = function(cmd) {
  *     If an element that was passed as part of <var>args</var> or that is
  *     returned as result has gone stale.
  */
-GeckoDriver.prototype.executeAsyncScript = function(cmd) {
+GeckoDriver.prototype.executeAsyncScript = function (cmd) {
   let { script, args } = cmd.parameters;
   let opts = {
     script: cmd.parameters.script,
@@ -736,7 +749,7 @@ GeckoDriver.prototype.executeAsyncScript = function(cmd) {
   return this.execute_(script, args, opts);
 };
 
-GeckoDriver.prototype.execute_ = async function(
+GeckoDriver.prototype.execute_ = async function (
   script,
   args = [],
   {
@@ -814,7 +827,7 @@ GeckoDriver.prototype.execute_ = async function(
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.navigateTo = async function(cmd) {
+GeckoDriver.prototype.navigateTo = async function (cmd) {
   lazy.assert.content(this.context);
   const browsingContext = lazy.assert.open(
     this.getBrowsingContext({ top: true })
@@ -864,7 +877,7 @@ GeckoDriver.prototype.navigateTo = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getCurrentUrl = async function() {
+GeckoDriver.prototype.getCurrentUrl = async function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
 
@@ -882,7 +895,7 @@ GeckoDriver.prototype.getCurrentUrl = async function() {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getTitle = async function() {
+GeckoDriver.prototype.getTitle = async function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
 
@@ -898,7 +911,7 @@ GeckoDriver.prototype.getTitle = async function() {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.getWindowType = function() {
+GeckoDriver.prototype.getWindowType = function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
 
   return this.windowType;
@@ -916,7 +929,7 @@ GeckoDriver.prototype.getWindowType = function() {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getPageSource = async function() {
+GeckoDriver.prototype.getPageSource = async function () {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
@@ -934,7 +947,7 @@ GeckoDriver.prototype.getPageSource = async function() {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.goBack = async function() {
+GeckoDriver.prototype.goBack = async function () {
   lazy.assert.content(this.context);
   const browsingContext = lazy.assert.open(
     this.getBrowsingContext({ top: true })
@@ -962,7 +975,7 @@ GeckoDriver.prototype.goBack = async function() {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.goForward = async function() {
+GeckoDriver.prototype.goForward = async function () {
   lazy.assert.content(this.context);
   const browsingContext = lazy.assert.open(
     this.getBrowsingContext({ top: true })
@@ -990,7 +1003,7 @@ GeckoDriver.prototype.goForward = async function() {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.refresh = async function() {
+GeckoDriver.prototype.refresh = async function () {
   lazy.assert.content(this.context);
   const browsingContext = lazy.assert.open(
     this.getBrowsingContext({ top: true })
@@ -1022,7 +1035,7 @@ GeckoDriver.prototype.refresh = async function() {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.getWindowHandle = function() {
+GeckoDriver.prototype.getWindowHandle = function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
 
   if (this.context == lazy.Context.Chrome) {
@@ -1045,7 +1058,7 @@ GeckoDriver.prototype.getWindowHandle = function() {
  * @returns {Array.<string>}
  *     Unique window handles.
  */
-GeckoDriver.prototype.getWindowHandles = function() {
+GeckoDriver.prototype.getWindowHandles = function () {
   if (this.context == lazy.Context.Chrome) {
     return lazy.windowManager.chromeWindowHandles.map(String);
   }
@@ -1068,7 +1081,7 @@ GeckoDriver.prototype.getWindowHandles = function() {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getWindowRect = async function() {
+GeckoDriver.prototype.getWindowRect = async function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
 
@@ -1106,7 +1119,7 @@ GeckoDriver.prototype.getWindowRect = async function() {
  * @throws {UnsupportedOperationError}
  *     Not applicable to application.
  */
-GeckoDriver.prototype.setWindowRect = async function(cmd) {
+GeckoDriver.prototype.setWindowRect = async function (cmd) {
   lazy.assert.desktop();
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
@@ -1202,7 +1215,7 @@ GeckoDriver.prototype.setWindowRect = async function(cmd) {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.switchToWindow = async function(cmd) {
+GeckoDriver.prototype.switchToWindow = async function (cmd) {
   const { focus = true, handle } = cmd.parameters;
 
   lazy.assert.string(
@@ -1246,7 +1259,7 @@ GeckoDriver.prototype.switchToWindow = async function(cmd) {
  *     A boolean value which determines whether to focus the window.
  *     Defaults to true.
  */
-GeckoDriver.prototype.setWindowHandle = async function(
+GeckoDriver.prototype.setWindowHandle = async function (
   winProperties,
   focus = true
 ) {
@@ -1312,7 +1325,7 @@ GeckoDriver.prototype.setWindowHandle = async function(
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.switchToParentFrame = async function() {
+GeckoDriver.prototype.switchToParentFrame = async function () {
   let browsingContext = this.getBrowsingContext();
   if (browsingContext && !browsingContext.parent) {
     return;
@@ -1342,7 +1355,7 @@ GeckoDriver.prototype.switchToParentFrame = async function() {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.switchToFrame = async function(cmd) {
+GeckoDriver.prototype.switchToFrame = async function (cmd) {
   const { element: el, id } = cmd.parameters;
 
   if (typeof id == "number") {
@@ -1359,7 +1372,7 @@ GeckoDriver.prototype.switchToFrame = async function(cmd) {
   // Bug 1495063: Elements should be passed as WebReference reference
   let byFrame;
   if (typeof el == "string") {
-    byFrame = WebElement.fromUUID(el).toJSON();
+    byFrame = lazy.WebElement.fromUUID(el).toJSON();
   } else if (el) {
     byFrame = el;
   }
@@ -1371,7 +1384,7 @@ GeckoDriver.prototype.switchToFrame = async function(cmd) {
   this.currentSession.contentBrowsingContext = browsingContext;
 };
 
-GeckoDriver.prototype.getTimeouts = function() {
+GeckoDriver.prototype.getTimeouts = function () {
   return this.currentSession.timeouts;
 };
 
@@ -1387,7 +1400,7 @@ GeckoDriver.prototype.getTimeouts = function() {
  *     If timeout type key is unknown, or the value provided with it is
  *     not an integer.
  */
-GeckoDriver.prototype.setTimeouts = function(cmd) {
+GeckoDriver.prototype.setTimeouts = function (cmd) {
   // merge with existing timeouts
   let merged = Object.assign(
     this.currentSession.timeouts.toJSON(),
@@ -1395,21 +1408,6 @@ GeckoDriver.prototype.setTimeouts = function(cmd) {
   );
 
   this.currentSession.timeouts = lazy.Timeouts.fromJSON(merged);
-};
-
-/** Single tap. */
-GeckoDriver.prototype.singleTap = async function(cmd) {
-  lazy.assert.open(this.getBrowsingContext());
-
-  let { id, x, y } = cmd.parameters;
-  let webEl = WebElement.fromUUID(id).toJSON();
-
-  await this.getActor().singleTap(
-    webEl,
-    x,
-    y,
-    this.currentSession.capabilities
-  );
 };
 
 /**
@@ -1430,16 +1428,12 @@ GeckoDriver.prototype.singleTap = async function(cmd) {
  * @throws {UnsupportedOperationError}
  *     Not yet available in current context.
  */
-GeckoDriver.prototype.performActions = async function(cmd) {
+GeckoDriver.prototype.performActions = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   const actions = cmd.parameters.actions;
-
-  await this.getActor().performActions(
-    actions,
-    this.currentSession.capabilities
-  );
+  await this.getActor().performActions(actions);
 };
 
 /**
@@ -1452,7 +1446,7 @@ GeckoDriver.prototype.performActions = async function(cmd) {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.releaseActions = async function() {
+GeckoDriver.prototype.releaseActions = async function () {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
@@ -1482,10 +1476,10 @@ GeckoDriver.prototype.releaseActions = async function() {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.findElement = async function(cmd) {
+GeckoDriver.prototype.findElement = async function (cmd) {
   const { element: el, using, value } = cmd.parameters;
 
-  if (!SUPPORTED_STRATEGIES.has(using)) {
+  if (!lazy.supportedStrategies.has(using)) {
     throw new lazy.error.InvalidSelectorError(
       `Strategy not supported: ${using}`
     );
@@ -1497,7 +1491,7 @@ GeckoDriver.prototype.findElement = async function(cmd) {
 
   let startNode;
   if (typeof el != "undefined") {
-    startNode = WebElement.fromUUID(el).toJSON();
+    startNode = lazy.WebElement.fromUUID(el).toJSON();
   }
 
   let opts = {
@@ -1536,10 +1530,10 @@ GeckoDriver.prototype.findElement = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.findElementFromShadowRoot = async function(cmd) {
+GeckoDriver.prototype.findElementFromShadowRoot = async function (cmd) {
   const { shadowRoot, using, value } = cmd.parameters;
 
-  if (!SUPPORTED_STRATEGIES.has(using)) {
+  if (!lazy.supportedStrategies.has(using)) {
     throw new lazy.error.InvalidSelectorError(
       `Strategy not supported: ${using}`
     );
@@ -1551,7 +1545,7 @@ GeckoDriver.prototype.findElementFromShadowRoot = async function(cmd) {
 
   const opts = {
     all: false,
-    startNode: ShadowRoot.fromUUID(shadowRoot).toJSON(),
+    startNode: lazy.ShadowRoot.fromUUID(shadowRoot).toJSON(),
     timeout: this.currentSession.timeouts.implicit,
   };
 
@@ -1581,10 +1575,10 @@ GeckoDriver.prototype.findElementFromShadowRoot = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.findElements = async function(cmd) {
+GeckoDriver.prototype.findElements = async function (cmd) {
   const { element: el, using, value } = cmd.parameters;
 
-  if (!SUPPORTED_STRATEGIES.has(using)) {
+  if (!lazy.supportedStrategies.has(using)) {
     throw new lazy.error.InvalidSelectorError(
       `Strategy not supported: ${using}`
     );
@@ -1596,7 +1590,7 @@ GeckoDriver.prototype.findElements = async function(cmd) {
 
   let startNode;
   if (typeof el != "undefined") {
-    startNode = WebElement.fromUUID(el).toJSON();
+    startNode = lazy.WebElement.fromUUID(el).toJSON();
   }
 
   let opts = {
@@ -1632,10 +1626,10 @@ GeckoDriver.prototype.findElements = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.findElementsFromShadowRoot = async function(cmd) {
+GeckoDriver.prototype.findElementsFromShadowRoot = async function (cmd) {
   const { shadowRoot, using, value } = cmd.parameters;
 
-  if (!SUPPORTED_STRATEGIES.has(using)) {
+  if (!lazy.supportedStrategies.has(using)) {
     throw new lazy.error.InvalidSelectorError(
       `Strategy not supported: ${using}`
     );
@@ -1647,7 +1641,7 @@ GeckoDriver.prototype.findElementsFromShadowRoot = async function(cmd) {
 
   const opts = {
     all: true,
-    startNode: ShadowRoot.fromUUID(shadowRoot).toJSON(),
+    startNode: lazy.ShadowRoot.fromUUID(shadowRoot).toJSON(),
     timeout: this.currentSession.timeouts.implicit,
   };
 
@@ -1678,7 +1672,7 @@ GeckoDriver.prototype.findElementsFromShadowRoot = async function(cmd) {
  * @throws {UnsupportedOperationError}
  *     Not available in chrome current context.
  */
-GeckoDriver.prototype.getShadowRoot = async function(cmd) {
+GeckoDriver.prototype.getShadowRoot = async function (cmd) {
   // Bug 1743541: Add support for chrome scope.
   lazy.assert.content(this.context);
   lazy.assert.open(this.getBrowsingContext());
@@ -1688,7 +1682,7 @@ GeckoDriver.prototype.getShadowRoot = async function(cmd) {
     cmd.parameters.id,
     lazy.pprint`Expected "id" to be a string, got ${cmd.parameters.id}`
   );
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getShadowRoot(webEl);
 };
@@ -1710,7 +1704,7 @@ GeckoDriver.prototype.getShadowRoot = async function(cmd) {
  * @throws {UnsupportedOperationError}
  *     Not available in chrome context.
  */
-GeckoDriver.prototype.getActiveElement = async function() {
+GeckoDriver.prototype.getActiveElement = async function () {
   lazy.assert.content(this.context);
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
@@ -1736,12 +1730,12 @@ GeckoDriver.prototype.getActiveElement = async function() {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.clickElement = async function(cmd) {
+GeckoDriver.prototype.clickElement = async function (cmd) {
   const browsingContext = lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   const actor = this.getActor();
 
@@ -1787,13 +1781,13 @@ GeckoDriver.prototype.clickElement = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getElementAttribute = async function(cmd) {
+GeckoDriver.prototype.getElementAttribute = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   const id = lazy.assert.string(cmd.parameters.id);
   const name = lazy.assert.string(cmd.parameters.name);
-  const webEl = WebElement.fromUUID(id).toJSON();
+  const webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getElementAttribute(webEl, name);
 };
@@ -1821,13 +1815,13 @@ GeckoDriver.prototype.getElementAttribute = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getElementProperty = async function(cmd) {
+GeckoDriver.prototype.getElementProperty = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   const id = lazy.assert.string(cmd.parameters.id);
   const name = lazy.assert.string(cmd.parameters.name);
-  const webEl = WebElement.fromUUID(id).toJSON();
+  const webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getElementProperty(webEl, name);
 };
@@ -1854,12 +1848,12 @@ GeckoDriver.prototype.getElementProperty = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getElementText = async function(cmd) {
+GeckoDriver.prototype.getElementText = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getElementText(webEl);
 };
@@ -1885,12 +1879,12 @@ GeckoDriver.prototype.getElementText = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getElementTagName = async function(cmd) {
+GeckoDriver.prototype.getElementTagName = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getElementTagName(webEl);
 };
@@ -1914,12 +1908,12 @@ GeckoDriver.prototype.getElementTagName = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.isElementDisplayed = async function(cmd) {
+GeckoDriver.prototype.isElementDisplayed = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().isElementDisplayed(
     webEl,
@@ -1950,13 +1944,13 @@ GeckoDriver.prototype.isElementDisplayed = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getElementValueOfCssProperty = async function(cmd) {
+GeckoDriver.prototype.getElementValueOfCssProperty = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
   let prop = lazy.assert.string(cmd.parameters.propertyName);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getElementValueOfCssProperty(webEl, prop);
 };
@@ -1982,12 +1976,12 @@ GeckoDriver.prototype.getElementValueOfCssProperty = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.isElementEnabled = async function(cmd) {
+GeckoDriver.prototype.isElementEnabled = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().isElementEnabled(
     webEl,
@@ -2014,12 +2008,12 @@ GeckoDriver.prototype.isElementEnabled = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.isElementSelected = async function(cmd) {
+GeckoDriver.prototype.isElementSelected = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().isElementSelected(
     webEl,
@@ -2039,12 +2033,12 @@ GeckoDriver.prototype.isElementSelected = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.getElementRect = async function(cmd) {
+GeckoDriver.prototype.getElementRect = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getElementRect(webEl);
 };
@@ -2069,13 +2063,13 @@ GeckoDriver.prototype.getElementRect = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.sendKeysToElement = async function(cmd) {
+GeckoDriver.prototype.sendKeysToElement = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
   let text = lazy.assert.string(cmd.parameters.text);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().sendKeysToElement(
     webEl,
@@ -2102,12 +2096,12 @@ GeckoDriver.prototype.sendKeysToElement = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.clearElement = async function(cmd) {
+GeckoDriver.prototype.clearElement = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   await this.getActor().clearElement(webEl);
 };
@@ -2130,7 +2124,7 @@ GeckoDriver.prototype.clearElement = async function(cmd) {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.addCookie = async function(cmd) {
+GeckoDriver.prototype.addCookie = async function (cmd) {
   lazy.assert.content(this.context);
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
@@ -2160,7 +2154,7 @@ GeckoDriver.prototype.addCookie = async function(cmd) {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.getCookies = async function() {
+GeckoDriver.prototype.getCookies = async function () {
   lazy.assert.content(this.context);
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
@@ -2179,7 +2173,7 @@ GeckoDriver.prototype.getCookies = async function() {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.deleteAllCookies = async function() {
+GeckoDriver.prototype.deleteAllCookies = async function () {
   lazy.assert.content(this.context);
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
@@ -2200,7 +2194,7 @@ GeckoDriver.prototype.deleteAllCookies = async function() {
  * @throws {UnsupportedOperationError}
  *     Not available in current context.
  */
-GeckoDriver.prototype.deleteCookie = async function(cmd) {
+GeckoDriver.prototype.deleteCookie = async function (cmd) {
   lazy.assert.content(this.context);
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
@@ -2237,7 +2231,7 @@ GeckoDriver.prototype.deleteCookie = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.newWindow = async function(cmd) {
+GeckoDriver.prototype.newWindow = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
 
@@ -2288,7 +2282,10 @@ GeckoDriver.prototype.newWindow = async function(cmd) {
   // Actors need the new window to be loaded to safely execute queries.
   // Wait until the initial page load has been finished.
   await lazy.waitForInitialNavigationCompleted(
-    contentBrowser.browsingContext.webProgress
+    contentBrowser.browsingContext.webProgress,
+    {
+      unloadTimeout: 5000,
+    }
   );
 
   const id = lazy.TabManager.getIdForBrowser(contentBrowser);
@@ -2313,7 +2310,7 @@ GeckoDriver.prototype.newWindow = async function(cmd) {
  * @throws {UnexpectedAlertOpenError}
  *     A modal dialog is open, blocking this operation.
  */
-GeckoDriver.prototype.close = async function() {
+GeckoDriver.prototype.close = async function () {
   lazy.assert.open(
     this.getBrowsingContext({ context: lazy.Context.Content, top: true })
   );
@@ -2348,7 +2345,7 @@ GeckoDriver.prototype.close = async function() {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.closeChromeWindow = async function() {
+GeckoDriver.prototype.closeChromeWindow = async function () {
   lazy.assert.desktop();
   lazy.assert.open(
     this.getBrowsingContext({ context: lazy.Context.Chrome, top: true })
@@ -2376,7 +2373,7 @@ GeckoDriver.prototype.closeChromeWindow = async function() {
 };
 
 /** Delete Marionette session. */
-GeckoDriver.prototype.deleteSession = function() {
+GeckoDriver.prototype.deleteSession = function () {
   if (!this.currentSession) {
     return;
   }
@@ -2453,7 +2450,7 @@ GeckoDriver.prototype.deleteSession = function() {
  * @throws {StaleElementReferenceError}
  *     If element represented by reference <var>id</var> has gone stale.
  */
-GeckoDriver.prototype.takeScreenshot = async function(cmd) {
+GeckoDriver.prototype.takeScreenshot = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
 
@@ -2463,7 +2460,7 @@ GeckoDriver.prototype.takeScreenshot = async function(cmd) {
   full = typeof full == "undefined" ? true : full;
   scroll = typeof scroll == "undefined" ? true : scroll;
 
-  let webEl = id ? WebElement.fromUUID(id).toJSON() : null;
+  let webEl = id ? lazy.WebElement.fromUUID(id).toJSON() : null;
 
   // Only consider full screenshot if no element has been specified
   full = webEl ? false : full;
@@ -2481,7 +2478,7 @@ GeckoDriver.prototype.takeScreenshot = async function(cmd) {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.getScreenOrientation = function() {
+GeckoDriver.prototype.getScreenOrientation = function () {
   lazy.assert.mobile();
   lazy.assert.open(this.getBrowsingContext({ top: true }));
 
@@ -2504,7 +2501,7 @@ GeckoDriver.prototype.getScreenOrientation = function() {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.setScreenOrientation = async function(cmd) {
+GeckoDriver.prototype.setScreenOrientation = async function (cmd) {
   lazy.assert.mobile();
   lazy.assert.open(this.getBrowsingContext({ top: true }));
 
@@ -2555,7 +2552,7 @@ GeckoDriver.prototype.setScreenOrientation = async function(cmd) {
  * @throws {UnsupportedOperationError}
  *     Not available for current application.
  */
-GeckoDriver.prototype.minimizeWindow = async function() {
+GeckoDriver.prototype.minimizeWindow = async function () {
   lazy.assert.desktop();
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
@@ -2607,7 +2604,7 @@ GeckoDriver.prototype.minimizeWindow = async function() {
  * @throws {UnsupportedOperationError}
  *     Not available for current application.
  */
-GeckoDriver.prototype.maximizeWindow = async function() {
+GeckoDriver.prototype.maximizeWindow = async function () {
   lazy.assert.desktop();
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
@@ -2659,7 +2656,7 @@ GeckoDriver.prototype.maximizeWindow = async function() {
  * @throws {UnsupportedOperationError}
  *     Not available for current application.
  */
-GeckoDriver.prototype.fullscreenWindow = async function() {
+GeckoDriver.prototype.fullscreenWindow = async function () {
   lazy.assert.desktop();
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
@@ -2699,7 +2696,7 @@ GeckoDriver.prototype.fullscreenWindow = async function() {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.dismissDialog = async function() {
+GeckoDriver.prototype.dismissDialog = async function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   this._checkIfAlertIsPresent();
 
@@ -2720,7 +2717,7 @@ GeckoDriver.prototype.dismissDialog = async function() {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.acceptDialog = async function() {
+GeckoDriver.prototype.acceptDialog = async function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   this._checkIfAlertIsPresent();
 
@@ -2741,7 +2738,7 @@ GeckoDriver.prototype.acceptDialog = async function() {
  * @throws {NoSuchWindowError}
  *     Top-level browsing context has been discarded.
  */
-GeckoDriver.prototype.getTextFromDialog = function() {
+GeckoDriver.prototype.getTextFromDialog = function () {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   this._checkIfAlertIsPresent();
   return this.dialog.text;
@@ -2769,7 +2766,7 @@ GeckoDriver.prototype.getTextFromDialog = function() {
  *     If the current user prompt is something other than an alert,
  *     confirm, or a prompt.
  */
-GeckoDriver.prototype.sendKeysToDialog = async function(cmd) {
+GeckoDriver.prototype.sendKeysToDialog = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   this._checkIfAlertIsPresent();
 
@@ -2793,13 +2790,13 @@ GeckoDriver.prototype.sendKeysToDialog = async function(cmd) {
   this.dialog.text = text;
 };
 
-GeckoDriver.prototype._checkIfAlertIsPresent = function() {
+GeckoDriver.prototype._checkIfAlertIsPresent = function () {
   if (!this.dialog || !this.dialog.isOpen) {
     throw new lazy.error.NoSuchAlertError();
   }
 };
 
-GeckoDriver.prototype._handleUserPrompts = async function() {
+GeckoDriver.prototype._handleUserPrompts = async function () {
   if (!this.dialog || !this.dialog.isOpen) {
     return;
   }
@@ -2855,7 +2852,7 @@ GeckoDriver.prototype._handleUserPrompts = async function() {
  * @param {boolean} cmd.parameters.value
  *     True if the server should accept new socket connections.
  */
-GeckoDriver.prototype.acceptConnections = async function(cmd) {
+GeckoDriver.prototype.acceptConnections = async function (cmd) {
   lazy.assert.boolean(cmd.parameters.value);
   await this._server.setAcceptConnections(cmd.parameters.value);
 };
@@ -2894,7 +2891,7 @@ GeckoDriver.prototype.acceptConnections = async function(cmd) {
  *     If <var>flags</var> contains unknown or incompatible flags,
  *     for example multiple Quit flags.
  */
-GeckoDriver.prototype.quit = async function(cmd) {
+GeckoDriver.prototype.quit = async function (cmd) {
   const { flags = [], safeMode = false } = cmd.parameters;
   const quits = ["eConsiderQuit", "eAttemptQuit", "eForceQuit"];
 
@@ -2973,7 +2970,7 @@ GeckoDriver.prototype.quit = async function(cmd) {
   };
 };
 
-GeckoDriver.prototype.installAddon = function(cmd) {
+GeckoDriver.prototype.installAddon = function (cmd) {
   lazy.assert.desktop();
 
   let path = cmd.parameters.path;
@@ -2989,7 +2986,7 @@ GeckoDriver.prototype.installAddon = function(cmd) {
   return lazy.Addon.install(path, temp);
 };
 
-GeckoDriver.prototype.uninstallAddon = function(cmd) {
+GeckoDriver.prototype.uninstallAddon = function (cmd) {
   lazy.assert.desktop();
 
   let id = cmd.parameters.id;
@@ -3015,7 +3012,7 @@ GeckoDriver.prototype.uninstallAddon = function(cmd) {
  * @returns {string}
  *     The localized string for the requested entity.
  */
-GeckoDriver.prototype.localizeEntity = function(cmd) {
+GeckoDriver.prototype.localizeEntity = function (cmd) {
   let { urls, id } = cmd.parameters;
 
   if (!Array.isArray(urls)) {
@@ -3049,7 +3046,7 @@ GeckoDriver.prototype.localizeEntity = function(cmd) {
  * @returns {string}
  *     The localized string for the requested property.
  */
-GeckoDriver.prototype.localizeProperty = function(cmd) {
+GeckoDriver.prototype.localizeProperty = function (cmd) {
   let { urls, id } = cmd.parameters;
 
   if (!Array.isArray(urls)) {
@@ -3069,7 +3066,7 @@ GeckoDriver.prototype.localizeProperty = function(cmd) {
 /**
  * Initialize the reftest mode
  */
-GeckoDriver.prototype.setupReftest = async function(cmd) {
+GeckoDriver.prototype.setupReftest = async function (cmd) {
   if (this._reftest) {
     throw new lazy.error.UnsupportedOperationError(
       "Called reftest:setup with a reftest session already active"
@@ -3092,16 +3089,9 @@ GeckoDriver.prototype.setupReftest = async function(cmd) {
 };
 
 /** Run a reftest. */
-GeckoDriver.prototype.runReftest = function(cmd) {
-  let {
-    test,
-    references,
-    expected,
-    timeout,
-    width,
-    height,
-    pageRanges,
-  } = cmd.parameters;
+GeckoDriver.prototype.runReftest = function (cmd) {
+  let { test, references, expected, timeout, width, height, pageRanges } =
+    cmd.parameters;
 
   if (!this._reftest) {
     throw new lazy.error.UnsupportedOperationError(
@@ -3130,7 +3120,7 @@ GeckoDriver.prototype.runReftest = function(cmd) {
  * Closes the reftest window (without changing the current window handle),
  * and removes cached canvases.
  */
-GeckoDriver.prototype.teardownReftest = function() {
+GeckoDriver.prototype.teardownReftest = function () {
   if (!this._reftest) {
     throw new lazy.error.UnsupportedOperationError(
       "Called reftest:teardown before reftest:start"
@@ -3182,7 +3172,7 @@ GeckoDriver.prototype.teardownReftest = function() {
  * @throws {UnsupportedOperationError}
  *     Not available in chrome context.
  */
-GeckoDriver.prototype.print = async function(cmd) {
+GeckoDriver.prototype.print = async function (cmd) {
   lazy.assert.content(this.context);
   lazy.assert.open(this.getBrowsingContext({ top: true }));
   await this._handleUserPrompts();
@@ -3232,7 +3222,7 @@ GeckoDriver.prototype.print = async function(cmd) {
   return btoa(binaryString);
 };
 
-GeckoDriver.prototype.setPermission = async function(cmd) {
+GeckoDriver.prototype.setPermission = async function (cmd) {
   const { descriptor, state, oneRealm = false } = cmd.parameters;
 
   lazy.assert.boolean(oneRealm);
@@ -3255,12 +3245,12 @@ GeckoDriver.prototype.setPermission = async function(cmd) {
  * @returns {string}
  *     The Accessibility label for this element
  */
-GeckoDriver.prototype.getComputedLabel = async function(cmd) {
+GeckoDriver.prototype.getComputedLabel = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
 
   return this.getActor().getComputedLabel(webEl);
 };
@@ -3276,12 +3266,12 @@ GeckoDriver.prototype.getComputedLabel = async function(cmd) {
  * @returns {string}
  *     The Accessibility role for this element
  */
-GeckoDriver.prototype.getComputedRole = async function(cmd) {
+GeckoDriver.prototype.getComputedRole = async function (cmd) {
   lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
   let id = lazy.assert.string(cmd.parameters.id);
-  let webEl = WebElement.fromUUID(id).toJSON();
+  let webEl = lazy.WebElement.fromUUID(id).toJSON();
   return this.getActor().getComputedRole(webEl);
 };
 
@@ -3294,7 +3284,6 @@ GeckoDriver.prototype.commands = {
   "Marionette:Quit": GeckoDriver.prototype.quit,
   "Marionette:SetContext": GeckoDriver.prototype.setContext,
   "Marionette:SetScreenOrientation": GeckoDriver.prototype.setScreenOrientation,
-  "Marionette:SingleTap": GeckoDriver.prototype.singleTap,
 
   // Addon service
   "Addon:Install": GeckoDriver.prototype.installAddon,

@@ -51,9 +51,12 @@
 #ifdef XP_MACOSX
     <command id="cmd_findSelection" oncommand="gLazyFindCommand('onFindSelectionCommand')"/>
 #endif
+    <command id="cmd_translate" oncommand="TranslationsPanel.open(event);"/>
     <!-- work-around bug 392512 -->
     <command id="Browser:AddBookmarkAs"
              oncommand="PlacesCommandHook.bookmarkPage();"/>
+    <command id="Browser:SearchBookmarks"
+            oncommand="PlacesCommandHook.searchBookmarks();"/>
     <command id="Browser:BookmarkAllTabs"
              oncommand="PlacesUIUtils.showBookmarkPagesDialog(PlacesCommandHook.uniqueCurrentPages);"/>
     <command id="Browser:Back"    oncommand="BrowserBack();" disabled="true"/>
@@ -95,6 +98,7 @@
     <command id="Browser:Screenshot" oncommand="ScreenshotsUtils.notify(window, 'shortcut')"/>
     <command id="History:UndoCloseTab" oncommand="undoCloseTab();" data-l10n-args='{"tabCount": 1}'/>
     <command id="History:UndoCloseWindow" oncommand="undoCloseWindow();"/>
+    <command id="History:RestoreLastClosedTabOrWindowOrSession" oncommand="restoreLastClosedTabOrWindowOrSession();" />
 
     <command id="wrCaptureCmd" oncommand="gGfxUtils.webrenderCapture();" disabled="true"/>
     <command id="wrToggleCaptureSequenceCmd" oncommand="gGfxUtils.toggleWebrenderCaptureSequence();" disabled="true"/>
@@ -215,12 +219,16 @@
 #ifndef XP_MACOSX
     <key id="showAllHistoryKb" data-l10n-id="history-show-all-shortcut" command="Browser:ShowAllHistory" modifiers="accel,shift"/>
     <key keycode="VK_F5" command="Browser:ReloadSkipCache" modifiers="accel"/>
-    <key id="key_fullScreen" keycode="VK_F11" command="View:FullScreen"/>
+    <key id="key_enterFullScreen" keycode="VK_F11" command="View:FullScreen"/>
+    <key id="key_exitFullScreen" keycode="VK_F11" command="View:FullScreen" reserved="true" disabled="true"/>
 #else
     <key id="showAllHistoryKb" data-l10n-id="history-show-all-shortcut-mac" command="Browser:ShowAllHistory" modifiers="accel"/>
-    <key id="key_fullScreen" data-l10n-id="full-screen-shortcut" command="View:FullScreen" modifiers="accel,control"/>
-    <key id="key_fullScreen_old" data-l10n-id="full-screen-shortcut" command="View:FullScreen" modifiers="accel,shift"/>
-    <key keycode="VK_F11" command="View:FullScreen"/>
+    <key id="key_enterFullScreen" data-l10n-id="full-screen-shortcut" command="View:FullScreen" modifiers="accel,control"/>
+    <key id="key_enterFullScreen_old" data-l10n-id="full-screen-shortcut" command="View:FullScreen" modifiers="accel,shift"/>
+    <key id="key_enterFullScreen_compat" keycode="VK_F11" command="View:FullScreen"/>
+    <key id="key_exitFullScreen" data-l10n-id="full-screen-shortcut" command="View:FullScreen" modifiers="accel,control" reserved="true" disabled="true"/>
+    <key id="key_exitFullScreen_old" data-l10n-id="full-screen-shortcut" command="View:FullScreen" modifiers="accel,shift" reserved="true" disabled="true"/>
+    <key id="key_exitFullScreen_compat" keycode="VK_F11" command="View:FullScreen" reserved="true" disabled="true"/>
 #endif
     <key id="key_toggleReaderMode"
          command="View:ReaderView"
@@ -323,7 +331,7 @@
 #endif
          reserved="true"/>
 
-    <key id="key_undoCloseTab" command="History:UndoCloseTab" data-l10n-id="tab-new-shortcut" modifiers="accel,shift"/>
+    <key id="key_restoreLastClosedTabOrWindowOrSession" command="History:RestoreLastClosedTabOrWindowOrSession" data-l10n-id="tab-new-shortcut" modifiers="accel,shift"/>
     <key id="key_undoCloseWindow" command="History:UndoCloseWindow" data-l10n-id="window-new-shortcut" modifiers="accel,shift"/>
 
 #ifdef XP_GNOME

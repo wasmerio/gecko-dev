@@ -11,8 +11,10 @@
 #include "mozilla/intl/BidiEmbeddingLevel.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/CompactPair.h"
 #include "mozilla/EnumSet.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/dom/Highlight.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/Result.h"
 #include "mozilla/TextRange.h"
@@ -44,7 +46,7 @@ struct SelectionDetails {
   int32_t mStart;
   int32_t mEnd;
   mozilla::SelectionType mSelectionType;
-  RefPtr<const nsAtom> mHighlightName;
+  mozilla::dom::HighlightSelectionData mHighlightData;
   mozilla::TextRangeStyle mTextRangeStyle;
   mozilla::UniquePtr<SelectionDetails> mNext;
 };
@@ -101,10 +103,6 @@ enum class PeekOffsetOption : uint8_t {
   // If true, the offset has to end up in an editable node, otherwise we'll keep
   // searching.
   ForceEditableRegion,
-
-  // If set, the result's native anonymous subtree root may be different from
-  // the scan start content's root.
-  AllowContentInDifferentNativeAnonymousSubtreeRoot,
 };
 
 using PeekOffsetOptions = EnumSet<PeekOffsetOption>;
@@ -437,7 +435,7 @@ class nsFrameSelection final {
    * @brief Adds a highlight selection for `aHighlight`.
    */
   MOZ_CAN_RUN_SCRIPT void AddHighlightSelection(
-      const nsAtom* aHighlightName, const mozilla::dom::Highlight& aHighlight);
+      const nsAtom* aHighlightName, mozilla::dom::Highlight& aHighlight);
   /**
    * @brief Removes the Highlight selection identified by `aHighlightName`.
    */
@@ -451,7 +449,7 @@ class nsFrameSelection final {
    * created using |AddHighlightSelection|.
    */
   MOZ_CAN_RUN_SCRIPT void AddHighlightSelectionRange(
-      const nsAtom* aHighlightName, const mozilla::dom::Highlight& aHighlight,
+      const nsAtom* aHighlightName, mozilla::dom::Highlight& aHighlight,
       mozilla::dom::AbstractRange& aRange);
 
   /**
@@ -987,7 +985,8 @@ class nsFrameSelection final {
       mDomSelections[sizeof(mozilla::kPresentSelectionTypes) /
                      sizeof(mozilla::SelectionType)];
 
-  nsTHashMap<RefPtr<const nsAtom>, RefPtr<mozilla::dom::Selection>>
+  nsTArray<mozilla::CompactPair<RefPtr<const nsAtom>,
+                                RefPtr<mozilla::dom::Selection>>>
       mHighlightSelections;
 
   struct TableSelection {

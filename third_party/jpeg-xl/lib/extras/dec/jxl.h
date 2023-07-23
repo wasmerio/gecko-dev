@@ -8,14 +8,14 @@
 
 // Decodes JPEG XL images in memory.
 
+#include <jxl/parallel_runner.h>
+#include <jxl/types.h>
 #include <stdint.h>
 
 #include <limits>
 #include <string>
 #include <vector>
 
-#include "jxl/parallel_runner.h"
-#include "jxl/types.h"
 #include "lib/extras/packed_image.h"
 
 namespace jxl {
@@ -55,7 +55,7 @@ struct JXLDecompressParams {
   bool unpremultiply_alpha = false;
 
   // Controls the effective bit depth of the output pixels.
-  JxlBitDepth output_bitdepth = {JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, 0, 0};
+  JxlBitDepth output_bitdepth = {JXL_BIT_DEPTH_FROM_CODESTREAM, 0, 0};
 };
 
 bool DecodeImageJXL(const uint8_t* bytes, size_t bytes_size,

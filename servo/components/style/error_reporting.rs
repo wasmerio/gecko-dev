@@ -20,8 +20,10 @@ pub enum ContextualParseError<'a> {
     UnsupportedPropertyDeclaration(
         &'a str,
         ParseError<'a>,
-        Option<&'a SelectorList<SelectorImpl>>,
+        &'a [SelectorList<SelectorImpl>],
     ),
+    /// A property descriptor was not recognized.
+    UnsupportedPropertyDescriptor(&'a str, ParseError<'a>),
     /// A font face descriptor was not recognized.
     UnsupportedFontFaceDescriptor(&'a str, ParseError<'a>),
     /// A font feature values descriptor was not recognized.
@@ -133,6 +135,14 @@ impl<'a> fmt::Display for ContextualParseError<'a> {
         match *self {
             ContextualParseError::UnsupportedPropertyDeclaration(decl, ref err, _selectors) => {
                 write!(f, "Unsupported property declaration: '{}', ", decl)?;
+                parse_error_to_str(err, f)
+            },
+            ContextualParseError::UnsupportedPropertyDescriptor(decl, ref err) => {
+                write!(
+                    f,
+                    "Unsupported @property descriptor declaration: '{}', ",
+                    decl
+                )?;
                 parse_error_to_str(err, f)
             },
             ContextualParseError::UnsupportedFontFaceDescriptor(decl, ref err) => {

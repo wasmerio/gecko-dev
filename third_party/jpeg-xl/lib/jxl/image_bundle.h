@@ -8,12 +8,12 @@
 
 // The main image or frame consists of a bundle of associated images.
 
+#include <jxl/cms_interface.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <vector>
 
-#include "jxl/cms_interface.h"
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/status.h"
@@ -46,11 +46,14 @@ class ImageBundle {
 
   ImageBundle Copy() const {
     ImageBundle copy(metadata_);
-    copy.color_ = CopyImage(color_);
+    copy.color_ = Image3F(color_.xsize(), color_.ysize());
+    CopyImageTo(color_, &copy.color_);
     copy.c_current_ = c_current_;
     copy.extra_channels_.reserve(extra_channels_.size());
     for (const ImageF& plane : extra_channels_) {
-      copy.extra_channels_.emplace_back(CopyImage(plane));
+      ImageF ec(plane.xsize(), plane.ysize());
+      CopyImageTo(plane, &ec);
+      copy.extra_channels_.emplace_back(std::move(ec));
     }
 
     copy.jpeg_data =

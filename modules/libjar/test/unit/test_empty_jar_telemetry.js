@@ -4,7 +4,9 @@
 
 "use strict";
 
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 
 const { TelemetryTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/TelemetryTestUtils.sys.mjs"
@@ -96,7 +98,7 @@ add_task(async function test_empty_jar_file_async() {
 
   await new Promise(resolve => {
     chan.asyncOpen(
-      new Listener(function(l) {
+      new Listener(function (l) {
         Assert.ok(chan.contentLength == 0);
         resolve();
       })

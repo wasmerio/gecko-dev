@@ -36,10 +36,10 @@ const NOTIFY_BROWSER_SHUTDOWN_FLUSH = "sessionstore-browser-shutdown-flush";
 // the browser.sessionstore.max_concurrent_tabs pref.
 const MAX_CONCURRENT_TAB_RESTORES = 3;
 
-// Amount (in CSS px) by which we allow window edges to be off-screen
-// when restoring a window, before we override the saved position to
-// pull the window back within the available screen area.
-const SCREEN_EDGE_SLOP = 8;
+// Minimum amount (in CSS px) by which we allow window edges to be off-screen
+// when restoring a window, before we override the saved position to pull the
+// window back within the available screen area.
+const MIN_SCREEN_EDGE_SLOP = 8;
 
 // global notifications observed
 const OBSERVING = [
@@ -228,8 +228,10 @@ XPCOMUtils.defineLazyServiceGetters(lazy, {
 
 ChromeUtils.defineESModuleGetters(lazy, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   DevToolsShim: "chrome://devtools-startup/content/DevToolsShim.sys.mjs",
   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
+  HomePage: "resource:///modules/HomePage.sys.mjs",
   PrivacyFilter: "resource://gre/modules/sessionstore/PrivacyFilter.sys.mjs",
   PromiseUtils: "resource://gre/modules/PromiseUtils.sys.mjs",
   RunState: "resource:///modules/sessionstore/RunState.sys.mjs",
@@ -239,16 +241,11 @@ ChromeUtils.defineESModuleGetters(lazy, {
   SessionSaver: "resource:///modules/sessionstore/SessionSaver.sys.mjs",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
   TabAttributes: "resource:///modules/sessionstore/TabAttributes.sys.mjs",
+  TabCrashHandler: "resource:///modules/ContentCrashHandlers.sys.mjs",
   TabState: "resource:///modules/sessionstore/TabState.sys.mjs",
   TabStateCache: "resource:///modules/sessionstore/TabStateCache.sys.mjs",
   TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-  HomePage: "resource:///modules/HomePage.jsm",
-  TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(lazy, "blankURI", () => {
@@ -269,6 +266,9 @@ var gDebuggingEnabled = false;
  */
 var gResistFingerprintingEnabled = false;
 
+/**
+ * @namespace SessionStore
+ */
 export var SessionStore = {
   get promiseInitialized() {
     return SessionStoreInternal.promiseInitialized;
@@ -288,6 +288,18 @@ export var SessionStore = {
 
   get lastClosedObjectType() {
     return SessionStoreInternal.lastClosedObjectType;
+  },
+
+  get lastClosedActions() {
+    return [...SessionStoreInternal._lastClosedActions];
+  },
+
+  get LAST_ACTION_CLOSED_TAB() {
+    return SessionStoreInternal._LAST_ACTION_CLOSED_TAB;
+  },
+
+  get LAST_ACTION_CLOSED_WINDOW() {
+    return SessionStoreInternal._LAST_ACTION_CLOSED_WINDOW;
   },
 
   get willAutoRestore() {
@@ -355,12 +367,12 @@ export var SessionStore = {
     SessionStoreInternal.resetLastClosedTabCount(aWindow);
   },
 
-  getClosedTabCount: function ss_getClosedTabCount(aWindow) {
-    return SessionStoreInternal.getClosedTabCount(aWindow);
+  getClosedTabCountForWindow: function ss_getClosedTabCountForWindow(aWindow) {
+    return SessionStoreInternal.getClosedTabCountForWindow(aWindow);
   },
 
-  getClosedTabData: function ss_getClosedTabData(aWindow) {
-    return SessionStoreInternal.getClosedTabData(aWindow);
+  getClosedTabDataForWindow: function ss_getClosedTabDataForWindow(aWindow) {
+    return SessionStoreInternal.getClosedTabDataForWindow(aWindow);
   },
 
   undoCloseTab: function ss_undoCloseTab(aWindow, aIndex) {
@@ -373,6 +385,16 @@ export var SessionStore = {
 
   getClosedWindowCount: function ss_getClosedWindowCount() {
     return SessionStoreInternal.getClosedWindowCount();
+  },
+
+  // this should only be used by one caller (currently restoreLastClosedTabOrWindowOrSession in browser.js)
+  popLastClosedAction: function ss_popLastClosedAction() {
+    return SessionStoreInternal._lastClosedActions.pop();
+  },
+
+  // for testing purposes
+  resetLastClosedActions: function ss_resetLastClosedActions() {
+    SessionStoreInternal._lastClosedActions = [];
   },
 
   getClosedWindowData: function ss_getClosedWindowData() {
@@ -597,6 +619,11 @@ export var SessionStore = {
 // Freeze the SessionStore object. We don't want anyone to modify it.
 Object.freeze(SessionStore);
 
+/**
+ * @namespace SessionStoreInternal
+ *
+ * @description Internal implementations and helpers for the public SessionStore methods
+ */
 var SessionStoreInternal = {
   QueryInterface: ChromeUtils.generateQI([
     "nsIObserver",
@@ -689,6 +716,63 @@ var SessionStoreInternal = {
   // number of tabs currently restoring
   _tabsRestoringCount: 0,
 
+  /**
+   * @typedef {Object} CloseAction
+   * @property {string} type
+   *   What the close action acted upon. One of either _LAST_ACTION_CLOSED_TAB or
+   *   _LAST_ACTION_CLOSED_WINDOW
+   * @property {number} closedId
+   *   The unique ID of the item that closed.
+   */
+
+  /**
+   * An in-order stack of close actions for tabs and windows.
+   * @type {CloseAction[]}
+   */
+  _lastClosedActions: [],
+
+  /**
+   * Removes an object from the _lastClosedActions list
+   *
+   * @param closedAction
+   *        Either _LAST_ACTION_CLOSED_TAB or _LAST_ACTION_CLOSED_WINDOW
+   * @param closedId
+   *        The closedId of a tab or window
+   */
+  _removeClosedAction(closedAction, closedId) {
+    let closedActionIndex = this._lastClosedActions.findIndex(
+      obj => obj.type == closedAction && obj.closedId == closedId
+    );
+
+    if (closedActionIndex > -1) {
+      this._lastClosedActions.splice(closedActionIndex, 1);
+    }
+  },
+
+  /**
+   * Add an object to the _lastClosedActions list and truncates the list if needed
+   *
+   * @param closedAction
+   *        Either _LAST_ACTION_CLOSED_TAB or _LAST_ACTION_CLOSED_WINDOW
+   * @param closedId
+   *        The closedId of a tab or window
+   */
+  _addClosedAction(closedAction, closedId) {
+    this._lastClosedActions.push({
+      type: closedAction,
+      closedId,
+    });
+    let maxLength = this._max_tabs_undo * this._max_windows_undo;
+
+    if (this._lastClosedActions.length > maxLength) {
+      this._lastClosedActions.splice(maxLength, this._lastClosedActions.length);
+    }
+  },
+
+  _LAST_ACTION_CLOSED_TAB: "tab",
+
+  _LAST_ACTION_CLOSED_WINDOW: "window",
+
   _log: null,
 
   // When starting Firefox with a single private window, this is the place
@@ -700,7 +784,7 @@ var SessionStoreInternal = {
   _closedObjectsChanged: false,
 
   // A promise resolved once initialization is complete
-  _deferredInitialized: (function() {
+  _deferredInitialized: (function () {
     let deferred = {};
 
     deferred.promise = new Promise((resolve, reject) => {
@@ -715,7 +799,7 @@ var SessionStoreInternal = {
   _sessionInitialized: false,
 
   // A promise resolved once all windows are restored.
-  _deferredAllWindowsRestored: (function() {
+  _deferredAllWindowsRestored: (function () {
     let deferred = {};
 
     deferred.promise = new Promise((resolve, reject) => {
@@ -776,10 +860,10 @@ var SessionStoreInternal = {
         !tabTimestamps.length ||
         tabTimestamps.sort((a, b) => b - a)[0] < this._closedWindows[0].closedAt
       ) {
-        return "window";
+        return this._LAST_ACTION_CLOSED_WINDOW;
       }
     }
-    return "tab";
+    return this._LAST_ACTION_CLOSED_TAB;
   },
 
   /**
@@ -804,7 +888,7 @@ var SessionStoreInternal = {
     }
 
     TelemetryTimestamps.add("sessionRestoreInitialized");
-    OBSERVING.forEach(function(aTopic) {
+    OBSERVING.forEach(function (aTopic) {
       Services.obs.addObserver(this, aTopic, true);
     }, this);
 
@@ -833,9 +917,8 @@ var SessionStoreInternal = {
         // If we're doing a DEFERRED session, then we want to pull pinned tabs
         // out so they can be restored.
         if (ss.sessionType == ss.DEFER_SESSION) {
-          let [iniState, remainingState] = this._prepDataForDeferredRestore(
-            state
-          );
+          let [iniState, remainingState] =
+            this._prepDataForDeferredRestore(state);
           // If we have a iniState with windows, that means that we have windows
           // with app tabs to restore.
           if (iniState.windows.length) {
@@ -922,7 +1005,7 @@ var SessionStoreInternal = {
 
           // clear any lastSessionWindowID attributes since those don't matter
           // during normal restore
-          state.windows.forEach(function(aWindow) {
+          state.windows.forEach(function (aWindow) {
             delete aWindow.__lastSessionWindowID;
           });
         }
@@ -1637,7 +1720,7 @@ var SessionStoreInternal = {
       this.onTabBrowserInserted(aWindow, tabbrowser.tabs[i]);
     }
     // notification of tab add/remove/selection/show/hide
-    TAB_EVENTS.forEach(function(aEvent) {
+    TAB_EVENTS.forEach(function (aEvent) {
       tabbrowser.tabContainer.addEventListener(aEvent, this, true);
     }, this);
 
@@ -1763,12 +1846,10 @@ var SessionStoreInternal = {
           // they should be added back to _closedWindows.
           // We'll cheat a little bit and reuse _prepDataForDeferredRestore
           // even though it wasn't built exactly for this.
-          let [
-            appTabsState,
-            normalTabsState,
-          ] = this._prepDataForDeferredRestore({
-            windows: [closedWindowState],
-          });
+          let [appTabsState, normalTabsState] =
+            this._prepDataForDeferredRestore({
+              windows: [closedWindowState],
+            });
 
           // These are our pinned tabs, which we should restore
           if (appTabsState.windows.length) {
@@ -1911,9 +1992,8 @@ var SessionStoreInternal = {
       }
 
       let restoreID = WINDOW_RESTORE_IDS.get(aWindow);
-      this._windows[aWindow.__SSi] = this._statesToRestore[
-        restoreID
-      ].windows[0];
+      this._windows[aWindow.__SSi] =
+        this._statesToRestore[restoreID].windows[0];
       delete this._statesToRestore[restoreID];
       WINDOW_RESTORE_IDS.delete(aWindow);
     }
@@ -1938,7 +2018,7 @@ var SessionStoreInternal = {
 
     let browsers = Array.from(tabbrowser.browsers);
 
-    TAB_EVENTS.forEach(function(aEvent) {
+    TAB_EVENTS.forEach(function (aEvent) {
       tabbrowser.tabContainer.removeEventListener(aEvent, this, true);
     }, this);
 
@@ -2032,6 +2112,13 @@ var SessionStoreInternal = {
           // before our flush, so we need to filter again.
           lazy.PrivacyFilter.filterPrivateTabs(winData);
           this.maybeSaveClosedWindow(winData, isLastWindow);
+
+          if (!isLastWindow && winData.closedId > -1) {
+            this._addClosedAction(
+              this._LAST_ACTION_CLOSED_WINDOW,
+              winData.closedId
+            );
+          }
         }
 
         // Update the tabs data now that we've got the most
@@ -2409,6 +2496,7 @@ var SessionStoreInternal = {
 
     this._clearRestoringWindows();
     this._saveableClosedWindowData = new WeakSet();
+    this._lastClosedActions = [];
   },
 
   /**
@@ -2801,7 +2889,7 @@ var SessionStoreInternal = {
    * @param closedTabs (array)
    *        The list of closed tabs for a window.
    */
-  saveClosedTabData(winData, closedTabs, tabData) {
+  saveClosedTabData(winData, closedTabs, tabData, saveAction = true) {
     // Find the index of the first tab in the list
     // of closed tabs that was closed before our tab.
     let index = closedTabs.findIndex(tab => {
@@ -2831,6 +2919,10 @@ var SessionStoreInternal = {
       }
     } else {
       winData._lastClosedTabGroupCount = -1;
+    }
+
+    if (saveAction) {
+      this._addClosedAction(this._LAST_ACTION_CLOSED_TAB, tabData.closedId);
     }
 
     // Truncate the list of closed tabs, if needed.
@@ -2871,6 +2963,8 @@ var SessionStoreInternal = {
       this._closedWindowTabs.delete(closedTab.permanentKey);
       delete closedTab.permanentKey;
     }
+
+    this._removeClosedAction(this._LAST_ACTION_CLOSED_TAB, closedTab.closedId);
 
     return closedTab;
   },
@@ -3297,7 +3391,7 @@ var SessionStoreInternal = {
     if ("__SSi" in aWindow) {
       return Math.min(
         Math.max(this._windows[aWindow.__SSi]._lastClosedTabGroupCount, 1),
-        this.getClosedTabCount(aWindow)
+        this.getClosedTabCountForWindow(aWindow)
       );
     }
 
@@ -3312,7 +3406,7 @@ var SessionStoreInternal = {
     }
   },
 
-  getClosedTabCount: function ssi_getClosedTabCount(aWindow) {
+  getClosedTabCountForWindow: function ssi_getClosedTabCountForWindow(aWindow) {
     if ("__SSi" in aWindow) {
       return this._windows[aWindow.__SSi]._closedTabs.length;
     }
@@ -3327,9 +3421,17 @@ var SessionStoreInternal = {
     return DyingWindowCache.get(aWindow)._closedTabs.length;
   },
 
-  getClosedTabData: function ssi_getClosedTabData(aWindow) {
+  getClosedTabDataForWindow: function ssi_getClosedTabDataForWindow(aWindow) {
+    // We need to enable wrapping reflectors in order to allow the cloning of
+    // objects containing FormDatas, which could be stored by
+    // form-associated custom elements.
+    let options = { wrapReflectors: true };
     if ("__SSi" in aWindow) {
-      return Cu.cloneInto(this._windows[aWindow.__SSi]._closedTabs, {});
+      return Cu.cloneInto(
+        this._windows[aWindow.__SSi]._closedTabs,
+        {},
+        options
+      );
     }
 
     if (!DyingWindowCache.has(aWindow)) {
@@ -3340,7 +3442,7 @@ var SessionStoreInternal = {
     }
 
     let data = DyingWindowCache.get(aWindow);
-    return Cu.cloneInto(data._closedTabs, {});
+    return Cu.cloneInto(data._closedTabs, {}, options);
   },
 
   undoCloseTab: function ssi_undoCloseTab(aWindow, aIndex) {
@@ -3805,9 +3907,8 @@ var SessionStoreInternal = {
         canUseLastWindow = false;
       }
 
-      let [canUseWindow, canOverwriteTabs] = this._prepWindowToRestoreInto(
-        windowToUse
-      );
+      let [canUseWindow, canOverwriteTabs] =
+        this._prepWindowToRestoreInto(windowToUse);
 
       // If there's a window already open that we can restore into, use that
       if (canUseWindow) {
@@ -4028,7 +4129,7 @@ var SessionStoreInternal = {
   _updateWindowFeatures: function ssi_updateWindowFeatures(aWindow) {
     var winData = this._windows[aWindow.__SSi];
 
-    WINDOW_ATTRIBUTES.forEach(function(aAttr) {
+    WINDOW_ATTRIBUTES.forEach(function (aAttr) {
       winData[aAttr] = this._getWindowDimension(aWindow, aAttr);
     }, this);
 
@@ -4036,7 +4137,7 @@ var SessionStoreInternal = {
       winData.sizemodeBeforeMinimized = winData.sizemode;
     }
 
-    var hidden = WINDOW_HIDEABLE_FEATURES.filter(function(aItem) {
+    var hidden = WINDOW_HIDEABLE_FEATURES.filter(function (aItem) {
       return aWindow[aItem] && !aWindow[aItem].visible;
     });
     if (hidden.length) {
@@ -4304,11 +4405,12 @@ var SessionStoreInternal = {
    *        Window reference to the window to use for restoration
    * @param winData
    *        JS object
-   * @param aOptions
-   *        {overwriteTabs: true} to overwrite existing tabs w/ new ones
-   *        {firstWindow: true} if this is the first non-private window we're
-   *                            restoring in this session, that might open an
-   *                            external link as well
+   * @param aOptions.overwriteTabs
+   *        to overwrite existing tabs w/ new ones
+   * @param aOptions.firstWindow
+   *        if this is the first non-private window we're
+   *        restoring in this session, that might open an
+   *        external link as well
    */
   restoreWindow: function ssi_restoreWindow(aWindow, winData, aOptions = {}) {
     let overwriteTabs = aOptions && aOptions.overwriteTabs;
@@ -4446,9 +4548,8 @@ var SessionStoreInternal = {
     }
     // Because newClosedTabsData are put in first, we need to
     // copy also the _lastClosedTabGroupCount.
-    this._windows[
-      aWindow.__SSi
-    ]._lastClosedTabGroupCount = newLastClosedTabGroupCount;
+    this._windows[aWindow.__SSi]._lastClosedTabGroupCount =
+      newLastClosedTabGroupCount;
 
     if (!this._isWindowLoaded(aWindow)) {
       // from now on, the data will come from the actual window
@@ -4493,7 +4594,7 @@ var SessionStoreInternal = {
       let sc = Services.io.QueryInterface(Ci.nsISpeculativeConnect);
       let uri = Services.io.newURI(url);
       try {
-        sc.speculativeConnect(uri, principal, null);
+        sc.speculativeConnect(uri, principal, null, false);
         return true;
       } catch (error) {
         // Can't setup speculative connection for this url.
@@ -4579,11 +4680,12 @@ var SessionStoreInternal = {
    *        Additionally required windows will be opened.
    * @param aState
    *        JS object or JSON string
-   * @param aOptions
-   *        {overwriteTabs: true} to overwrite existing tabs w/ new ones
-   *        {firstWindow: true} if this is the first non-private window we're
-   *                            restoring in this session, that might open an
-   *                            external link as well
+   * @param aOptions.overwriteTabs
+   *        to overwrite existing tabs w/ new ones
+   * @param aOptions.firstWindow
+   *        if this is the first non-private window we're
+   *        restoring in this session, that might open an
+   *        external link as well
    */
   restoreWindows: function ssi_restoreWindows(aWindow, aState, aOptions = {}) {
     // initialize window if necessary
@@ -5055,7 +5157,7 @@ var SessionStoreInternal = {
    */
   restoreWindowFeatures: function ssi_restoreWindowFeatures(aWindow, aWinData) {
     var hidden = aWinData.hidden ? aWinData.hidden.split(",") : [];
-    WINDOW_HIDEABLE_FEATURES.forEach(function(aItem) {
+    WINDOW_HIDEABLE_FEATURES.forEach(function (aItem) {
       aWindow[aItem].visible = !hidden.includes(aItem);
     });
 
@@ -5153,22 +5255,30 @@ var SessionStoreInternal = {
       let cssToDesktopScale =
         screen.defaultCSSScaleFactor / screen.contentsScaleFactor;
 
-      let slop = SCREEN_EDGE_SLOP * cssToDesktopScale;
+      let winSlopX = win.screenEdgeSlopX * cssToDesktopScale;
+      let winSlopY = win.screenEdgeSlopY * cssToDesktopScale;
+
+      let minSlop = MIN_SCREEN_EDGE_SLOP * cssToDesktopScale;
+      let slopX = Math.max(minSlop, winSlopX);
+      let slopY = Math.max(minSlop, winSlopY);
 
       // Pull the window within the screen's bounds (allowing a little slop
       // for windows that may be deliberately placed with their border off-screen
       // as when Win10 "snaps" a window to the left/right edge -- bug 1276516).
       // First, ensure the left edge is large enough...
-      if (aLeft < screenLeft - slop) {
-        aLeft = screenLeft;
+      if (aLeft < screenLeft - slopX) {
+        aLeft = screenLeft - winSlopX;
       }
       // Then check the resulting right edge, and reduce it if necessary.
       let right = aLeft + aWidth * cssToDesktopScale;
-      if (right > screenRight + slop) {
-        right = screenRight;
+      if (right > screenRight + slopX) {
+        right = screenRight + winSlopX;
         // See if we can move the left edge leftwards to maintain width.
         if (aLeft > screenLeft) {
-          aLeft = Math.max(right - aWidth * cssToDesktopScale, screenLeft);
+          aLeft = Math.max(
+            right - aWidth * cssToDesktopScale,
+            screenLeft - winSlopX
+          );
         }
       }
       // Finally, update aWidth to account for the adjusted left and right
@@ -5176,14 +5286,17 @@ var SessionStoreInternal = {
       aWidth = (right - aLeft) / cssToDesktopScale;
 
       // And do the same in the vertical dimension.
-      if (aTop < screenTop - slop) {
-        aTop = screenTop;
+      if (aTop < screenTop - slopY) {
+        aTop = screenTop - winSlopY;
       }
       let bottom = aTop + aHeight * cssToDesktopScale;
-      if (bottom > screenBottom + slop) {
-        bottom = screenBottom;
+      if (bottom > screenBottom + slopY) {
+        bottom = screenBottom + winSlopY;
         if (aTop > screenTop) {
-          aTop = Math.max(bottom - aHeight * cssToDesktopScale, screenTop);
+          aTop = Math.max(
+            bottom - aHeight * cssToDesktopScale,
+            screenTop - winSlopY
+          );
         }
       }
       aHeight = (bottom - aTop) / cssToDesktopScale;
@@ -5219,9 +5332,8 @@ var SessionStoreInternal = {
           aWindow.resizeTo(aWidth, aHeight);
         }
       }
-      this._windows[
-        aWindow.__SSi
-      ].sizemodeBeforeMinimized = aSizeModeBeforeMinimized;
+      this._windows[aWindow.__SSi].sizemodeBeforeMinimized =
+        aSizeModeBeforeMinimized;
       if (
         aSizeMode &&
         win_("sizemode") != aSizeMode &&
@@ -5290,6 +5402,18 @@ var SessionStoreInternal = {
    * @returns Array of closed windows.
    */
   _removeClosedWindow(index) {
+    // remove all of the closed tabs from the _lastClosedActions list
+    // before removing the window from it
+    for (let closedTab of this._closedWindows[index]._closedTabs) {
+      this._removeClosedAction(
+        this._LAST_ACTION_CLOSED_TAB,
+        closedTab.closedId
+      );
+    }
+    this._removeClosedAction(
+      this._LAST_ACTION_CLOSED_WINDOW,
+      this._closedWindows[index].closedId
+    );
     let windows = this._closedWindows.splice(index, 1);
     this._closedObjectsChanged = true;
     return windows;
@@ -5767,7 +5891,7 @@ var SessionStoreInternal = {
       // We want to build the rest of this new window object if we have pinnedTabs.
       if (pinnedWindowState.tabs.length) {
         // First get the other attributes off the window
-        WINDOW_ATTRIBUTES.forEach(function(attr) {
+        WINDOW_ATTRIBUTES.forEach(function (attr) {
           if (attr in window) {
             pinnedWindowState[attr] = window[attr];
             delete window[attr];
@@ -5806,32 +5930,33 @@ var SessionStoreInternal = {
     return [defaultState, state];
   },
 
-  _sendRestoreCompletedNotifications: function ssi_sendRestoreCompletedNotifications() {
-    // not all windows restored, yet
-    if (this._restoreCount > 1) {
-      this._restoreCount--;
-      return;
-    }
+  _sendRestoreCompletedNotifications:
+    function ssi_sendRestoreCompletedNotifications() {
+      // not all windows restored, yet
+      if (this._restoreCount > 1) {
+        this._restoreCount--;
+        return;
+      }
 
-    // observers were already notified
-    if (this._restoreCount == -1) {
-      return;
-    }
+      // observers were already notified
+      if (this._restoreCount == -1) {
+        return;
+      }
 
-    // This was the last window restored at startup, notify observers.
-    if (!this._browserSetState) {
-      Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
-      this._deferredAllWindowsRestored.resolve();
-    } else {
-      // _browserSetState is used only by tests, and it uses an alternate
-      // notification in order not to retrigger startup observers that
-      // are listening for NOTIFY_WINDOWS_RESTORED.
-      Services.obs.notifyObservers(null, NOTIFY_BROWSER_STATE_RESTORED);
-    }
+      // This was the last window restored at startup, notify observers.
+      if (!this._browserSetState) {
+        Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+        this._deferredAllWindowsRestored.resolve();
+      } else {
+        // _browserSetState is used only by tests, and it uses an alternate
+        // notification in order not to retrigger startup observers that
+        // are listening for NOTIFY_WINDOWS_RESTORED.
+        Services.obs.notifyObservers(null, NOTIFY_BROWSER_STATE_RESTORED);
+      }
 
-    this._browserSetState = false;
-    this._restoreCount = -1;
-  },
+      this._browserSetState = false;
+      this._restoreCount = -1;
+    },
 
   /**
    * Set the given window's busy state
@@ -5847,9 +5972,8 @@ var SessionStoreInternal = {
     // Keep the to-be-restored state in sync because that is returned by
     // getWindowState() as long as the window isn't loaded, yet.
     if (!this._isWindowLoaded(aWindow)) {
-      let stateToRestore = this._statesToRestore[
-        WINDOW_RESTORE_IDS.get(aWindow)
-      ].windows[0];
+      let stateToRestore =
+        this._statesToRestore[WINDOW_RESTORE_IDS.get(aWindow)].windows[0];
       stateToRestore.busy = aValue;
     }
   },
@@ -6117,7 +6241,7 @@ var SessionStoreInternal = {
     let beats = Math.ceil(delay / DELAY_BEAT);
     let deferred = lazy.PromiseUtils.defer();
     timer.initWithCallback(
-      function() {
+      function () {
         if (beats <= 0) {
           deferred.resolve();
         }
@@ -6170,6 +6294,13 @@ var SessionStoreInternal = {
                 value.selectedIndex,
                 value.value
               );
+              break;
+            }
+            if (
+              value.hasOwnProperty("value") &&
+              value.hasOwnProperty("state")
+            ) {
+              root.addCustomElement(isXpath, key, value.value, value.state);
               break;
             }
             if (
@@ -6402,7 +6533,8 @@ var SessionStoreInternal = {
     }
     // Here, we need to load user data or about:blank instead.
     // As it's user-typed (or blank), it gets system triggering principal:
-    let triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    let triggeringPrincipal =
+      Services.scriptSecurityManager.getSystemPrincipal();
     // Bypass all the fixup goop for about:blank:
     if (!haveUserTypedValue) {
       let blankPromise = this._waitForStateStop(browser, "about:blank");
@@ -6816,11 +6948,8 @@ var TabRestoreQueue = {
    */
   willRestoreSoon(tab) {
     let { priority, hidden, visible } = this.tabs;
-    let {
-      restoreOnDemand,
-      restorePinnedTabsOnDemand,
-      restoreHiddenTabs,
-    } = this.prefs;
+    let { restoreOnDemand, restorePinnedTabsOnDemand, restoreHiddenTabs } =
+      this.prefs;
     let restorePinned = !(restoreOnDemand && restorePinnedTabsOnDemand);
     let candidateSet = [];
 

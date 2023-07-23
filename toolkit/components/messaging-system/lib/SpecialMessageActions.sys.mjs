@@ -10,6 +10,7 @@ const NETWORK_TRR_MODE_PREF = "network.trr.mode";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
   FxAccounts: "resource://gre/modules/FxAccounts.sys.mjs",
   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
@@ -17,7 +18,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 XPCOMUtils.defineLazyModuleGetters(lazy, {
-  AddonManager: "resource://gre/modules/AddonManager.jsm",
   Spotlight: "resource://activity-stream/lib/Spotlight.jsm",
 });
 
@@ -62,7 +62,8 @@ export const SpecialMessageActions = {
     try {
       this.loadAddonIconInURLBar(browser);
       const aUri = Services.io.newURI(url);
-      const systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+      const systemPrincipal =
+        Services.scriptSecurityManager.getSystemPrincipal();
 
       // AddonManager installation source associated to the addons installed from activitystream's CFR
       // and RTAMO (source is going to be "amo" if not configured explicitly in the message provider).
@@ -191,6 +192,10 @@ export const SpecialMessageActions = {
     // Array of prefs that are allowed to be edited by SET_PREF
     const allowedPrefs = [
       "browser.dataFeatureRecommendations.enabled",
+      "browser.migrate.content-modal.about-welcome-behavior",
+      "browser.migrate.content-modal.enabled",
+      "browser.migrate.content-modal.import-all.enabled",
+      "browser.migrate.preferences-entrypoint.enabled",
       "browser.startup.homepage",
       "browser.privateWindowSeparation.enabled",
       "browser.firefox-view.feature-tour",
@@ -376,9 +381,8 @@ export const SpecialMessageActions = {
           action.data.where || "current",
           {
             private: false,
-            triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal(
-              {}
-            ),
+            triggeringPrincipal:
+              Services.scriptSecurityManager.createNullPrincipal({}),
             csp: null,
           }
         );
@@ -457,9 +461,8 @@ export const SpecialMessageActions = {
         // Use location provided; if not specified, replace the current tab.
         window.openLinkIn(url, data.where || "current", {
           private: false,
-          triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal(
-            {}
-          ),
+          triggeringPrincipal:
+            Services.scriptSecurityManager.createNullPrincipal({}),
           csp: null,
         });
         break;

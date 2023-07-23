@@ -33,11 +33,16 @@ function rewriteChromeUri(uri) {
 }
 
 module.exports = {
+  // The ordering for this stories array affects the order that they are displayed in Storybook
   stories: [
-    "../**/*.stories.md",
-    "../stories/**/*.stories.mdx",
-    "../stories/**/*.stories.@(js|jsx|mjs|ts|tsx|md)",
+    // Docs section
+    "../**/README.*.stories.md",
+    // UI Widgets section
     `${projectRoot}/toolkit/content/widgets/**/*.stories.@(js|jsx|mjs|ts|tsx|md)`,
+    // about:logins components stories
+    `${projectRoot}/browser/components/aboutlogins/content/components/**/*.stories.mjs`,
+    // Everything else
+    "../stories/**/*.stories.@(js|jsx|mjs|ts|tsx|md)",
   ],
   // Additions to the staticDirs might also need to get added to
   // MozXULElement.importCss in preview.mjs to enable auto-reloading.
@@ -45,6 +50,7 @@ module.exports = {
     `${projectRoot}/toolkit/content/widgets/`,
     `${projectRoot}/browser/themes/shared/`,
     `${projectRoot}/browser/components/firefoxview/`,
+    `${projectRoot}/browser/components/aboutlogins/content/components/`,
   ],
   addons: [
     "@storybook/addon-links",
@@ -57,7 +63,7 @@ module.exports = {
       },
     },
     "@storybook/addon-a11y",
-    path.resolve(__dirname, "addon-pseudo-localization"),
+    path.resolve(__dirname, "addon-fluent"),
     path.resolve(__dirname, "addon-component-status"),
   ],
   framework: "@storybook/web-components",

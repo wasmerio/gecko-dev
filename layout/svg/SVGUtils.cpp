@@ -261,13 +261,9 @@ float SVGUtils::ObjectSpace(const gfxRect& aRect,
          axis;
 }
 
-float SVGUtils::UserSpace(SVGElement* aSVGElement,
-                          const SVGAnimatedLength* aLength) {
-  return aLength->GetAnimValue(aSVGElement);
-}
-
 float SVGUtils::UserSpace(nsIFrame* aNonSVGContext,
                           const SVGAnimatedLength* aLength) {
+  MOZ_ASSERT(!aNonSVGContext->IsTextFrame(), "Not expecting text content");
   return aLength->GetAnimValue(aNonSVGContext);
 }
 
@@ -447,7 +443,6 @@ void SVGUtils::DetermineMaskUsage(const nsIFrame* aFrame, bool aHandleOpacity,
       break;
     case ClipPathType::Shape:
     case ClipPathType::Box:
-    case ClipPathType::Path:
       aUsage.shouldApplyBasicShapeOrPath = true;
       break;
     case ClipPathType::None:
@@ -832,17 +827,6 @@ gfxRect SVGUtils::GetClipRectForFrame(const nsIFrame* aFrame, float aX,
     clipRect.height = aHeight;
   }
   return clipRect;
-}
-
-void SVGUtils::SetClipRect(gfxContext* aContext, const gfxMatrix& aCTM,
-                           const gfxRect& aRect) {
-  if (aCTM.IsSingular()) {
-    return;
-  }
-
-  gfxContextMatrixAutoSaveRestore matrixAutoSaveRestore(aContext);
-  aContext->Multiply(aCTM);
-  aContext->Clip(aRect);
 }
 
 gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, uint32_t aFlags,
@@ -1550,7 +1534,7 @@ gfxMatrix SVGUtils::GetTransformMatrixInUserSpace(const nsIFrame* aFrame) {
   if (properties.HasTransform()) {
     trans = nsStyleTransformMatrix::ReadTransforms(
         properties.mTranslate, properties.mRotate, properties.mScale,
-        properties.mMotion, properties.mTransform, refBox,
+        properties.mMotion.ptrOr(nullptr), properties.mTransform, refBox,
         AppUnitsPerCSSPixel());
   } else {
     trans = Matrix4x4::From2D(svgTransform);

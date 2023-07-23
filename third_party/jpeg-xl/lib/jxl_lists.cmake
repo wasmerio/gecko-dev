@@ -6,6 +6,30 @@
 # This file is generated, do not modify by manually.
 # Run `tools/scripts/build_cleaner.py --update` to regenerate it.
 
+set(JPEGXL_INTERNAL_BASE_SOURCES
+  jxl/base/arch_macros.h
+  jxl/base/bits.h
+  jxl/base/byte_order.h
+  jxl/base/cache_aligned.cc
+  jxl/base/cache_aligned.h
+  jxl/base/compiler_specific.h
+  jxl/base/data_parallel.cc
+  jxl/base/data_parallel.h
+  jxl/base/float.h
+  jxl/base/iaca.h
+  jxl/base/os_macros.h
+  jxl/base/override.h
+  jxl/base/padded_bytes.cc
+  jxl/base/padded_bytes.h
+  jxl/base/printf_macros.h
+  jxl/base/random.cc
+  jxl/base/random.h
+  jxl/base/sanitizer_definitions.h
+  jxl/base/scope_guard.h
+  jxl/base/span.h
+  jxl/base/status.h
+)
+
 set(JPEGXL_INTERNAL_CODEC_APNG_SOURCES
   extras/dec/apng.cc
   extras/dec/apng.h
@@ -92,29 +116,6 @@ set(JPEGXL_INTERNAL_DEC_SOURCES
   jxl/ans_common.cc
   jxl/ans_common.h
   jxl/ans_params.h
-  jxl/base/arch_macros.h
-  jxl/base/bits.h
-  jxl/base/byte_order.h
-  jxl/base/cache_aligned.cc
-  jxl/base/cache_aligned.h
-  jxl/base/compiler_specific.h
-  jxl/base/data_parallel.cc
-  jxl/base/data_parallel.h
-  jxl/base/file_io.h
-  jxl/base/iaca.h
-  jxl/base/os_macros.h
-  jxl/base/override.h
-  jxl/base/padded_bytes.cc
-  jxl/base/padded_bytes.h
-  jxl/base/printf_macros.h
-  jxl/base/profiler.h
-  jxl/base/random.cc
-  jxl/base/random.h
-  jxl/base/sanitizer_definitions.h
-  jxl/base/scope_guard.h
-  jxl/base/span.h
-  jxl/base/status.h
-  jxl/base/thread_pool_internal.h
   jxl/blending.cc
   jxl/blending.h
   jxl/chroma_from_luma.cc
@@ -208,6 +209,7 @@ set(JPEGXL_INTERNAL_DEC_SOURCES
   jxl/image_metadata.cc
   jxl/image_metadata.h
   jxl/image_ops.h
+  jxl/inverse_mtf-inl.h
   jxl/jxl_inspection.h
   jxl/lehmer_code.h
   jxl/loop_filter.cc
@@ -285,7 +287,6 @@ set(JPEGXL_INTERNAL_DEC_SOURCES
   jxl/render_pipeline/stage_ycbcr.h
   jxl/sanitizers.h
   jxl/simd_util-inl.h
-  jxl/size_constraints.h
   jxl/splines.cc
   jxl/splines.h
   jxl/toc.cc
@@ -298,7 +299,6 @@ set(JPEGXL_INTERNAL_DEC_SOURCES
 set(JPEGXL_INTERNAL_ENC_SOURCES
   jxl/butteraugli/butteraugli.cc
   jxl/butteraugli/butteraugli.h
-  jxl/butteraugli_wrapper.cc
   jxl/enc_ac_strategy.cc
   jxl/enc_ac_strategy.h
   jxl/enc_adaptive_quantization.cc
@@ -314,8 +314,6 @@ set(JPEGXL_INTERNAL_ENC_SOURCES
   jxl/enc_bit_writer.h
   jxl/enc_butteraugli_comparator.cc
   jxl/enc_butteraugli_comparator.h
-  jxl/enc_butteraugli_pnorm.cc
-  jxl/enc_butteraugli_pnorm.h
   jxl/enc_cache.cc
   jxl/enc_cache.h
   jxl/enc_chroma_from_luma.cc
@@ -417,6 +415,8 @@ set(JPEGXL_INTERNAL_EXTRAS_FOR_TOOLS_SOURCES
   extras/codec.h
   extras/hlg.cc
   extras/hlg.h
+  extras/metrics.cc
+  extras/metrics.h
   extras/packed_image_convert.cc
   extras/packed_image_convert.h
   extras/tone_mapping.cc
@@ -435,6 +435,7 @@ set(JPEGXL_INTERNAL_EXTRAS_SOURCES
   extras/exif.cc
   extras/exif.h
   extras/packed_image.h
+  extras/size_constraints.h
   extras/time.cc
   extras/time.h
 )
@@ -451,15 +452,18 @@ set(JPEGXL_INTERNAL_GBENCH_SOURCES
 set(JPEGXL_INTERNAL_JPEGLI_SOURCES
   jpegli/adaptive_quantization.cc
   jpegli/adaptive_quantization.h
+  jpegli/bit_writer.cc
+  jpegli/bit_writer.h
   jpegli/bitstream.cc
   jpegli/bitstream.h
+  jpegli/color_quantize.cc
+  jpegli/color_quantize.h
   jpegli/color_transform.cc
   jpegli/color_transform.h
   jpegli/common.cc
   jpegli/common.h
   jpegli/common_internal.h
-  jpegli/dct.cc
-  jpegli/dct.h
+  jpegli/dct-inl.h
   jpegli/decode.cc
   jpegli/decode.h
   jpegli/decode_internal.h
@@ -468,9 +472,16 @@ set(JPEGXL_INTERNAL_JPEGLI_SOURCES
   jpegli/decode_scan.cc
   jpegli/decode_scan.h
   jpegli/destination_manager.cc
+  jpegli/downsample.cc
+  jpegli/downsample.h
   jpegli/encode.cc
   jpegli/encode.h
+  jpegli/encode_finish.cc
+  jpegli/encode_finish.h
   jpegli/encode_internal.h
+  jpegli/encode_streaming.cc
+  jpegli/encode_streaming.h
+  jpegli/entropy_coding-inl.h
   jpegli/entropy_coding.cc
   jpegli/entropy_coding.h
   jpegli/error.cc
@@ -479,14 +490,18 @@ set(JPEGXL_INTERNAL_JPEGLI_SOURCES
   jpegli/huffman.h
   jpegli/idct.cc
   jpegli/idct.h
+  jpegli/input.cc
+  jpegli/input.h
   jpegli/memory_manager.cc
   jpegli/memory_manager.h
   jpegli/quant.cc
   jpegli/quant.h
   jpegli/render.cc
   jpegli/render.h
+  jpegli/simd.cc
+  jpegli/simd.h
   jpegli/source_manager.cc
-  jpegli/source_manager.h
+  jpegli/transpose-inl.h
   jpegli/upsample.cc
   jpegli/upsample.h
 )
@@ -499,6 +514,11 @@ set(JPEGXL_INTERNAL_JPEGLI_TESTLIB_FILES
 set(JPEGXL_INTERNAL_JPEGLI_TESTS
   jpegli/decode_api_test.cc
   jpegli/encode_api_test.cc
+  jpegli/error_handling_test.cc
+  jpegli/input_suspension_test.cc
+  jpegli/output_suspension_test.cc
+  jpegli/source_manager_test.cc
+  jpegli/streaming_test.cc
   jpegli/transcode_api_test.cc
 )
 
@@ -506,15 +526,7 @@ set(JPEGXL_INTERNAL_JPEGLI_WRAPPER_SOURCES
   jpegli/libjpeg_wrapper.cc
 )
 
-set(JPEGXL_INTERNAL_PROFILER_SOURCES
-  profiler/profiler.cc
-  profiler/profiler.h
-  profiler/tsc_timer.h
-)
-
 set(JPEGXL_INTERNAL_PUBLIC_HEADERS
-  include/jxl/butteraugli.h
-  include/jxl/butteraugli_cxx.h
   include/jxl/cms_interface.h
   include/jxl/codestream_header.h
   include/jxl/color_encoding.h
@@ -552,7 +564,6 @@ set(JPEGXL_INTERNAL_TESTS
   jxl/bit_reader_test.cc
   jxl/bits_test.cc
   jxl/blending_test.cc
-  jxl/butteraugli_test.cc
   jxl/byte_order_test.cc
   jxl/coeff_order_test.cc
   jxl/color_encoding_internal_test.cc

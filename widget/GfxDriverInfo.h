@@ -178,6 +178,7 @@ enum class DeviceFamily : uint8_t {
   IntelSandyBridge,
   IntelGen7Baytrail,
   IntelSkylake,
+  IntelKabyLake,
   IntelHD520,
   IntelMobileHDGraphics,
   NvidiaBlockD3D9Layers,
@@ -242,6 +243,8 @@ enum DriverVendor : uint8_t {
   SoftwareMesaAll,
   // Wildcard for all non-Intel/NVIDIA/ATI Mesa drivers.
   MesaNonIntelNvidiaAtiAll,
+  // Running in VM.
+  MesaVM,
 
   Max
 };

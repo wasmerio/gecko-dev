@@ -74,6 +74,7 @@
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"
+#include "js/Conversions.h"
 #include "js/Date.h"
 #include "js/experimental/CodeCoverage.h"  // js::GetCodeCoverageSummary
 #include "js/experimental/CompileScript.h"  // JS::ParseGlobalScript, JS::PrepareForInstantiate
@@ -127,6 +128,7 @@
 #include "vm/StringType.h"
 #include "wasm/AsmJS.h"
 #include "wasm/WasmBaselineCompile.h"
+#include "wasm/WasmGcObject.h"
 #include "wasm/WasmInstance.h"
 #include "wasm/WasmIntrinsic.h"
 #include "wasm/WasmIonCompile.h"
@@ -202,14 +204,12 @@ static bool GetRealmConfiguration(JSContext* cx, unsigned argc, Value* vp) {
   }
 #endif
 
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
   bool changeArrayByCopy =
       cx->realm()->creationOptions().getChangeArrayByCopyEnabled();
   if (!JS_SetProperty(cx, info, "enableChangeArrayByCopy",
                       changeArrayByCopy ? TrueHandleValue : FalseHandleValue)) {
     return false;
   }
-#endif
 
 #ifdef ENABLE_NEW_SET_METHODS
   bool newSetMethods = cx->realm()->creationOptions().getNewSetMethodsEnabled();
@@ -575,15 +575,6 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
-  value = BooleanValue(true);
-#else
-  value = BooleanValue(false);
-#endif
-  if (!JS_SetProperty(cx, info, "change-array-by-copy", value)) {
-    return false;
-  }
-
 #ifdef ENABLE_NEW_SET_METHODS
   value = BooleanValue(true);
 #else
@@ -723,8 +714,10 @@ static bool GC(JSContext* cx, unsigned argc, Value* vp) {
 static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   if (args.get(0) == BooleanValue(true)) {
-    cx->runtime()->gc.storeBuffer().setAboutToOverflow(
-        JS::GCReason::FULL_GENERIC_BUFFER);
+    gc::GCRuntime& gc = cx->runtime()->gc;
+    if (gc.nursery().isEnabled()) {
+      gc.storeBuffer().setAboutToOverflow(JS::GCReason::FULL_GENERIC_BUFFER);
+    }
   }
 
   cx->minorGC(JS::GCReason::API);
@@ -2017,6 +2010,58 @@ static bool WasmIntrinsicI8VecMul(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+#ifdef ENABLE_WASM_GC
+static bool WasmGcReadField(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  RootedObject callee(cx, &args.callee());
+
+  if (!args.requireAtLeast(cx, "wasmGcReadField", 2)) {
+    return false;
+  }
+
+  if (!args[0].isObject() || !args[0].toObject().is<WasmGcObject>()) {
+    ReportUsageErrorASCII(cx, callee,
+                          "First argument must be a WebAssembly GC object");
+    return false;
+  }
+
+  uint32_t fieldIndex;
+  if (!JS::ToUint32(cx, args[1], &fieldIndex)) {
+    ReportUsageErrorASCII(cx, callee, "Second argument must be an integer");
+    return false;
+  }
+
+  Rooted<WasmGcObject*> gcObject(cx, &args[0].toObject().as<WasmGcObject>());
+  Rooted<Value> gcValue(cx);
+  if (!WasmGcObject::loadValue(cx, gcObject, jsid::Int(int32_t(fieldIndex)),
+                               &gcValue)) {
+    return false;
+  }
+
+  args.rval().set(gcValue);
+  return true;
+}
+
+static bool WasmGcArrayLength(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  RootedObject callee(cx, &args.callee());
+
+  if (!args.requireAtLeast(cx, "wasmGcArrayLength", 1)) {
+    return false;
+  }
+
+  if (!args[0].isObject() || !args[0].toObject().is<WasmArrayObject>()) {
+    ReportUsageErrorASCII(cx, callee,
+                          "First argument must be a WebAssembly GC array");
+    return false;
+  }
+
+  WasmArrayObject& arr = args[0].toObject().as<WasmArrayObject>();
+  args.rval().setInt32(int32_t(arr.numElements_));
+  return true;
+}
+#endif  // ENABLE_WASM_GC
+
 static bool LargeArrayBufferSupported(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   args.rval().setBoolean(ArrayBufferObject::MaxByteLength >
@@ -3273,7 +3318,7 @@ static bool NewString(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  gc::InitialHeap heap = gc::DefaultHeap;
+  gc::Heap heap = gc::Heap::Default;
   bool wantTwoByte = false;
   bool forceExternal = false;
   bool maybeExternal = false;
@@ -3316,7 +3361,7 @@ static bool NewString(JSContext* cx, unsigned argc, Value* vp) {
       *setting = static_cast<uint32_t>(i32);
     }
 
-    heap = requestTenured ? gc::TenuredHeap : gc::DefaultHeap;
+    heap = requestTenured ? gc::Heap::Tenured : gc::Heap::Default;
     if (forceExternal || maybeExternal) {
       wantTwoByte = true;
       if (capacity != 0) {
@@ -3426,7 +3471,7 @@ static bool NewRope(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  gc::InitialHeap heap = js::gc::DefaultHeap;
+  gc::Heap heap = js::gc::Heap::Default;
   if (args.get(2).isObject()) {
     RootedObject options(cx, &args[2].toObject());
     RootedValue v(cx);
@@ -3434,7 +3479,7 @@ static bool NewRope(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     if (!v.isUndefined() && !ToBoolean(v)) {
-      heap = js::gc::TenuredHeap;
+      heap = js::gc::Heap::Tenured;
     }
   }
 
@@ -3736,7 +3781,7 @@ bool IterativeFailureTest::testThread(unsigned thread) {
         fprintf(stderr, "  error while trying to print exception, giving up\n");
         return false;
       }
-      UniqueChars bytes(JS_EncodeStringToLatin1(cx, str));
+      UniqueChars bytes(JS_EncodeStringToUTF8(cx, str));
       if (!bytes) {
         return false;
       }
@@ -4130,6 +4175,12 @@ static bool RejectPromise(JSContext* cx, unsigned argc, Value* vp) {
   return result;
 }
 
+static bool StreamsAreEnabled(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  args.rval().setBoolean(cx->realm()->creationOptions().getStreamsEnabled());
+  return true;
+}
+
 static unsigned finalizeCount = 0;
 
 static void finalize_counter_finalize(JS::GCContext* gcx, JSObject* obj) {
@@ -4182,6 +4233,11 @@ static bool DumpHeap(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
   FILE* dumpFile = stdout;
+  auto closeFile = mozilla::MakeScopeExit([&dumpFile] {
+    if (dumpFile != stdout) {
+      fclose(dumpFile);
+    }
+  });
 
   if (args.length() > 1) {
     RootedObject callee(cx, &args.callee());
@@ -4195,27 +4251,33 @@ static bool DumpHeap(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     if (!fuzzingSafe) {
-      UniqueChars fileNameBytes = JS_EncodeStringToLatin1(cx, str);
+      UniqueChars fileNameBytes = JS_EncodeStringToUTF8(cx, str);
       if (!fileNameBytes) {
         return false;
       }
-      dumpFile = fopen(fileNameBytes.get(), "w");
+#ifdef XP_WIN
+      UniqueWideChars wideFileNameBytes =
+          JS::EncodeUtf8ToWide(cx, fileNameBytes.get());
+      if (!wideFileNameBytes) {
+        return false;
+      }
+      dumpFile = _wfopen(wideFileNameBytes.get(), L"w");
+#else
+      UniqueChars narrowFileNameBytes =
+          JS::EncodeUtf8ToNarrow(cx, fileNameBytes.get());
+      if (!narrowFileNameBytes) {
+        return false;
+      }
+      dumpFile = fopen(narrowFileNameBytes.get(), "w");
+#endif
       if (!dumpFile) {
-        fileNameBytes = JS_EncodeStringToLatin1(cx, str);
-        if (!fileNameBytes) {
-          return false;
-        }
-        JS_ReportErrorLatin1(cx, "can't open %s", fileNameBytes.get());
+        JS_ReportErrorUTF8(cx, "can't open %s", fileNameBytes.get());
         return false;
       }
     }
   }
 
   js::DumpHeap(cx, dumpFile, js::IgnoreNurseryObjects);
-
-  if (dumpFile != stdout) {
-    fclose(dumpFile);
-  }
 
   args.rval().setUndefined();
   return true;
@@ -4400,7 +4462,8 @@ static bool ReadGeckoInterpProfilingStack(JSContext* cx, unsigned argc,
     }
 
     // Skip fake JS frame pushed for js::RunScript by GeckoProfilerEntryMarker.
-    if (!frame.dynamicString()) {
+    const char* dynamicStr = frame.dynamicString();
+    if (!dynamicStr) {
       continue;
     }
 
@@ -4410,7 +4473,8 @@ static bool ReadGeckoInterpProfilingStack(JSContext* cx, unsigned argc,
     }
 
     Rooted<JSString*> dynamicString(
-        cx, JS_NewStringCopyZ(cx, frame.dynamicString()));
+        cx, JS_NewStringCopyUTF8Z(
+                cx, JS::ConstUTF8CharsZ(dynamicStr, strlen(dynamicStr))));
     if (!dynamicString) {
       return false;
     }
@@ -6869,13 +6933,11 @@ static bool CompileToStencil(JSContext* cx, uint32_t argc, Value* vp) {
   RefPtr<JS::Stencil> stencil;
   JS::CompilationStorage compileStorage;
   if (isModule) {
-    stencil = JS::CompileModuleScriptToStencil(
-        &fc, options, cx->stackLimitForCurrentPrincipal(), srcBuf,
-        compileStorage);
+    stencil =
+        JS::CompileModuleScriptToStencil(&fc, options, srcBuf, compileStorage);
   } else {
-    stencil = JS::CompileGlobalScriptToStencil(
-        &fc, options, cx->stackLimitForCurrentPrincipal(), srcBuf,
-        compileStorage);
+    stencil =
+        JS::CompileGlobalScriptToStencil(&fc, options, srcBuf, compileStorage);
   }
   if (!stencil) {
     return false;
@@ -7030,12 +7092,10 @@ static bool CompileToStencilXDR(JSContext* cx, uint32_t argc, Value* vp) {
   UniquePtr<frontend::ExtensibleCompilationStencil> stencil;
   if (isModule) {
     stencil = frontend::ParseModuleToExtensibleStencil(
-        cx, &fc, cx->stackLimitForCurrentPrincipal(), cx->tempLifoAlloc(),
-        input.get(), &scopeCache, srcBuf);
+        cx, &fc, cx->tempLifoAlloc(), input.get(), &scopeCache, srcBuf);
   } else {
     stencil = frontend::CompileGlobalScriptToExtensibleStencil(
-        cx, &fc, cx->stackLimitForCurrentPrincipal(), input.get(), &scopeCache,
-        srcBuf, ScopeKind::Global);
+        cx, &fc, input.get(), &scopeCache, srcBuf, ScopeKind::Global);
   }
   if (!stencil) {
     return false;
@@ -7528,7 +7588,8 @@ static bool GetLcovInfo(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  JSString* str = JS_NewStringCopyN(cx, content.get(), length);
+  JSString* str =
+      JS_NewStringCopyUTF8N(cx, JS::UTF8Chars(content.get(), length));
   if (!str) {
     return false;
   }
@@ -8370,7 +8431,7 @@ static bool GetICUOptions(JSContext* cx, unsigned argc, Value* vp) {
 
   intl::FormatBuffer<char16_t, intl::INITIAL_CHAR_BUFFER_SIZE> buf(cx);
 
-  if (auto ok = DateTimeInfo::timeZoneId(DateTimeInfo::ShouldRFP::No, buf);
+  if (auto ok = DateTimeInfo::timeZoneId(DateTimeInfo::ForceUTC::No, buf);
       ok.isErr()) {
     intl::ReportInternalError(cx, ok.unwrapErr());
     return false;
@@ -8867,6 +8928,10 @@ JS_FN_HELP("rejectPromise", RejectPromise, 2, 0,
 "rejectPromise(promise, reason)",
 "  Reject a Promise by calling the JSAPI function JS::RejectPromise."),
 
+JS_FN_HELP("streamsAreEnabled", StreamsAreEnabled, 0, 0,
+"streamsAreEnabled()",
+"  Returns a boolean indicating whether WHATWG Streams are enabled for the current realm."),
+
     JS_FN_HELP("makeFinalizeObserver", MakeFinalizeObserver, 0, 0,
 "makeFinalizeObserver()",
 "  Get a special object whose finalization increases the counter returned\n"
@@ -9193,6 +9258,16 @@ JS_FOR_WASM_FEATURES(WASM_FEATURE, WASM_FEATURE, WASM_FEATURE)
 "wasmIntrinsicI8VecMul()",
 "  Returns a module that implements an i8 vector pairwise multiplication intrinsic."),
 
+#ifdef ENABLE_WASM_GC
+    JS_FN_HELP("wasmGcReadField", WasmGcReadField, 2, 0,
+"wasmGcReadField(obj, index)",
+"  Gets a field of a WebAssembly GC struct or array."),
+
+    JS_FN_HELP("wasmGcArrayLength", WasmGcArrayLength, 1, 0,
+"wasmGcArrayLength(arr)",
+"  Gets the length of a WebAssembly GC array."),
+#endif // ENABLE_WASM_GC
+
     JS_FN_HELP("largeArrayBufferSupported", LargeArrayBufferSupported, 0, 0,
 "largeArrayBufferSupported()",
 "  Returns true if array buffers larger than 2GB can be allocated."),
@@ -9347,17 +9422,6 @@ JS_FOR_WASM_FEATURES(WASM_FEATURE, WASM_FEATURE, WASM_FEATURE)
 "  (like a shape or a scope chain element). The destination of the i'th array\n"
 "  element's edge is the node of the i+1'th array element; the destination of\n"
 "  the last array element is implicitly |target|.\n"),
-
-    JS_FN_HELP("shortestPaths", ShortestPaths, 3, 0,
-"shortestPaths(targets, options)",
-"  Return an array of arrays of shortest retaining paths. There is an array of\n"
-"  shortest retaining paths for each object in |targets|. Each element in a path\n"
-"  is of the form |{ predecessor, edge }|. |options| may contain:\n"
-"  \n"
-"    maxNumPaths: The maximum number of paths returned in each of those arrays\n"
-"      (default 3).\n"
-"    start: The object to start all paths from. If not given, then\n"
-"      the starting point will be the set of GC roots."),
 
 #if defined(DEBUG) || defined(JS_JITSPEW)
     JS_FN_HELP("dumpObject", DumpObject, 1, 0,
@@ -9682,6 +9746,18 @@ JS_FN_HELP("getEnclosingEnvironmentObject", GetEnclosingEnvironmentObject, 1, 0,
 JS_FN_HELP("getEnvironmentObjectType", GetEnvironmentObjectType, 1, 0,
 "getEnvironmentObjectType(env)",
 "  Return a string represents the type of given environment object."),
+
+    JS_FN_HELP("shortestPaths", ShortestPaths, 3, 0,
+"shortestPaths(targets, options)",
+"  Return an array of arrays of shortest retaining paths. There is an array of\n"
+      "  shortest retaining paths for each object in |targets|. Each element in a path\n"
+      "  is of the form |{ predecessor, edge }|. |options| may contain:\n"
+      "  \n"
+      "    maxNumPaths: The maximum number of paths returned in each of those arrays\n"
+      "      (default 3).\n"
+      "    start: The object to start all paths from. If not given, then\n"
+      "      the starting point will be the set of GC roots."),
+
 
     JS_FS_HELP_END
 };

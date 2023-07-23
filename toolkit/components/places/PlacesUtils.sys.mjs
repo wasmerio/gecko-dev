@@ -58,20 +58,14 @@ function asQuery(aNode) {
 async function notifyKeywordChange(url, keyword, source) {
   // Notify bookmarks about the removal.
   let bookmarks = [];
-  await PlacesUtils.bookmarks.fetch({ url }, b => bookmarks.push(b));
-  for (let bookmark of bookmarks) {
-    let ids = await PlacesUtils.promiseManyItemIds([
-      bookmark.guid,
-      bookmark.parentGuid,
-    ]);
-    bookmark.id = ids.get(bookmark.guid);
-    bookmark.parentId = ids.get(bookmark.parentGuid);
-  }
+  await PlacesUtils.bookmarks.fetch({ url }, b => bookmarks.push(b), {
+    includeItemIds: true,
+  });
 
   const notifications = bookmarks.map(
     bookmark =>
       new PlacesBookmarkKeyword({
-        id: bookmark.id,
+        id: bookmark.itemId,
         itemType: bookmark.type,
         url,
         guid: bookmark.guid,
@@ -641,7 +635,7 @@ export var PlacesUtils = {
   nodeIsBookmark: function PU_nodeIsBookmark(aNode) {
     return (
       aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_URI &&
-      aNode.itemId != -1
+      (aNode.itemId != -1 || aNode.bookmarkGuid)
     );
   },
 
@@ -955,12 +949,7 @@ export var PlacesUtils = {
    * @return the reversed host string.
    */
   getReversedHost(url) {
-    return (
-      url.host
-        .split("")
-        .reverse()
-        .join("") + "."
-    );
+    return url.host.split("").reverse().join("") + ".";
   },
 
   /**
@@ -1363,13 +1352,6 @@ export var PlacesUtils = {
     return found;
   },
 
-  getChildCountForFolder(guid) {
-    let folder = PlacesUtils.getFolderContents(guid).root;
-    let childCount = folder.childCount;
-    folder.containerOpen = false;
-    return childCount;
-  },
-
   /**
    * Returns an array containing all the uris in the first level of the
    * passed in container.
@@ -1504,7 +1486,7 @@ export var PlacesUtils = {
       }
       PlacesUtils.favicons.getFaviconDataForPage(
         aPageUrl,
-        function(uri, dataLen, data, mimeType, size) {
+        function (uri, dataLen, data, mimeType, size) {
           if (uri) {
             resolve({ uri, dataLen, data, mimeType, size });
           } else {
@@ -1535,64 +1517,6 @@ export var PlacesUtils = {
       "size=" +
       Math.round(size) * window.devicePixelRatio
     );
-  },
-
-  /**
-   * Get the unique id for an item (a bookmark, a folder or a separator) given
-   * its item id.
-   *
-   * @param aItemId
-   *        an item id
-   * @return {Promise}
-   * @resolves to the GUID.
-   * @rejects if aItemId is invalid.
-   */
-  promiseItemGuid(aItemId) {
-    return GuidHelper.getItemGuid(aItemId);
-  },
-
-  /**
-   * Get the item id for an item (a bookmark, a folder or a separator) given
-   * its unique id.
-   *
-   * @param aGuid
-   *        an item GUID
-   * @return {Promise}
-   * @resolves to the item id.
-   * @rejects if there's no item for the given GUID.
-   */
-  promiseItemId(aGuid) {
-    return GuidHelper.getItemId(aGuid);
-  },
-
-  /**
-   * Get the item ids for multiple items (a bookmark, a folder or a separator)
-   * given the unique ids for each item.
-   *
-   * @param {Array} aGuids An array of item GUIDs.
-   * @return {Promise}
-   * @resolves to a Map of item ids.
-   * @rejects if not all of the GUIDs could be found.
-   */
-  promiseManyItemIds(aGuids) {
-    return GuidHelper.getManyItemIds(aGuids);
-  },
-
-  /**
-   * Invalidate the GUID cache for the given itemId.
-   *
-   * @param aItemId
-   *        an item id
-   */
-  invalidateCachedGuidFor(aItemId) {
-    GuidHelper.invalidateCacheForItemId(aItemId);
-  },
-
-  /**
-   * Invalidates the entire GUID cache.
-   */
-  invalidateCachedGuids() {
-    GuidHelper.invalidateCache();
   },
 
   /**
@@ -1665,7 +1589,7 @@ export var PlacesUtils = {
    * resolved to null.
    */
   async promiseBookmarksTree(aItemGuid = "", aOptions = {}) {
-    let createItemInfoObject = async function(aRow, aIncludeParentGuid) {
+    let createItemInfoObject = async function (aRow, aIncludeParentGuid) {
       let item = {};
       let copyProps = (...props) => {
         for (let prop of props) {
@@ -1684,9 +1608,6 @@ export var PlacesUtils = {
       if (aOptions.includeItemIds) {
         item.id = itemId;
       }
-
-      // Cache it for promiseItemId consumers regardless.
-      GuidHelper.updateCache(itemId, item.guid);
 
       let type = aRow.getResultByName("type");
       item.typeCode = type;
@@ -1837,7 +1758,7 @@ export var PlacesUtils = {
           rootItem.itemsCount++;
         } catch (ex) {
           // This is a bogus child, report and skip it.
-          console.error("Failed to fetch the data for an item " + ex);
+          console.error("Failed to fetch the data for an item ", ex);
           continue;
         }
       }
@@ -1918,10 +1839,7 @@ export var PlacesUtils = {
       case "hex":
         let hash = lazy.gCryptoHash.finish(false);
         return Array.from(hash, (c, i) =>
-          hash
-            .charCodeAt(i)
-            .toString(16)
-            .padStart(2, "0")
+          hash.charCodeAt(i).toString(16).padStart(2, "0")
         ).join("");
       case "ascii":
       default:
@@ -2030,7 +1948,7 @@ export var PlacesUtils = {
   },
 };
 
-XPCOMUtils.defineLazyGetter(PlacesUtils, "history", function() {
+XPCOMUtils.defineLazyGetter(PlacesUtils, "history", function () {
   let hs = Cc["@mozilla.org/browser/nav-history-service;1"].getService(
     Ci.nsINavHistoryService
   );
@@ -2094,7 +2012,7 @@ XPCOMUtils.defineLazyServiceGetter(
   "nsITaggingService"
 );
 
-XPCOMUtils.defineLazyGetter(lazy, "bundle", function() {
+XPCOMUtils.defineLazyGetter(lazy, "bundle", function () {
   const PLACES_STRING_BUNDLE_URI = "chrome://places/locale/places.properties";
   return Services.strings.createBundle(PLACES_STRING_BUNDLE_URI);
 });
@@ -2124,7 +2042,7 @@ function setupDbForShutdown(conn, name) {
       try {
         PlacesUtils.history.connectionShutdownClient.jsclient.addBlocker(
           `${name} closing as part of Places shutdown`,
-          async function() {
+          async function () {
             state = "1. Service has initiated shutdown";
 
             // At this stage, all external clients have finished using the
@@ -2642,10 +2560,8 @@ PlacesUtils.keywords = {
       throw new Error("Invalid keyword");
     }
 
-    let {
-      keyword,
-      source = Ci.nsINavBookmarksService.SOURCE_DEFAULT,
-    } = keywordOrEntry;
+    let { keyword, source = Ci.nsINavBookmarksService.SOURCE_DEFAULT } =
+      keywordOrEntry;
     keyword = keywordOrEntry.keyword.trim().toLowerCase();
     return PlacesUtils.withConnectionWrapper(
       "PlacesUtils.keywords.remove",
@@ -2657,7 +2573,7 @@ PlacesUtils.keywords = {
         let { url } = cache.get(keyword);
         cache.delete(keyword);
 
-        await db.executeTransaction(async function() {
+        await db.executeTransaction(async function () {
           await db.execute(
             `DELETE FROM moz_keywords WHERE keyword = :keyword`,
             { keyword }
@@ -2704,7 +2620,7 @@ PlacesUtils.keywords = {
     }
     return PlacesUtils.withConnectionWrapper(
       "PlacesUtils.keywords.reassign",
-      async function(db) {
+      async function (db) {
         let keywordsToReassign = [];
         let keywordsToRemove = [];
         let cache = await promiseKeywordsCache();
@@ -2720,7 +2636,7 @@ PlacesUtils.keywords = {
           return;
         }
 
-        await db.executeTransaction(async function() {
+        await db.executeTransaction(async function () {
           // Remove existing keywords from the new URL.
           await db.executeCached(
             `DELETE FROM moz_keywords WHERE keyword = :keyword`,
@@ -2788,7 +2704,7 @@ PlacesUtils.keywords = {
     }
     return PlacesUtils.withConnectionWrapper(
       "PlacesUtils.keywords.removeFromURLsIfNotBookmarked",
-      async function(db) {
+      async function (db) {
         let keywordsByHref = new Map();
         let cache = await promiseKeywordsCache();
         for (let [keyword, entry] of cache) {
@@ -2856,7 +2772,7 @@ PlacesUtils.keywords = {
   eraseEverything() {
     return PlacesUtils.withConnectionWrapper(
       "PlacesUtils.keywords.eraseEverything",
-      async function(db) {
+      async function (db) {
         let cache = await promiseKeywordsCache();
         if (!cache.size) {
           return;
@@ -2883,7 +2799,7 @@ PlacesUtils.keywords = {
 var gKeywordsCachePromise = Promise.resolve();
 
 function promiseKeywordsCache() {
-  let promise = gKeywordsCachePromise.then(function(cache) {
+  let promise = gKeywordsCachePromise.then(function (cache) {
     if (cache) {
       return cache;
     }
@@ -2927,174 +2843,3 @@ function promiseKeywordsCache() {
   gKeywordsCachePromise = promise.catch(_ => {});
   return promise;
 }
-
-// Sometime soon, likely as part of the transition to mozIAsyncBookmarks,
-// itemIds will be deprecated in favour of GUIDs, which play much better
-// with multiple undo/redo operations.  Because these GUIDs are already stored,
-// and because we don't want to revise the transactions API once more when this
-// happens, transactions are set to work with GUIDs exclusively, in the sense
-// that they may never expose itemIds, nor do they accept them as input.
-// More importantly, transactions which add or remove items guarantee to
-// restore the GUIDs on undo/redo, so that the following transactions that may
-// done or undo can assume the items they're interested in are stil accessible
-// through the same GUID.
-// The current bookmarks API, however, doesn't expose the necessary means for
-// working with GUIDs.  So, until it does, this helper object accesses the
-// Places database directly in order to switch between GUIDs and itemIds, and
-// "restore" GUIDs on items re-created items.
-var GuidHelper = {
-  // Cache for GUID<->itemId paris.
-  guidsForIds: new Map(),
-  idsForGuids: new Map(),
-
-  async getItemId(aGuid) {
-    let cached = this.idsForGuids.get(aGuid);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    let itemId = await PlacesUtils.withConnectionWrapper(
-      "GuidHelper.getItemId",
-      async function(db) {
-        let rows = await db.executeCached(
-          "SELECT b.id, b.guid from moz_bookmarks b WHERE b.guid = :guid LIMIT 1",
-          { guid: aGuid }
-        );
-        if (!rows.length) {
-          throw new Error("no item found for the given GUID");
-        }
-
-        return rows[0].getResultByName("id");
-      }
-    );
-
-    this.updateCache(itemId, aGuid);
-    return itemId;
-  },
-
-  async getManyItemIds(aGuids) {
-    let uncachedGuids = aGuids.filter(guid => !this.idsForGuids.has(guid));
-    if (uncachedGuids.length) {
-      await PlacesUtils.withConnectionWrapper(
-        "GuidHelper.getItemId",
-        async db => {
-          while (uncachedGuids.length) {
-            let chunk = uncachedGuids.splice(0, 100);
-            let rows = await db.executeCached(
-              `SELECT b.id, b.guid from moz_bookmarks b WHERE
-             b.guid IN (${"?,".repeat(chunk.length - 1) + "?"})
-             LIMIT ${chunk.length}`,
-              chunk
-            );
-            if (rows.length < chunk.length) {
-              throw new Error("Not all items were found!");
-            }
-            for (let row of rows) {
-              this.updateCache(
-                row.getResultByIndex(0),
-                row.getResultByIndex(1)
-              );
-            }
-          }
-        }
-      );
-    }
-    return new Map(aGuids.map(guid => [guid, this.idsForGuids.get(guid)]));
-  },
-
-  async getItemGuid(aItemId) {
-    let cached = this.guidsForIds.get(aItemId);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    let guid = await PlacesUtils.withConnectionWrapper(
-      "GuidHelper.getItemGuid",
-      async function(db) {
-        let rows = await db.executeCached(
-          "SELECT b.id, b.guid from moz_bookmarks b WHERE b.id = :id LIMIT 1",
-          { id: aItemId }
-        );
-        if (!rows.length) {
-          throw new Error("no item found for the given itemId");
-        }
-
-        return rows[0].getResultByName("guid");
-      }
-    );
-
-    this.updateCache(aItemId, guid);
-    return guid;
-  },
-
-  /**
-   * Updates the cache.
-   *
-   * @note This is the only place where the cache should be populated,
-   *       invalidation relies on both Maps being populated at the same time.
-   */
-  updateCache(aItemId, aGuid) {
-    if (typeof aItemId != "number" || aItemId <= 0) {
-      throw new Error(
-        "Trying to update the GUIDs cache with an invalid itemId"
-      );
-    }
-    if (!PlacesUtils.isValidGuid(aGuid)) {
-      throw new Error("Trying to update the GUIDs cache with an invalid GUID");
-    }
-    this.ensureObservingRemovedItems();
-    this.guidsForIds.set(aItemId, aGuid);
-    this.idsForGuids.set(aGuid, aItemId);
-  },
-
-  invalidateCacheForItemId(aItemId) {
-    let guid = this.guidsForIds.get(aItemId);
-    this.guidsForIds.delete(aItemId);
-    this.idsForGuids.delete(guid);
-  },
-
-  invalidateCache() {
-    this.guidsForIds.clear();
-    this.idsForGuids.clear();
-  },
-
-  ensureObservingRemovedItems() {
-    if (this.addListeners) {
-      return;
-    }
-    /**
-     * This observers serves two purposes:
-     * (1) Invalidate cached id<->GUID paris on when items are removed.
-     * (2) Cache GUIDs given us free of charge by onItemAdded/onItemRemoved.
-     *      So, for exmaple, when the NewBookmark needs the new GUID, we already
-     *      have it cached.
-     */
-    let listener = events => {
-      for (let event of events) {
-        switch (event.type) {
-          case "bookmark-added":
-            this.updateCache(event.id, event.guid);
-            this.updateCache(event.parentId, event.parentGuid);
-            break;
-          case "bookmark-removed":
-            this.guidsForIds.delete(event.id);
-            this.idsForGuids.delete(event.guid);
-            this.updateCache(event.parentId, event.parentGuid);
-            break;
-        }
-      }
-    };
-
-    this.addListeners = true;
-    PlacesUtils.observers.addListener(
-      ["bookmark-added", "bookmark-removed"],
-      listener
-    );
-    PlacesUtils.registerShutdownFunction(() => {
-      PlacesUtils.observers.removeListener(
-        ["bookmark-added", "bookmark-removed"],
-        listener
-      );
-    });
-  },
-};

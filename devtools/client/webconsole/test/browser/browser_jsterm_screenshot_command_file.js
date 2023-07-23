@@ -13,7 +13,7 @@ const TEST_URI =
 // to keep tests consistant across OSs we are setting the dpr to 1
 const dpr = "--dpr 1";
 
-add_task(async function() {
+add_task(async function () {
   const hud = await openNewTabAndConsole(TEST_URI);
 
   info("wait for the iframes to be loaded");
@@ -24,7 +24,9 @@ add_task(async function() {
   });
 
   info("Test :screenshot to file");
-  const file = FileUtils.getFile("TmpD", ["TestScreenshotFile.png"]);
+  const file = new FileUtils.File(
+    PathUtils.join(PathUtils.tempDir, "TestScreenshotFile.png")
+  );
   const command = `:screenshot ${file.path} ${dpr}`;
   await executeAndWaitForMessageByType(
     hud,
@@ -92,10 +94,7 @@ add_task(async function() {
   );
   const date = new Date();
   const monthString = (date.getMonth() + 1).toString().padStart(2, "0");
-  const dayString = date
-    .getDate()
-    .toString()
-    .padStart(2, "0");
+  const dayString = date.getDate().toString().padStart(2, "0");
   const expectedDateString = `${date.getFullYear()}-${monthString}-${dayString}`;
 
   let screenshotDir;
@@ -109,12 +108,10 @@ add_task(async function() {
     screenshotDir = await Downloads.getPreferredDownloadsDirectory();
   }
 
-  const {
-    renderedDate,
-    filePath,
-  } = /Saved to (?<filePath>.*Screen Shot (?<renderedDate>\d{4}-\d{2}-\d{2}) at \d{2}.\d{2}.\d{2}\.png)/.exec(
-    message.node.textContent
-  ).groups;
+  const { renderedDate, filePath } =
+    /Saved to (?<filePath>.*Screen Shot (?<renderedDate>\d{4}-\d{2}-\d{2}) at \d{2}.\d{2}.\d{2}\.png)/.exec(
+      message.node.textContent
+    ).groups;
   is(
     renderedDate,
     expectedDateString,

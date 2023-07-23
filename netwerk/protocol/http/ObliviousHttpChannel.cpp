@@ -374,8 +374,9 @@ ObliviousHttpChannel::GetEncodedBodySize(uint64_t* aEncodedBodySize) {
 
 NS_IMETHODIMP
 ObliviousHttpChannel::LogBlockedCORSRequest(const nsAString& aMessage,
-                                            const nsACString& aCategory) {
-  return mInnerChannel->LogBlockedCORSRequest(aMessage, aCategory);
+                                            const nsACString& aCategory,
+                                            bool aIsWarning) {
+  return mInnerChannel->LogBlockedCORSRequest(aMessage, aCategory, aIsWarning);
 }
 
 NS_IMETHODIMP
@@ -401,18 +402,6 @@ void ObliviousHttpChannel::SetConnectionInfo(nsHttpConnectionInfo* aCi) {
 void ObliviousHttpChannel::DoDiagnosticAssertWhenOnStopNotCalledOnDestroy() {
   if (mInnerChannelInternal) {
     mInnerChannelInternal->DoDiagnosticAssertWhenOnStopNotCalledOnDestroy();
-  }
-}
-
-void ObliviousHttpChannel::SetIPv6Disabled() {
-  if (mInnerChannelInternal) {
-    mInnerChannelInternal->SetIPv6Disabled();
-  }
-}
-
-void ObliviousHttpChannel::SetIPv4Disabled() {
-  if (mInnerChannelInternal) {
-    mInnerChannelInternal->SetIPv4Disabled();
   }
 }
 
@@ -670,9 +659,7 @@ ObliviousHttpChannel::OnDataAvailable(nsIRequest* aRequest,
       ("ObliviousHttpChannel::OnDataAvailable [this=%p, request=%p, stream=%p, "
        "offset=%" PRIu64 ", count=%u]",
        this, aRequest, aStream, aOffset, aCount));
-  if (aOffset != 0) {
-    return NS_ERROR_INVALID_ARG;
-  }
+  MOZ_ASSERT(aOffset == mRawResponse.Length());
   size_t oldLength = mRawResponse.Length();
   size_t newLength = oldLength + aCount;
   if (newLength < oldLength) {  // i.e., overflow

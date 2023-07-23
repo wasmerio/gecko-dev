@@ -11,6 +11,7 @@
  */
 
 var EXPORTED_SYMBOLS = [
+  "dumpn",
   "HTTP_400",
   "HTTP_401",
   "HTTP_402",
@@ -36,7 +37,11 @@ var EXPORTED_SYMBOLS = [
   "HTTP_505",
   "HttpError",
   "HttpServer",
+  "LineData",
   "NodeServer",
+  "nsHttpHeaders",
+  "overrideBinaryStreamsForTests",
+  "WriteThroughCopier",
 ];
 
 const CC = Components.Constructor;
@@ -49,8 +54,8 @@ var DEBUG = false; // non-const *only* so tweakable in server tests
 /** True if debugging output should be timestamped. */
 var DEBUG_TIMESTAMP = false; // non-const so tweakable in server tests
 
-const { AppConstants } = ChromeUtils.import(
-  "resource://gre/modules/AppConstants.jsm"
+const { AppConstants } = ChromeUtils.importESModule(
+  "resource://gre/modules/AppConstants.sys.mjs"
 );
 
 /**
@@ -68,7 +73,7 @@ function NS_ASSERT(cond, msg) {
     var stack = new Error().stack.split(/\n/);
     dumpn(
       stack
-        .map(function(val) {
+        .map(function (val) {
           return "###!!!   " + val;
         })
         .join("\n")
@@ -194,9 +199,6 @@ function dumpStack() {
   stack.forEach(dumpn);
 }
 
-/** The XPCOM thread manager. */
-var gThreadManager = null;
-
 /**
  * JavaScript constructors for commonly-used classes; precreating these is a
  * speedup over doing the same from base principles.  See the docs at
@@ -253,6 +255,16 @@ var BinaryOutputStream = CC(
   "nsIBinaryOutputStream",
   "setOutputStream"
 );
+
+function overrideBinaryStreamsForTests(
+  inputStream,
+  outputStream,
+  responseSegmentSize
+) {
+  BinaryInputStream = inputStream;
+  BinaryOutputStream = outputStream;
+  Response.SEGMENT_SIZE = responseSegmentSize;
+}
 
 /**
  * Returns the RFC 822/1123 representation of a date.
@@ -367,10 +379,6 @@ function printObj(o, showMembers) {
  * Instantiates a new HTTP server.
  */
 function nsHttpServer() {
-  if (!gThreadManager) {
-    gThreadManager = Cc["@mozilla.org/thread-manager;1"].getService();
-  }
-
   /** The port on which this server listens. */
   this._port = undefined;
 
@@ -457,7 +465,7 @@ nsHttpServer.prototype = {
       // Note: must use main thread here, or we might get a GC that will cause
       //       threadsafety assertions.  We really need to fix XPConnect so that
       //       you can actually do things in multi-threaded JS.  :-(
-      input.asyncWait(reader, 0, 0, gThreadManager.mainThread);
+      input.asyncWait(reader, 0, 0, Services.tm.mainThread);
     } catch (e) {
       // Assume this connection can't be salvaged and bail on it completely;
       // don't attempt to close it so that we can assert that any connection
@@ -504,7 +512,7 @@ nsHttpServer.prototype = {
           self._notifyStopped();
         },
       };
-      gThreadManager.currentThread.dispatch(
+      Services.tm.currentThread.dispatch(
         stopEvent,
         Ci.nsIThread.DISPATCH_NORMAL
       );
@@ -652,7 +660,7 @@ nsHttpServer.prototype = {
     this._stopCallback =
       typeof callback === "function"
         ? callback
-        : function() {
+        : function () {
             callback.onStopped();
           };
 
@@ -939,10 +947,11 @@ class NodeServer {
     const serverIP =
       AppConstants.platform == "android" ? "10.0.2.2" : "127.0.0.1";
     req.open("POST", `http://${serverIP}:${h2Port}${path}`);
+    req.channel.QueryInterface(Ci.nsIHttpChannelInternal).bypassProxy = true;
 
     // Passing a function to NodeServer.execute will define that function
     // in node. It can be called in a later execute command.
-    let isFunction = function(obj) {
+    let isFunction = function (obj) {
       return !!(obj && obj.constructor && obj.call && obj.apply);
     };
     let payload = command;
@@ -1352,7 +1361,7 @@ Connection.prototype = {
 
     // If an error triggered a server shutdown, act on it now
     if (server._doQuit) {
-      server.stop(function() {
+      server.stop(function () {
         /* not like we can do anything better */
       });
     }
@@ -1488,9 +1497,9 @@ RequestReader.prototype = {
       "*** onInputStreamReady(input=" +
         input +
         ") on thread " +
-        gThreadManager.currentThread +
+        Services.tm.currentThread +
         " (main is " +
-        gThreadManager.mainThread +
+        Services.tm.mainThread +
         ")"
     );
     dumpn("*** this._state == " + this._state);
@@ -1546,7 +1555,7 @@ RequestReader.prototype = {
     }
 
     if (this._state != READER_FINISHED) {
-      input.asyncWait(this, 0, 0, gThreadManager.currentThread);
+      input.asyncWait(this, 0, 0, Services.tm.currentThread);
     }
   },
 
@@ -2155,7 +2164,7 @@ LineData.prototype = {
  * Creates a request-handling function for an nsIHttpRequestHandler object.
  */
 function createHandlerFunc(handler) {
-  return function(metadata, response) {
+  return function (metadata, response) {
     handler.handle(metadata, response);
   };
 }
@@ -2233,7 +2242,8 @@ function defaultIndexHandler(metadata, response) {
     }
   }
 
-  body += "    </ol>\
+  body +=
+    "    </ol>\
                 </body>\
               </html>";
 
@@ -2613,7 +2623,7 @@ ServerHandler.prototype = {
     file = file.clone();
 
     var self = this;
-    this._overridePaths[path] = function(request, response) {
+    this._overridePaths[path] = function (request, response) {
       if (!file.exists()) {
         throw HTTP_404;
       }
@@ -2838,7 +2848,7 @@ ServerHandler.prototype = {
 
       if (start !== undefined && start >= file.fileSize) {
         var HTTP_416 = new HttpError(416, "Requested Range Not Satisfiable");
-        HTTP_416.customErrorHandling = function(errorResponse) {
+        HTTP_416.customErrorHandling = function (errorResponse) {
           maybeAddHeaders(file, metadata, errorResponse);
         };
         throw HTTP_416;
@@ -3017,8 +3027,8 @@ ServerHandler.prototype = {
         throw e;
       }
 
-      let writeMore = function() {
-        gThreadManager.currentThread.dispatch(
+      let writeMore = function () {
+        Services.tm.currentThread.dispatch(
           writeData,
           Ci.nsIThread.DISPATCH_NORMAL
         );
@@ -3540,7 +3550,7 @@ ServerHandler.prototype = {
    * Contains handlers for the default set of URIs contained in this server.
    */
   _defaultPaths: {
-    "/": function(metadata, response) {
+    "/": function (metadata, response) {
       response.setStatusLine(metadata.httpVersion, 200, "OK");
       response.setHeader("Content-Type", "text/html;charset=utf-8", false);
 
@@ -3558,7 +3568,7 @@ ServerHandler.prototype = {
       response.bodyOutputStream.write(body, body.length);
     },
 
-    "/trace": function(metadata, response) {
+    "/trace": function (metadata, response) {
       response.setStatusLine(metadata.httpVersion, 200, "OK");
       response.setHeader("Content-Type", "text/plain;charset=utf-8", false);
 
@@ -3582,8 +3592,9 @@ ServerHandler.prototype = {
 
       var headEnum = metadata.headers;
       while (headEnum.hasMoreElements()) {
-        var fieldName = headEnum.getNext().QueryInterface(Ci.nsISupportsString)
-          .data;
+        var fieldName = headEnum
+          .getNext()
+          .QueryInterface(Ci.nsISupportsString).data;
         body += fieldName + ": " + metadata.getHeader(fieldName) + "\r\n";
       }
 
@@ -4276,7 +4287,7 @@ Response.prototype = {
       // way to handle both cases without removing bodyOutputStream access and
       // moving its effective write(data, length) method onto Response, which
       // would be slower and require more code than this anyway.
-      gThreadManager.currentThread.dispatch(
+      Services.tm.currentThread.dispatch(
         {
           run() {
             dumpn("*** canceling copy asynchronously...");
@@ -4368,11 +4379,11 @@ Response.prototype = {
       // headers
       let headEnum = this._informationalResponseHeaders.enumerator;
       while (headEnum.hasMoreElements()) {
-        let fieldName = headEnum.getNext().QueryInterface(Ci.nsISupportsString)
-          .data;
-        let values = this._informationalResponseHeaders.getHeaderValues(
-          fieldName
-        );
+        let fieldName = headEnum
+          .getNext()
+          .QueryInterface(Ci.nsISupportsString).data;
+        let values =
+          this._informationalResponseHeaders.getHeaderValues(fieldName);
         for (let i = 0, sz = values.length; i < sz; i++) {
           preambleData.push(fieldName + ": " + values[i] + "\r\n");
         }
@@ -4425,8 +4436,9 @@ Response.prototype = {
     // headers
     var headEnum = headers.enumerator;
     while (headEnum.hasMoreElements()) {
-      var fieldName = headEnum.getNext().QueryInterface(Ci.nsISupportsString)
-        .data;
+      var fieldName = headEnum
+        .getNext()
+        .QueryInterface(Ci.nsISupportsString).data;
       var values = headers.getHeaderValues(fieldName);
       for (var i = 0, sz = values.length; i < sz; i++) {
         preambleData.push(fieldName + ": " + values[i] + "\r\n");
@@ -5015,7 +5027,7 @@ WriteThroughCopier.prototype = {
       },
     };
 
-    gThreadManager.currentThread.dispatch(event, Ci.nsIThread.DISPATCH_NORMAL);
+    Services.tm.currentThread.dispatch(event, Ci.nsIThread.DISPATCH_NORMAL);
   },
 
   /**
@@ -5027,7 +5039,7 @@ WriteThroughCopier.prototype = {
       this,
       0,
       Response.SEGMENT_SIZE,
-      gThreadManager.mainThread
+      Services.tm.mainThread
     );
   },
 
@@ -5045,7 +5057,7 @@ WriteThroughCopier.prototype = {
       this,
       0,
       pendingData[0].length,
-      gThreadManager.mainThread
+      Services.tm.mainThread
     );
   },
 
@@ -5067,7 +5079,7 @@ WriteThroughCopier.prototype = {
       this,
       Ci.nsIAsyncOutputStream.WAIT_CLOSURE_ONLY,
       0,
-      gThreadManager.mainThread
+      Services.tm.mainThread
     );
   },
 
@@ -5632,7 +5644,7 @@ function server(port, basePath) {
   srv.identity.setPrimary("http", "localhost", port);
   srv.start(port);
 
-  var thread = gThreadManager.currentThread;
+  var thread = Services.tm.currentThread;
   while (!srv.isStopped()) {
     thread.processNextEvent(true);
   }

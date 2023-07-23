@@ -650,15 +650,19 @@ def config_sub(shell, triplet):
     # Config.sub doesn't like the *-windows-msvc/*-windows-gnu triplets, so
     # munge those before and after calling config.sub.
     suffix = None
-    mingw_suffix = "-mingw32"
-    for check_suffix in ("-windows-msvc", "-windows-gnu"):
+    munging = {
+        "-windows-msvc": "-mingw32",
+        "-windows-gnu": "-mingw32",
+    }
+    for check_suffix, replacement in munging.items():
         if triplet.endswith(check_suffix):
             suffix = check_suffix
-            triplet = triplet[: -len(suffix)] + mingw_suffix
+            triplet = triplet[: -len(suffix)] + replacement
+            break
     result = check_cmd_output(shell, config_sub, triplet).strip()
     if suffix:
-        assert result.endswith(mingw_suffix)
-        result = result[: -len(mingw_suffix)] + suffix
+        assert result.endswith(replacement)
+        result = result[: -len(replacement)] + suffix
     return result
 
 
@@ -821,7 +825,8 @@ set_config("CPU_ARCH", target.cpu)
 add_old_configure_assignment("CPU_ARCH", target.cpu)
 set_config("INTEL_ARCHITECTURE", target_variables.INTEL_ARCHITECTURE)
 set_config("TARGET_CPU", target.raw_cpu)
-set_config("TARGET_OS", target.raw_os)
+set_config("TARGET_OS", target.os)
+set_config("TARGET_RAW_OS", target.raw_os)
 set_config("TARGET_ENDIANNESS", target.endianness)
 
 
@@ -1171,6 +1176,7 @@ set_config("MOZ_APP_VERSION", milestone.app_version)
 set_config("MOZ_APP_VERSION_DISPLAY", milestone.app_version_display)
 add_old_configure_assignment("MOZ_APP_VERSION", milestone.app_version)
 
+add_old_configure_assignment("NIGHTLY_BUILD", milestone.is_nightly)
 
 # The app update channel is 'default' when not supplied. The value is used in
 # the application's confvars.sh (and is made available to a project specific
@@ -1226,36 +1232,6 @@ def mozillabuild_bin_paths(mozillabuild, shell, host_is_windows):
 @imports("os")
 def prefer_mozillabuild_path(mozillabuild_bin_paths):
     return mozillabuild_bin_paths + os.environ["PATH"].split(os.pathsep)
-
-
-# A template providing a shorthand for setting a variable. The created
-# option will only be settable with imply_option.
-# It is expected that a project-specific moz.configure will call imply_option
-# to set a value other than the default.
-# If required, the set_as_define and set_for_old_configure arguments
-# will additionally cause the variable to be set using set_define and
-# add_old_configure_assignment. util.configure would be an appropriate place for
-# this, but it uses add_old_configure_assignment, which is defined in this file.
-@template
-def project_flag(env=None, set_for_old_configure=False, set_as_define=False, **kwargs):
-
-    if not env:
-        configure_error("A project_flag must be passed a variable name to set.")
-
-    opt = option(env=env, possible_origins=("implied",), **kwargs)
-
-    @depends(opt.option)
-    def option_implementation(value):
-        if value:
-            if len(value):
-                return value
-            return bool(value)
-
-    set_config(env, option_implementation)
-    if set_as_define:
-        set_define(env, option_implementation)
-    if set_for_old_configure:
-        add_old_configure_assignment(env, option_implementation)
 
 
 # milestone.is_nightly corresponds to cases NIGHTLY_BUILD is set.

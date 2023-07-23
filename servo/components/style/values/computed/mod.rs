@@ -20,7 +20,7 @@ use crate::font_metrics::{FontMetrics, FontMetricsOrientation};
 use crate::media_queries::Device;
 #[cfg(feature = "gecko")]
 use crate::properties;
-use crate::properties::{ComputedValues, LonghandId, StyleBuilder};
+use crate::properties::{ComputedValues, StyleBuilder};
 use crate::rule_cache::RuleCacheConditions;
 use crate::stylesheets::container_rule::{
     ContainerInfo, ContainerSizeQuery, ContainerSizeQueryResult,
@@ -42,22 +42,21 @@ pub use self::align::{
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignSelf, JustifySelf};
 pub use self::angle::Angle;
+pub use self::animation::{AnimationIterationCount, AnimationName, AnimationTimeline};
+pub use self::animation::{ScrollAxis, ScrollTimelineName, TransitionProperty, ViewTimelineInset};
 pub use self::background::{BackgroundRepeat, BackgroundSize};
 pub use self::basic_shape::FillRule;
-pub use self::border::{BorderCornerRadius, BorderRadius, BorderSpacing};
-pub use self::border::{BorderImageRepeat, BorderImageSideWidth};
-pub use self::border::{BorderImageSlice, BorderImageWidth};
-pub use self::box_::{
-    Appearance, BreakBetween, BreakWithin, Clear, ContainIntrinsicSize, ContentVisibility, Float,
+pub use self::border::{
+    BorderCornerRadius, BorderImageRepeat, BorderImageSideWidth, BorderImageSlice,
+    BorderImageWidth, BorderRadius, BorderSideWidth, BorderSpacing, LineWidth,
 };
 pub use self::box_::{
-    Contain, ContainerName, ContainerType, Display, LineClamp, Overflow, OverflowAnchor,
+    Appearance, BaselineSource, BreakBetween, BreakWithin, Clear, Contain, ContainIntrinsicSize,
+    ContainerName, ContainerType, ContentVisibility, Display, Float, LineClamp, Overflow,
+    OverflowAnchor, OverflowClipBox, OverscrollBehavior, Perspective, Resize, ScrollSnapAlign,
+    ScrollSnapAxis, ScrollSnapStop, ScrollSnapStrictness, ScrollSnapType, ScrollbarGutter,
+    TouchAction, VerticalAlign, WillChange,
 };
-pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective, Resize, ScrollbarGutter};
-pub use self::box_::{
-    ScrollSnapAlign, ScrollSnapAxis, ScrollSnapStop, ScrollSnapStrictness, ScrollSnapType,
-};
-pub use self::box_::{TouchAction, VerticalAlign, WillChange};
 pub use self::color::{
     Color, ColorOrAuto, ColorPropertyValue, ColorScheme, ForcedColorAdjust, PrintColorAdjust,
 };
@@ -80,7 +79,7 @@ pub use self::length::{NonNegativeLengthPercentage, NonNegativeLengthPercentageO
 #[cfg(feature = "gecko")]
 pub use self::list::ListStyleType;
 pub use self::list::Quotes;
-pub use self::motion::{OffsetPath, OffsetRotate};
+pub use self::motion::{OffsetPath, OffsetPosition, OffsetRotate};
 pub use self::outline::OutlineStyle;
 pub use self::page::{PageName, PageOrientation, PageSize, PageSizeOrientation, PaperSize};
 pub use self::percentage::{NonNegativePercentage, Percentage};
@@ -106,8 +105,6 @@ pub use self::transform::{TransformOrigin, TransformStyle, Translate};
 #[cfg(feature = "gecko")]
 pub use self::ui::CursorImage;
 pub use self::ui::{BoolInteger, Cursor, UserSelect};
-pub use self::animation::{AnimationIterationCount, AnimationName, AnimationTimeline};
-pub use self::animation::{ScrollAxis, ScrollTimelineName, TransitionProperty, ViewTimelineInset};
 pub use super::specified::TextTransform;
 pub use super::specified::ViewportVariant;
 pub use super::specified::{BorderStyle, TextDecorationLine};
@@ -188,11 +185,10 @@ pub struct Context<'a> {
     /// Returns the container information to evaluate a given container query.
     pub container_info: Option<ContainerInfo>,
 
-    /// The property we are computing a value for, if it is a non-inherited
-    /// property.  None if we are computed a value for an inherited property
-    /// or not computing for a property at all (e.g. in a media query
-    /// evaluation).
-    pub for_non_inherited_property: Option<LonghandId>,
+    /// Whether we're computing a value for a non-inherited property.
+    /// False if we are computed a value for an inherited property or not computing for a property
+    /// at all (e.g. in a media query evaluation).
+    pub for_non_inherited_property: bool,
 
     /// The conditions to cache a rule node on the rule cache.
     ///
@@ -226,7 +222,7 @@ impl<'a> Context<'a> {
             quirks_mode,
             for_smil_animation: false,
             container_info: None,
-            for_non_inherited_property: None,
+            for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(&mut conditions),
             container_size_query: RefCell::new(ContainerSizeQuery::none()),
         };
@@ -261,7 +257,7 @@ impl<'a> Context<'a> {
             quirks_mode,
             for_smil_animation: false,
             container_info,
-            for_non_inherited_property: None,
+            for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(&mut conditions),
             container_size_query: RefCell::new(container_size_query),
         };
@@ -284,7 +280,7 @@ impl<'a> Context<'a> {
             quirks_mode,
             container_info: None,
             for_smil_animation: false,
-            for_non_inherited_property: None,
+            for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(rule_cache_conditions),
             container_size_query: RefCell::new(container_size_query),
         }
@@ -306,7 +302,7 @@ impl<'a> Context<'a> {
             quirks_mode,
             container_info: None,
             for_smil_animation,
-            for_non_inherited_property: None,
+            for_non_inherited_property: false,
             rule_cache_conditions: RefCell::new(rule_cache_conditions),
             container_size_query: RefCell::new(container_size_query),
         }
@@ -324,7 +320,7 @@ impl<'a> Context<'a> {
         orientation: FontMetricsOrientation,
         retrieve_math_scales: bool,
     ) -> FontMetrics {
-        if self.for_non_inherited_property.is_some() {
+        if self.for_non_inherited_property {
             self.rule_cache_conditions.borrow_mut().set_uncacheable();
         }
         self.builder.add_flags(match base_size {
@@ -390,7 +386,12 @@ impl<'a> Context<'a> {
     /// Apply text-zoom if enabled.
     #[cfg(feature = "gecko")]
     pub fn maybe_zoom_text(&self, size: CSSPixelLength) -> CSSPixelLength {
-        if self.style().get_font().clone__x_text_scale().text_zoom_enabled() {
+        if self
+            .style()
+            .get_font()
+            .clone__x_text_scale()
+            .text_zoom_enabled()
+        {
             self.device().zoom_text(size)
         } else {
             size

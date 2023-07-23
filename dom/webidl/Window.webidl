@@ -25,15 +25,11 @@ interface XULControllers;
 interface nsIDOMWindowUtils;
 interface nsIPrintSettings;
 
-typedef OfflineResourceList ApplicationCache;
-
 // http://www.whatwg.org/specs/web-apps/current-work/
 [Global, LegacyUnenumerableNamedProperties, NeedResolve,
  Exposed=Window,
  InstrumentedProps=(AbsoluteOrientationSensor,
                     Accelerometer,
-                    ApplicationCache,
-                    ApplicationCacheErrorEvent,
                     Atomics,
                     AudioParamMap,
                     AudioWorklet,
@@ -248,7 +244,6 @@ typedef OfflineResourceList ApplicationCache;
   readonly attribute Navigator clientInformation;
 
   [Replaceable] readonly attribute External external;
-  [Throws, SecureContext, Pref="browser.cache.offline.enable"] readonly attribute ApplicationCache applicationCache;
 
   // user prompts
   [Throws, NeedsSubjectPrincipal] undefined alert();
@@ -341,15 +336,8 @@ partial interface Window {
   [Throws, NeedsCallerType] undefined resizeBy(long x, long y);
 
   // viewport
-  // These are writable because we allow chrome to write them.  And they need
-  // to use 'any' as the type, because non-chrome writing them needs to act
-  // like a [Replaceable] attribute would, which needs the original JS value.
-  // TODO: These can be updated to follow the spec exactly a while after we
-  // enable dom.window_position_size_properties_replaceable.enabled=true
-  //[Replaceable, Throws] readonly attribute double innerWidth;
-  //[Replaceable, Throws] readonly attribute double innerHeight;
-  [Throws, NeedsCallerType] attribute any innerWidth;
-  [Throws, NeedsCallerType] attribute any innerHeight;
+  [Replaceable, Throws] readonly attribute double innerWidth;
+  [Replaceable, Throws] readonly attribute double innerHeight;
 
   // viewport scrolling
   undefined scroll(unrestricted double x, unrestricted double y);
@@ -375,19 +363,10 @@ partial interface Window {
   [Replaceable, Throws, NeedsCallerType] readonly attribute double screenTop;
 
   // client
-  // These are writable because we allow chrome to write them.  And they need
-  // to use 'any' as the type, because non-chrome writing them needs to act
-  // like a [Replaceable] attribute would, which needs the original JS value.
-  // TODO: These can be updated to follow the spec exactly a while after we
-  // enable dom.window_position_size_properties_replaceable.enabled=true
-  //[Replaceable, Throws] readonly attribute double screenX;
-  //[Replaceable, Throws] readonly attribute double screenY;
-  //[Replaceable, Throws] readonly attribute double outerWidth;
-  //[Replaceable, Throws] readonly attribute double outerHeight;
-  [Throws, NeedsCallerType] attribute any screenX;
-  [Throws, NeedsCallerType] attribute any screenY;
-  [Throws, NeedsCallerType] attribute any outerWidth;
-  [Throws, NeedsCallerType] attribute any outerHeight;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double screenX;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double screenY;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double outerWidth;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double outerHeight;
 };
 
 // https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#animation-frames
@@ -442,7 +421,6 @@ partial interface Window {
    */
   [Throws, ChromeOnly] undefined sizeToContentConstrained(optional SizeToContentConstraints constraints = {});
 
-  // XXX Shouldn't this be in nsIDOMChromeWindow?
   [ChromeOnly, Replaceable, Throws] readonly attribute XULControllers controllers;
 
   [ChromeOnly, Throws] readonly attribute Element? realFrameElement;
@@ -464,6 +442,16 @@ partial interface Window {
   [ChromeOnly, Throws]
   readonly attribute double desktopToDeviceScale;
 
+  // Returns the amount of CSS pixels relative to this window we're allowed to
+  // go out of the screen. This is needed so that SessionRestore is able to
+  // position windows that use client-side decorations correctly, but still
+  // pull mispositioned windows into the screen.
+  [ChromeOnly]
+  readonly attribute double screenEdgeSlopX;
+  [ChromeOnly]
+  readonly attribute double screenEdgeSlopY;
+
+
   /* The maximum offset that the window can be scrolled to
      (i.e., the document width/height minus the scrollport width/height) */
   [ChromeOnly, Throws]  readonly attribute long   scrollMinX;
@@ -473,7 +461,6 @@ partial interface Window {
 
   [Throws] attribute boolean fullScreen;
 
-  // XXX Should this be in nsIDOMChromeWindow?
   undefined                 updateCommands(DOMString action,
                                            optional Selection? sel = null,
                                            optional short reason = 0);

@@ -244,7 +244,7 @@ nsresult HTMLEditor::SetInlinePropertiesAsSubAction(
   }
 
   // XXX Shouldn't we return before calling `CommitComposition()`?
-  if (IsInPlaintextMode()) {
+  if (IsPlaintextMailComposer()) {
     return NS_OK;
   }
 
@@ -644,7 +644,7 @@ HTMLEditor::AutoInlineStyleSetter::ElementIsGoodContainerForTheStyle(
       nsString attrValue;
       if (aElement.IsHTMLElement(&HTMLPropertyRef()) &&
           !HTMLEditUtils::ElementHasAttributeExcept(aElement, *mAttribute) &&
-          aElement.GetAttr(kNameSpaceID_None, mAttribute, attrValue)) {
+          aElement.GetAttr(mAttribute, attrValue)) {
         if (attrValue.Equals(mAttributeValue,
                              nsCaseInsensitiveStringComparator)) {
           return true;
@@ -674,7 +674,7 @@ HTMLEditor::AutoInlineStyleSetter::ElementIsGoodContainerForTheStyle(
   // attribute that sets only the style we're looking for, if this type of
   // style supports it
   if (!aElement.IsHTMLElement(nsGkAtoms::span) ||
-      !aElement.HasAttr(kNameSpaceID_None, nsGkAtoms::style) ||
+      !aElement.HasAttr(nsGkAtoms::style) ||
       HTMLEditUtils::ElementHasAttributeExcept(aElement, *nsGkAtoms::style)) {
     return false;
   }
@@ -2279,6 +2279,7 @@ Result<EditorDOMPoint, nsresult> HTMLEditor::ClearStyleAt(
   //       `<p><b><i>a[]bc</i></b></p>`, we want to make it as
   //       `<p><b><i>a</i></b><b><i>bc</i></b></p>`.
   EditorDOMPoint pointToPutCaret(aPoint);
+  AutoTrackDOMPoint trackPointToPutCaret(RangeUpdaterRef(), &pointToPutCaret);
   Result<SplitNodeResult, nsresult> splitNodeResult =
       SplitAncestorStyledInlineElementsAt(
           aPoint, aStyleToRemove, SplitAtEdges::eAllowToCreateEmptyContainer);
@@ -2286,6 +2287,7 @@ Result<EditorDOMPoint, nsresult> HTMLEditor::ClearStyleAt(
     NS_WARNING("HTMLEditor::SplitAncestorStyledInlineElementsAt() failed");
     return splitNodeResult.propagateErr();
   }
+  trackPointToPutCaret.FlushAndStopTracking();
   SplitNodeResult unwrappedSplitNodeResult = splitNodeResult.unwrap();
   unwrappedSplitNodeResult.MoveCaretPointTo(
       pointToPutCaret, *this,
@@ -2358,6 +2360,7 @@ Result<EditorDOMPoint, nsresult> HTMLEditor::ClearStyleAt(
     }
     atStartOfNextNode.Set(atStartOfNextNode.GetContainerParent(), 0);
   }
+  AutoTrackDOMPoint trackPointToPutCaret2(RangeUpdaterRef(), &pointToPutCaret);
   Result<SplitNodeResult, nsresult> splitResultAtStartOfNextNode =
       SplitAncestorStyledInlineElementsAt(
           atStartOfNextNode, aStyleToRemove,
@@ -2366,6 +2369,7 @@ Result<EditorDOMPoint, nsresult> HTMLEditor::ClearStyleAt(
     NS_WARNING("HTMLEditor::SplitAncestorStyledInlineElementsAt() failed");
     return splitResultAtStartOfNextNode.propagateErr();
   }
+  trackPointToPutCaret2.FlushAndStopTracking();
   SplitNodeResult unwrappedSplitResultAtStartOfNextNode =
       splitResultAtStartOfNextNode.unwrap();
   unwrappedSplitResultAtStartOfNextNode.MoveCaretPointTo(
@@ -3309,7 +3313,7 @@ nsresult HTMLEditor::RemoveInlinePropertiesAsSubAction(
   }
 
   // XXX Shouldn't we quit before calling `CommitComposition()`?
-  if (IsInPlaintextMode()) {
+  if (IsPlaintextMailComposer()) {
     return NS_OK;
   }
 
@@ -4131,7 +4135,7 @@ Result<EditorDOMPoint, nsresult> HTMLEditor::SetFontSizeOfFontElementChildren(
 
   // If this is a font node with size, put big/small inside it.
   if (aContent.IsHTMLElement(nsGkAtoms::font) &&
-      aContent.AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::size)) {
+      aContent.AsElement()->HasAttr(nsGkAtoms::size)) {
     EditorDOMPoint pointToPutCaret;
 
     // Cycle through children and adjust relative font size.

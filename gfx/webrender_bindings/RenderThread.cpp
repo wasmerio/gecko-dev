@@ -50,9 +50,6 @@
 
 #ifdef MOZ_WIDGET_GTK
 #  include "mozilla/WidgetUtilsGtk.h"
-#endif
-
-#ifdef MOZ_WAYLAND
 #  include "GLLibraryEGL.h"
 #endif
 
@@ -604,13 +601,11 @@ void RenderThread::HandleFrameOneDocInner(wr::WindowId aWindowId, bool aRender,
 
     WindowInfo* info = it->second.get();
     PendingFrameInfo& frameInfo = info->mPendingFrames.front();
-    frameInfo.mFrameNeedsRender |= aRender;
-    render = frameInfo.mFrameNeedsRender;
 
     frame = frameInfo;
   } else {
     // Just give the frame info default values.
-    frame = {TimeStamp::Now(), VsyncId(), aRender};
+    frame = {TimeStamp::Now(), VsyncId()};
   }
 
   // Sadly this doesn't include the lock, since we don't have the frame there
@@ -925,8 +920,7 @@ void RenderThread::IncPendingFrameCount(wr::WindowId aWindowId,
     return;
   }
   it->second->mPendingFrameBuild++;
-  it->second->mPendingFrames.push(
-      PendingFrameInfo{aStartTime, aStartId, false});
+  it->second->mPendingFrames.push(PendingFrameInfo{aStartTime, aStartId});
 }
 
 void RenderThread::DecPendingFrameBuildCount(wr::WindowId aWindowId) {
@@ -1537,7 +1531,7 @@ static already_AddRefed<gl::GLContext> CreateGLContextANGLE(
 }
 #endif
 
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WAYLAND) || defined(MOZ_X11)
+#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK)
 static already_AddRefed<gl::GLContext> CreateGLContextEGL() {
   // Create GLContext with dummy EGLSurface.
   bool forHardwareWebRender = true;
@@ -1576,7 +1570,7 @@ static already_AddRefed<gl::GLContext> CreateGLContext(nsACString& aError) {
   }
 #elif defined(MOZ_WIDGET_ANDROID)
   gl = CreateGLContextEGL();
-#elif defined(MOZ_WAYLAND) || defined(MOZ_X11)
+#elif defined(MOZ_WIDGET_GTK)
   if (gfx::gfxVars::UseEGL()) {
     gl = CreateGLContextEGL();
   }

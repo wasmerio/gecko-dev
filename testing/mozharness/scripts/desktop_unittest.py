@@ -50,7 +50,7 @@ SUITE_CATEGORIES = [
 ]
 SUITE_DEFAULT_E10S = ["mochitest", "reftest"]
 SUITE_NO_E10S = ["xpcshell"]
-SUITE_REPEATABLE = ["mochitest", "reftest"]
+SUITE_REPEATABLE = ["mochitest", "reftest", "xpcshell"]
 
 
 # DesktopUnittest {{{1
@@ -329,6 +329,15 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                     "default": False,
                     "dest": "useHttp3Server",
                     "help": "Whether to use the Http3 server",
+                },
+            ],
+            [
+                ["--use-http2-server"],
+                {
+                    "action": "store_true",
+                    "default": False,
+                    "dest": "useHttp2Server",
+                    "help": "Whether to use the Http2 server",
                 },
             ],
         ]
@@ -632,6 +641,8 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
 
             if c["useHttp3Server"]:
                 base_cmd.append("--use-http3-server")
+            elif c["useHttp2Server"]:
+                base_cmd.append("--use-http2-server")
 
             # Ignore chunking if we have user specified test paths
             if not (self.verify_enabled or self.per_test_coverage):
@@ -665,6 +676,11 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
 
             if c["enable_xorigin_tests"]:
                 base_cmd.append("--enable-xorigin-tests")
+
+            if suite_category not in ["cppunittest", "gtest", "jittest"]:
+                # Enable stylo threads everywhere we can. Some tests don't
+                # support --setpref, so ignore those.
+                base_cmd.append("--setpref=layout.css.stylo-threads=4")
 
             if c["extra_prefs"]:
                 base_cmd.extend(["--setpref={}".format(p) for p in c["extra_prefs"]])
@@ -1182,8 +1198,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
 
                 if self.config["allow_software_gl_layers"]:
                     env["MOZ_LAYERS_ALLOW_SOFTWARE_GL"] = "1"
-
-                env["STYLO_THREADS"] = "4"
 
                 env = self.query_env(partial_env=env, log_level=INFO)
                 cmd_timeout = self.get_timeout_for_category(suite_category)

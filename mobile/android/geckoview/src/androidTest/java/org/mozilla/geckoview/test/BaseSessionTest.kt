@@ -48,6 +48,8 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         const val FORMS_AUTOCOMPLETE_HTML_PATH = "/assets/www/forms_autocomplete.html"
         const val FORMS_ID_VALUE_HTML_PATH = "/assets/www/forms_id_value.html"
         const val CC_FORM_HTML_PATH = "/assets/www/cc_form.html"
+        const val FEDCM_RP_HTML_PATH = "/assets/www/fedcm_rp.html"
+        const val FEDCM_IDP_MANIFEST_PATH = "/assets/www/fedcm_ipd_manifest.json"
         const val HELLO_HTML_PATH = "/assets/www/hello.html"
         const val HELLO2_HTML_PATH = "/assets/www/hello2.html"
         const val HELLO_IFRAME_HTML_PATH = "/assets/www/iframe_hello.html"
@@ -92,6 +94,7 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         const val IFRAME_UNKNOWN_PROTOCOL = "/assets/www/iframe_unknown_protocol.html"
         const val MEDIA_SESSION_DOM1_PATH = "/assets/www/media_session_dom1.html"
         const val MEDIA_SESSION_DEFAULT1_PATH = "/assets/www/media_session_default1.html"
+        const val PULL_TO_REFRESH_SUBFRAME_PATH = "/assets/www/pull-to-refresh-subframe.html"
         const val TOUCH_HTML_PATH = "/assets/www/touch.html"
         const val TOUCH_XORIGIN_HTML_PATH = "/assets/www/touch_xorigin.html"
         const val GETUSERMEDIA_XORIGIN_CONTAINER_HTML_PATH = "/assets/www/getusermedia_xorigin_container.html"
@@ -182,7 +185,7 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
             assertThat(
                 "Read parcel matches written parcel",
                 parcel.dataPosition(),
-                Matchers.equalTo(pos)
+                Matchers.equalTo(pos),
             )
         } finally {
             parcel.recycle()
@@ -240,14 +243,14 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         // Create a Promise to listen to the key event, and wait on it below.
         val promise = this.evaluatePromiseJS(
             """new Promise(r => window.addEventListener(
-                    'keyup', r, { once: true }))"""
+                    'keyup', r, { once: true }))""",
         )
         val time = SystemClock.uptimeMillis()
         val keyEvent = KeyEvent(time, time, KeyEvent.ACTION_DOWN, keyCode, 0)
         this.textInput.onKeyDown(keyCode, keyEvent)
         this.textInput.onKeyUp(
             keyCode,
-            KeyEvent.changeAction(keyEvent, KeyEvent.ACTION_UP)
+            KeyEvent.changeAction(keyEvent, KeyEvent.ACTION_UP),
         )
         promise.value
     }

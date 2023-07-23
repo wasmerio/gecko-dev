@@ -42,7 +42,7 @@ httpServer.registerPathHandler("/test.js", (request, response) => {
   response.write(testSourceContent);
 });
 
-add_task(async function() {
+add_task(async function () {
   const dbg = await initDebuggerWithAbsoluteURL(
     BASE_URL + "index.html",
     "test.js"
@@ -71,7 +71,9 @@ add_task(async function() {
   info("Select test.js tree node, and add override");
   const MockFilePicker = SpecialPowers.MockFilePicker;
   MockFilePicker.init(window);
-  const nsiFile = FileUtils.getFile("TmpD", [`test.js`]);
+  const nsiFile = new FileUtils.File(
+    PathUtils.join(PathUtils.tempDir, "test.js")
+  );
   MockFilePicker.setFiles([nsiFile]);
   const path = nsiFile.path;
 

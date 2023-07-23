@@ -35,7 +35,7 @@ includes = ["mozilla/ServoStyleConstsForwards.h", "mozilla/ServoStyleSet.h"]
 [parse]
 parse_deps = true
 extra_bindings = ["style"]
-include = ["style", "cssparser", "style_traits", "servo_arc"]
+include = ["style", "app_units", "cssparser", "style_traits", "servo_arc"]
 
 [struct]
 associated_constants_in_body = true
@@ -79,6 +79,7 @@ include = [
   "AnimationTimeline",
   "AnimationIterationCount",
   "Appearance",
+  "Au",
   "BreakBetween",
   "BreakWithin",
   "BorderStyle",
@@ -112,7 +113,10 @@ include = [
   "FontFamilyNameSyntax",
   "OverflowWrap",
   "OffsetPath",
+  "OffsetPathFunction",
+  "OffsetPosition",
   "OffsetRotate",
+  "RayFunction",
   "UnicodeRange",
   "UserSelect",
   "Float",
@@ -149,6 +153,7 @@ include = [
   "Position",
   "PositionOrAuto",
   "BackgroundSize",
+  "BaselineSource",
   "BorderImageSlice",
   "BorderSpacing",
   "BorderRadius",
@@ -339,16 +344,13 @@ renaming_overrides_prefixing = true
 
 "GenericCalcNode" = """
  private:
-
-  template <typename ResultT, typename PercentageConverter>
-  ResultT ResolveInternal(ResultT aPercentageBasis,
-                          PercentageConverter aPercentageConverter) const;
+  CSSCoord ResolveInternal(CSSCoord aPercentageBasis) const;
 
  public:
   CSSCoord ResolveToCSSPixels(CSSCoord aPercentageBasis) const;
 
-  using CoordPercentageRounder = nscoord(*)(float);
-  nscoord Resolve(nscoord aBasis, CoordPercentageRounder) const;
+  using CoordRounder = nscoord(*)(float);
+  nscoord Resolve(nscoord aBasis, CoordRounder) const;
 
   void ScaleLengthsBy(float);
 """
@@ -408,9 +410,9 @@ renaming_overrides_prefixing = true
   inline CSSCoord ResolveToCSSPixels(CSSCoord aPercentageBasisInCSSPixels) const;
   template<typename T> inline CSSCoord ResolveToCSSPixelsWith(T aPercentageGetter) const;
   template<typename T, typename U>
-  inline nscoord Resolve(T aPercentageGetter, U aPercentRoundingFunction) const;
+  inline nscoord Resolve(T aPercentageGetter, U aRoundingFunction) const;
   template<typename T>
-  inline nscoord Resolve(nscoord aPercentageBasis, T aPercentRoundingFunction) const;
+  inline nscoord Resolve(nscoord aPercentageBasis, T aRoundingFunction) const;
   template<typename T> inline nscoord Resolve(T aPercentageGetter) const;
   inline nscoord Resolve(nscoord aPercentageBasis) const;
 """
@@ -484,6 +486,10 @@ renaming_overrides_prefixing = true
   inline T& GetBStart(WritingMode);
   inline T& GetIEnd(WritingMode);
   inline T& GetBEnd(WritingMode);
+
+  static StyleRect WithAllSides(const T& aSide) {
+    return {aSide, aSide, aSide, aSide};
+  }
 """
 
 "GenericBorderRadius" = """
@@ -968,5 +974,31 @@ renaming_overrides_prefixing = true
 "FontPalette" = """
   inline static StyleFontPalette Normal() {
     return StyleFontPalette{StyleAtom(nsGkAtoms::normal->ToAddRefed())};
+  }
+"""
+
+"GenericOffsetPath" = """
+  // Return true if the <offset-path> is ray().
+  bool IsRay() const {
+    return IsOffsetPath() && AsOffsetPath().path->IsRay();
+  }
+
+  const StyleRayFunction& AsRay() const {
+    return AsOffsetPath().path->AsRay();
+  }
+
+  // Return true if the <basic-shape> is path().
+  bool IsPath() const {
+    return IsOffsetPath() && AsOffsetPath().path->IsShape() &&
+           AsOffsetPath().path->AsShape().IsPath();
+  }
+
+  const StyleSVGPathData& AsSVGPathData() const {
+    return AsOffsetPath().path->AsShape().AsPath().path;
+  }
+
+  // Return true if this is "<basic-shape> || <coord-box>".
+  bool IsBasicShapeOrCoordBox() const {
+    return IsCoordBox() || (IsOffsetPath() && AsOffsetPath().path->IsShape());
   }
 """

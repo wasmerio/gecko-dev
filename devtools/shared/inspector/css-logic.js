@@ -83,7 +83,7 @@ exports.CSSAtRuleClassNameType = {
  * @param {CSSRule} cssRule
  * @returns {String}
  */
-exports.getCSSAtRuleTypeName = function(cssRule) {
+exports.getCSSAtRuleTypeName = function (cssRule) {
   const ruleClassName = ChromeUtils.getClassName(cssRule);
   const atRuleTypeName = exports.CSSAtRuleClassNameType[ruleClassName];
   if (atRuleTypeName) {
@@ -109,7 +109,7 @@ exports.l10n = name => styleInspectorL10N.getStr(name);
  * @return {boolean} true if the given stylesheet is an author stylesheet,
  * false otherwise.
  */
-exports.isAuthorStylesheet = function(sheet) {
+exports.isAuthorStylesheet = function (sheet) {
   return sheet.parsingMode === "author";
 };
 
@@ -120,7 +120,7 @@ exports.isAuthorStylesheet = function(sheet) {
  * @return {boolean} true if the given stylesheet is a user stylesheet,
  * false otherwise.
  */
-exports.isUserStylesheet = function(sheet) {
+exports.isUserStylesheet = function (sheet) {
   return sheet.parsingMode === "user";
 };
 
@@ -131,7 +131,7 @@ exports.isUserStylesheet = function(sheet) {
  * @return {boolean} true if the given stylesheet is a agent stylesheet,
  * false otherwise.
  */
-exports.isAgentStylesheet = function(sheet) {
+exports.isAgentStylesheet = function (sheet) {
   return sheet.parsingMode === "agent";
 };
 
@@ -140,7 +140,7 @@ exports.isAgentStylesheet = function(sheet) {
  *
  * @param {CSSStyleSheet} sheet the DOM object for the style sheet.
  */
-exports.shortSource = function(sheet) {
+exports.shortSource = function (sheet) {
   if (!sheet) {
     return exports.l10n("rule.sourceInline");
   }
@@ -187,7 +187,7 @@ exports.shortSource = function(sheet) {
  *
  * @param {CSSStyleSheet} sheet the DOM object for the style sheet.
  */
-exports.longSource = function(sheet) {
+exports.longSource = function (sheet) {
   if (!sheet) {
     return exports.l10n("rule.sourceInline");
   }
@@ -252,10 +252,7 @@ function prettifyCSS(text, ruleCount) {
   // before and after). Remove those first. Don't do anything there aren't any.
   const trimmed = text.trim();
   if (trimmed.startsWith("<!--")) {
-    text = trimmed
-      .replace(/^<!--/, "")
-      .replace(/-->$/, "")
-      .trim();
+    text = trimmed.replace(/^<!--/, "").replace(/-->$/, "").trim();
   }
 
   const originalText = text;
@@ -415,6 +412,13 @@ function prettifyCSS(text, ruleCount) {
     return token;
   };
 
+  // Get preference of the user regarding what to use for indentation,
+  // spaces or tabs.
+  const tabPrefs = getTabPrefs();
+  const baseIndentString = tabPrefs.indentWithTabs
+    ? TAB_CHARS
+    : SPACE_CHARS.repeat(tabPrefs.indentUnit);
+
   while (true) {
     // Set the initial state.
     startIndex = undefined;
@@ -440,20 +444,16 @@ function prettifyCSS(text, ruleCount) {
       }
     }
 
-    // Get preference of the user regarding what to use for indentation,
-    // spaces or tabs.
-    const tabPrefs = getTabPrefs();
-
     if (isCloseBrace) {
       // Even if the stylesheet contains extra closing braces, the indent level should
       // remain > 0.
       indentLevel = Math.max(0, indentLevel - 1);
+      indent = baseIndentString.repeat(indentLevel);
 
+      // FIXME: This is incorrect and should be fixed in Bug 1839297
       if (tabPrefs.indentWithTabs) {
-        indent = TAB_CHARS.repeat(indentLevel);
         indentOffset = 4 * indentLevel;
       } else {
-        indent = SPACE_CHARS.repeat(indentLevel);
         indentOffset = 1 * indentLevel;
       }
       result = result + indent + "}";
@@ -469,11 +469,14 @@ function prettifyCSS(text, ruleCount) {
         columnOffset++;
       }
       result += "{";
+      indentLevel++;
+      indent = baseIndentString.repeat(indentLevel);
+      indentOffset = indent.length;
+
+      // FIXME: This is incorrect and should be fixed in Bug 1839297
       if (tabPrefs.indentWithTabs) {
-        indent = TAB_CHARS.repeat(++indentLevel);
         indentOffset = 4 * indentLevel;
       } else {
-        indent = SPACE_CHARS.repeat(++indentLevel);
         indentOffset = 1 * indentLevel;
       }
     }
@@ -618,7 +621,7 @@ function findNodeAndContainer(node) {
  *   - ele.containingDocOrShadow.querySelector(reply) === ele
  *   - ele.containingDocOrShadow.querySelectorAll(reply).length === 1
  */
-const findCssSelector = function(ele) {
+const findCssSelector = function (ele) {
   const { node, containingDocOrShadow } = findNodeAndContainer(ele);
   ele = node;
 

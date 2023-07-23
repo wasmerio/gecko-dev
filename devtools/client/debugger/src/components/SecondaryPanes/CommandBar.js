@@ -41,6 +41,7 @@ const KEYS = {
     stepOver: "F10",
     stepIn: "F11",
     stepOut: "Shift+F11",
+    trace: "Ctrl+Shift+5",
   },
   Darwin: {
     resume: "Cmd+\\",
@@ -48,12 +49,14 @@ const KEYS = {
     stepIn: "Cmd+;",
     stepOut: "Cmd+Shift+:",
     stepOutDisplay: "Cmd+Shift+;",
+    trace: "Ctrl+Shift+5",
   },
   Linux: {
     resume: "F8",
     stepOver: "F10",
     stepIn: "F11",
     stepOut: "Shift+F11",
+    trace: "Ctrl+Shift+5",
   },
 };
 
@@ -73,11 +76,15 @@ function getKeyForOS(os, action) {
 
 function formatKey(action) {
   const key = getKey(`${action}Display`) || getKey(action);
+
+  // On MacOS, we bind both Windows and MacOS/Darwin key shortcuts
+  // Display them both, but only when they are different
   if (isMacOS) {
     const winKey =
       getKeyForOS("WINNT", `${action}Display`) || getKeyForOS("WINNT", action);
-    // display both Windows type and Mac specific keys
-    return formatKeyShortcut([key, winKey].join(" "));
+    if (key != winKey) {
+      return formatKeyShortcut([key, winKey].join(" "));
+    }
   }
   return formatKeyShortcut(key);
 }
@@ -113,6 +120,7 @@ class CommandBar extends Component {
       logMethod: PropTypes.string.isRequired,
       setJavascriptTracingLogMethod: PropTypes.func.isRequired,
       setHideOrShowIgnoredSources: PropTypes.func.isRequired,
+      toggleSourceMapIgnoreList: PropTypes.func.isRequired,
     };
   }
 
@@ -161,7 +169,6 @@ class CommandBar extends Component {
     const isDisabled = !isPaused;
 
     return [
-      this.renderTraceButton(),
       this.renderPauseButton(),
       debugBtn(
         () => this.props.stepOver(),
@@ -197,7 +204,7 @@ class CommandBar extends Component {
     }
     // Display a button which:
     // - on left click, would toggle on/off javascript tracing
-    // - on right click, would display a context menu allowing to choose the loggin output (console or stdout)
+    // - on right click, would display a context menu allowing to choose the logging output (console or stdout)
     return (
       <button
         className={`devtools-button command-bar-button debugger-trace-menu-button ${
@@ -205,8 +212,12 @@ class CommandBar extends Component {
         }`}
         title={
           this.props.isTracingEnabled
-            ? L10N.getStr("stopTraceButtonTooltip")
-            : L10N.getFormatStr("startTraceButtonTooltip", this.props.logMethod)
+            ? L10N.getFormatStr("stopTraceButtonTooltip2", formatKey("trace"))
+            : L10N.getFormatStr(
+                "startTraceButtonTooltip2",
+                formatKey("trace"),
+                this.props.logMethod
+              )
         }
         onClick={event => {
           this.props.toggleTracing(this.props.logMethod);
@@ -215,7 +226,7 @@ class CommandBar extends Component {
           event.preventDefault();
           event.stopPropagation();
 
-          // Avoid showing the menu to avoid having to support chaging tracing config "live"
+          // Avoid showing the menu to avoid having to support changing tracing config "live"
           if (this.props.isTracingEnabled) {
             return;
           }
@@ -363,6 +374,18 @@ class CommandBar extends Component {
             this.props.setHideOrShowIgnoredSources(!prefs.hideIgnoredSources)
           }
         />
+        <MenuItem
+          key="debugger-settings-menu-item-enable-sourcemap-ignore-list"
+          className="menu-item debugger-settings-menu-item-enable-sourcemap-ignore-list"
+          checked={prefs.sourceMapIgnoreListEnabled}
+          label={L10N.getStr("settings.enableSourceMapIgnoreList.label")}
+          tooltip={L10N.getStr("settings.enableSourceMapIgnoreList.tooltip")}
+          onClick={() =>
+            this.props.toggleSourceMapIgnoreList(
+              !prefs.sourceMapIgnoreListEnabled
+            )
+          }
+        />
       </MenuList>
     );
   }
@@ -376,6 +399,7 @@ class CommandBar extends Component {
       >
         {this.renderStepButtons()}
         <div className="filler" />
+        {this.renderTraceButton()}
         {this.renderSkipPausingButton()}
         <div className="devtools-separator" />
         {this.renderSettingsButton()}
@@ -415,4 +439,5 @@ export default connect(mapStateToProps, {
   toggleSourceMapsEnabled: actions.toggleSourceMapsEnabled,
   toggleJavaScriptEnabled: actions.toggleJavaScriptEnabled,
   setHideOrShowIgnoredSources: actions.setHideOrShowIgnoredSources,
+  toggleSourceMapIgnoreList: actions.toggleSourceMapIgnoreList,
 })(CommandBar);

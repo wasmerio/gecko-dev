@@ -97,6 +97,7 @@ void GMPParent::CloneFrom(const GMPParent* aOther) {
   mVersion = aOther->mVersion;
   mDescription = aOther->mDescription;
   mDisplayName = aOther->mDisplayName;
+  mPluginType = aOther->mPluginType;
 #if defined(XP_WIN) || defined(XP_LINUX)
   mLibs = aOther->mLibs;
 #endif
@@ -191,7 +192,8 @@ RefPtr<GenericPromise> GMPParent::Init(GeckoMediaPluginServiceParent* aService,
   uint32_t pluginArch = base::PROCESS_ARCH_INVALID;
   rv = GetPluginFileArch(aPluginDir, mName, pluginArch);
   if (NS_FAILED(rv)) {
-    GMP_PARENT_LOG_DEBUG("%s: Plugin arch error: %d", __FUNCTION__, rv);
+    GMP_PARENT_LOG_DEBUG("%s: Plugin arch error: %d", __FUNCTION__,
+                         uint32_t(rv));
   } else {
     GMP_PARENT_LOG_DEBUG("%s: Plugin arch: 0x%x", __FUNCTION__, pluginArch);
   }
@@ -235,7 +237,8 @@ RefPtr<GenericPromise> GMPParent::Init(GeckoMediaPluginServiceParent* aService,
     rv = nsMacUtilsImpl::GetArchitecturesForBundle(&bundleArch);
     if (NS_FAILED(rv)) {
       // If we fail here, continue as if this is not a univeral binary.
-      GMP_PARENT_LOG_DEBUG("%s: Bundle arch error: %d", __FUNCTION__, rv);
+      GMP_PARENT_LOG_DEBUG("%s: Bundle arch error: %d", __FUNCTION__,
+                           uint32_t(rv));
     } else {
       GMP_PARENT_LOG_DEBUG("%s: Bundle arch: 0x%x", __FUNCTION__, bundleArch);
     }
@@ -539,7 +542,7 @@ void GMPParent::DeleteProcess() {
 
 #if defined(MOZ_WIDGET_ANDROID)
   if (mState != GMPStateNotLoaded) {
-    nsCOMPtr<nsIEventTarget> launcherThread(GetIPCLauncher());
+    nsCOMPtr<nsIEventTarget> launcherThread(ipc::GetIPCLauncher());
     MOZ_ASSERT(launcherThread);
 
     auto procType = java::GeckoProcessType::GMPLUGIN();
@@ -839,10 +842,12 @@ RefPtr<GenericPromise> GMPParent::ReadGMPInfoFile(nsIFile* aFile) {
   ReadInfoField(parser, "libraries"_ns, mLibs);
 #endif
 
+  UpdatePluginType();
+
 #ifdef XP_LINUX
   // The glibc workaround (see above) isn't needed for clearkey
   // because it's built along with the browser.
-  if (!mDisplayName.EqualsASCII("clearkey")) {
+  if (mPluginType != GMPPluginType::Clearkey) {
     ApplyGlibcWorkaround(mLibs);
   }
 #endif
@@ -953,38 +958,44 @@ RefPtr<GenericPromise> GMPParent::ParseChromiumManifest(
   }
 #endif
 
+  UpdatePluginType();
+
   GMPCapability video;
 
   // We hard code a few of the settings because they can't be stored in the
   // widevine manifest without making our API different to widevine's.
-  if (mDisplayName.EqualsASCII("clearkey")) {
-    video.mAPITags.AppendElement(nsCString{kClearKeyKeySystemName});
-    video.mAPITags.AppendElement(
-        nsCString{kClearKeyWithProtectionQueryKeySystemName});
+  switch (mPluginType) {
+    case GMPPluginType::Clearkey:
+      video.mAPITags.AppendElement(nsCString{kClearKeyKeySystemName});
+      video.mAPITags.AppendElement(
+          nsCString{kClearKeyWithProtectionQueryKeySystemName});
 #if XP_WIN
-    mLibs = nsLiteralCString(
-        "dxva2.dll, evr.dll, freebl3.dll, mfh264dec.dll, mfplat.dll, "
-        "msmpeg2vdec.dll, nss3.dll, softokn3.dll");
+      mLibs = nsLiteralCString(
+          "dxva2.dll, evr.dll, freebl3.dll, mfh264dec.dll, mfplat.dll, "
+          "msmpeg2vdec.dll, nss3.dll, softokn3.dll");
 #elif XP_LINUX
-    mLibs = "libfreeblpriv3.so, libsoftokn3.so"_ns;
+      mLibs = "libfreeblpriv3.so, libsoftokn3.so"_ns;
 #endif
-  } else if (mDisplayName.EqualsASCII("WidevineCdm")) {
-    video.mAPITags.AppendElement(nsCString{kWidevineKeySystemName});
+      break;
+    case GMPPluginType::Widevine:
+      video.mAPITags.AppendElement(nsCString{kWidevineKeySystemName});
 #if XP_WIN
-    // psapi.dll added for GetMappedFileNameW, which could possibly be avoided
-    // in future versions, see bug 1383611 for details.
-    mLibs = "dxva2.dll, ole32.dll, psapi.dll, winmm.dll"_ns;
+      // psapi.dll added for GetMappedFileNameW, which could possibly be avoided
+      // in future versions, see bug 1383611 for details.
+      mLibs = "dxva2.dll, ole32.dll, psapi.dll, winmm.dll"_ns;
 #endif
-  } else if (mDisplayName.EqualsASCII("fake")) {
-    // The fake CDM just exposes a key system with id "fake".
-    video.mAPITags.AppendElement(nsCString{"fake"});
+      break;
+    case GMPPluginType::Fake:
+      // The fake CDM just exposes a key system with id "fake".
+      video.mAPITags.AppendElement(nsCString{"fake"});
 #if XP_WIN
-    mLibs = "dxva2.dll, ole32.dll"_ns;
+      mLibs = "dxva2.dll, ole32.dll"_ns;
 #endif
-  } else {
-    GMP_PARENT_LOG_DEBUG("%s: Unrecognized key system: %s, failing.",
-                         __FUNCTION__, mDisplayName.get());
-    return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+      break;
+    default:
+      GMP_PARENT_LOG_DEBUG("%s: Unrecognized key system: %s, failing.",
+                           __FUNCTION__, mDisplayName.get());
+      return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
 
 #ifdef XP_LINUX
@@ -1055,6 +1066,20 @@ bool GMPParent::CanBeUsedFrom(const nsACString& aNodeId) const {
 void GMPParent::SetNodeId(const nsACString& aNodeId) {
   MOZ_ASSERT(!aNodeId.IsEmpty());
   mNodeId = aNodeId;
+}
+
+void GMPParent::UpdatePluginType() {
+  if (mDisplayName.EqualsLiteral("WidevineCdm")) {
+    mPluginType = GMPPluginType::Widevine;
+  } else if (mDisplayName.EqualsLiteral("gmpopenh264")) {
+    mPluginType = GMPPluginType::OpenH264;
+  } else if (mDisplayName.EqualsLiteral("clearkey")) {
+    mPluginType = GMPPluginType::Clearkey;
+  } else if (mDisplayName.EqualsLiteral("fake")) {
+    mPluginType = GMPPluginType::Fake;
+  } else {
+    mPluginType = GMPPluginType::Unknown;
+  }
 }
 
 const nsCString& GMPParent::GetDisplayName() const { return mDisplayName; }

@@ -61,10 +61,10 @@ class ProfileAutoCompleteResult {
     // The result code of this result object.
     if (resultCode) {
       this.searchResult = resultCode;
-    } else if (matchingProfiles.length) {
-      this.searchResult = Ci.nsIAutoCompleteResult.RESULT_SUCCESS;
     } else {
-      this.searchResult = Ci.nsIAutoCompleteResult.RESULT_NOMATCH;
+      this.searchResult = matchingProfiles.length
+        ? Ci.nsIAutoCompleteResult.RESULT_SUCCESS
+        : Ci.nsIAutoCompleteResult.RESULT_NOMATCH;
     }
 
     // An array of primary and secondary labels for each profile.
@@ -384,9 +384,8 @@ export class CreditCardResult extends ProfileAutoCompleteResult {
 
   _generateLabels(focusedFieldName, allFieldNames, profiles) {
     if (!this._isSecure) {
-      let brandName = lazy.FormAutofillUtils.brandBundle.GetStringFromName(
-        "brandShortName"
-      );
+      let brandName =
+        lazy.FormAutofillUtils.brandBundle.GetStringFromName("brandShortName");
 
       return [
         lazy.FormAutofillUtils.stringBundle.formatStringFromName(

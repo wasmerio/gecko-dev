@@ -6,8 +6,9 @@
 
 class PictureInPictureVideoWrapper {
   constructor() {
-    let netflixPlayerAPI = window.wrappedJSObject.netflix.appContext.state.playerApp.getAPI()
-      .videoPlayer;
+    let netflixPlayerAPI =
+      window.wrappedJSObject.netflix.appContext.state.playerApp.getAPI()
+        .videoPlayer;
     let sessionId = null;
     for (let id of netflixPlayerAPI.getAllPlayerSessionIds()) {
       if (id.startsWith("watch-")) {
@@ -47,7 +48,7 @@ class PictureInPictureVideoWrapper {
 
     if (container) {
       updateCaptionsFunction("");
-      const callback = function(mutationsList, observer) {
+      const callback = function (mutationsList, observer) {
         let text = container.querySelector(".player-timedtext").innerText;
         updateCaptionsFunction(text);
       };
@@ -72,6 +73,18 @@ class PictureInPictureVideoWrapper {
    */
   setCurrentTime(video, position) {
     this.player.seek(position * 1000);
+  }
+  setVolume(video, volume) {
+    this.player.setVolume(volume);
+  }
+  getVolume() {
+    return this.player.getVolume();
+  }
+  setMuted(video, shouldMute) {
+    this.player.setMuted(shouldMute);
+  }
+  isMuted() {
+    return this.player.isMuted();
   }
 }
 

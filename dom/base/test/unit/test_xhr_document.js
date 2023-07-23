@@ -11,7 +11,9 @@ var docbody =
   '<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body></body></html>';
 
 function handler(metadata, response) {
-  var { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+  var { NetUtil } = ChromeUtils.importESModule(
+    "resource://gre/modules/NetUtil.sys.mjs"
+  );
 
   let body = NetUtil.readInputStreamToString(
     metadata.bodyInputStream,
@@ -28,11 +30,11 @@ function run_test() {
   var parser = new DOMParser();
   let doc = parser.parseFromString(docbody, "text/html");
   let xhr = new XMLHttpRequest();
-  xhr.onload = function() {
+  xhr.onload = function () {
     Assert.equal(xhr.responseText, docbody);
     server.stop(do_test_finished);
   };
-  xhr.onerror = function() {
+  xhr.onerror = function () {
     Assert.equal(false, false);
     server.stop(do_test_finished);
   };

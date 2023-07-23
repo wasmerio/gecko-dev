@@ -149,16 +149,6 @@ class nsNavHistory final : public nsSupportsWeakReference,
                                 nsCString& _GUID);
 
   /**
-   * Asynchronously recalculates frecency for a given page.
-   *
-   * @param aPlaceId
-   *        Place id to recalculate the frecency for.
-   * @note If the new frecency is a non-zero value it will also unhide the page,
-   *       otherwise will reuse the old hidden value.
-   */
-  nsresult UpdateFrecency(int64_t aPlaceId);
-
-  /**
    * These functions return non-owning references to the locale-specific
    * objects for places components.
    */
@@ -213,14 +203,9 @@ class nsNavHistory final : public nsSupportsWeakReference,
                             const nsACString& aURI, const nsACString& aTitle,
                             uint32_t aAccessCount, PRTime aTime,
                             nsNavHistoryResultNode** aNode);
-
   nsresult VisitIdToResultNode(int64_t visitId,
                                nsNavHistoryQueryOptions* aOptions,
                                nsNavHistoryResultNode** aResult);
-
-  nsresult BookmarkIdToResultNode(int64_t aBookmarkId,
-                                  nsNavHistoryQueryOptions* aOptions,
-                                  nsNavHistoryResultNode** aResult);
   nsresult URIToResultNode(nsIURI* aURI, nsNavHistoryQueryOptions* aOptions,
                            nsNavHistoryResultNode** aResult);
 

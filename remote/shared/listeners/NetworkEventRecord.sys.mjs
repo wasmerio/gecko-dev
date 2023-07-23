@@ -19,6 +19,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
  */
 export class NetworkEventRecord {
   #channel;
+  #contextId;
   #fromCache;
   #networkListener;
   #redirectCount;
@@ -45,14 +46,16 @@ export class NetworkEventRecord {
 
     this.#networkListener = networkListener;
 
+    // The context ids computed by TabManager have the lifecycle of a navigable
+    // and can be reused for all the events emitted from this record.
+    this.#contextId = this.#getContextId();
+
     // The wrappedChannel id remains identical across redirects, whereas
     // nsIChannel.channelId is different for each and every request.
     this.#requestId = this.#wrappedChannel.id.toString();
 
-    const {
-      cookies,
-      headers,
-    } = lazy.NetworkUtils.fetchRequestHeadersAndCookies(channel);
+    const { cookies, headers } =
+      lazy.NetworkUtils.fetchRequestHeadersAndCookies(channel);
 
     // See the RequestData type definition for the full list of properties that
     // should be set on this object.
@@ -117,9 +120,8 @@ export class NetworkEventRecord {
    */
   addResponseStart(options) {
     const { channel, fromCache, rawHeaders = "" } = options;
-    const { headers } = lazy.NetworkUtils.fetchResponseHeadersAndCookies(
-      channel
-    );
+    const { headers } =
+      lazy.NetworkUtils.fetchResponseHeadersAndCookies(channel);
 
     const headersSize = rawHeaders.length;
     this.#responseData = {
@@ -226,7 +228,7 @@ export class NetworkEventRecord {
     this.#updateDataFromTimedChannel();
 
     this.#networkListener.emit("before-request-sent", {
-      contextId: this.#getContextId(),
+      contextId: this.#contextId,
       redirectCount: this.#redirectCount,
       requestData: this.#requestData,
       timestamp: Date.now(),
@@ -237,7 +239,7 @@ export class NetworkEventRecord {
     this.#updateDataFromTimedChannel();
 
     this.#networkListener.emit("response-completed", {
-      contextId: this.#getContextId(),
+      contextId: this.#contextId,
       redirectCount: this.#redirectCount,
       requestData: this.#requestData,
       responseData: this.#responseData,
@@ -249,7 +251,7 @@ export class NetworkEventRecord {
     this.#updateDataFromTimedChannel();
 
     this.#networkListener.emit("response-started", {
-      contextId: this.#getContextId(),
+      contextId: this.#contextId,
       redirectCount: this.#redirectCount,
       requestData: this.#requestData,
       responseData: this.#responseData,
@@ -281,9 +283,12 @@ export class NetworkEventRecord {
   }
 
   /**
-   * Retrieve the context id corresponding to the current channel, this could
-   * change dynamically during a cross group navigation for an iframe, so this
-   * should always be retrieved dynamically.
+   * Retrieve the navigable id for the current browsing context associated to
+   * the requests' channel. Network events are recorded in the parent process
+   * so we always expect to be able to use TabManager.getIdForBrowsingContext.
+   *
+   * @returns {string}
+   *     The navigable id corresponding to the given browsing context.
    */
   #getContextId() {
     const id = lazy.NetworkUtils.getChannelBrowsingContextID(this.#channel);
@@ -338,25 +343,25 @@ export class NetworkEventRecord {
       domainLookupStartTime;
 
     // Bug 1805478: Per spec, the origin time should match Performance API's
-    // originTime for the global which initiated the request. This is not
+    // timeOrigin for the global which initiated the request. This is not
     // available in the parent process, so for now we will use 0.
-    const originTime = 0;
+    const timeOrigin = 0;
 
     return {
-      originTime,
-      requestTime: this.#convertTimestamp(channelCreationTime, originTime),
-      redirectStart: this.#convertTimestamp(redirectStartTime, originTime),
-      redirectEnd: this.#convertTimestamp(redirectEndTime, originTime),
-      fetchStart: this.#convertTimestamp(fetchStartTime, originTime),
-      dnsStart: this.#convertTimestamp(domainLookupStartTime, originTime),
-      dnsEnd: this.#convertTimestamp(domainLookupEndTime, originTime),
-      connectStart: this.#convertTimestamp(connectStartTime, originTime),
-      connectEnd: this.#convertTimestamp(connectEndTime, originTime),
-      tlsStart: this.#convertTimestamp(secureConnectionStartTime, originTime),
-      tlsEnd: this.#convertTimestamp(connectEndTime, originTime),
-      requestStart: this.#convertTimestamp(requestStartTime, originTime),
-      responseStart: this.#convertTimestamp(responseStartTime, originTime),
-      responseEnd: this.#convertTimestamp(responseEndTime, originTime),
+      timeOrigin,
+      requestTime: this.#convertTimestamp(channelCreationTime, timeOrigin),
+      redirectStart: this.#convertTimestamp(redirectStartTime, timeOrigin),
+      redirectEnd: this.#convertTimestamp(redirectEndTime, timeOrigin),
+      fetchStart: this.#convertTimestamp(fetchStartTime, timeOrigin),
+      dnsStart: this.#convertTimestamp(domainLookupStartTime, timeOrigin),
+      dnsEnd: this.#convertTimestamp(domainLookupEndTime, timeOrigin),
+      connectStart: this.#convertTimestamp(connectStartTime, timeOrigin),
+      connectEnd: this.#convertTimestamp(connectEndTime, timeOrigin),
+      tlsStart: this.#convertTimestamp(secureConnectionStartTime, timeOrigin),
+      tlsEnd: this.#convertTimestamp(connectEndTime, timeOrigin),
+      requestStart: this.#convertTimestamp(requestStartTime, timeOrigin),
+      responseStart: this.#convertTimestamp(responseStartTime, timeOrigin),
+      responseEnd: this.#convertTimestamp(responseEndTime, timeOrigin),
     };
   }
 

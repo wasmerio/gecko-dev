@@ -122,9 +122,9 @@ AutoDisableProxyCheck::~AutoDisableProxyCheck() {
 }
 
 JS_PUBLIC_API void JS::AssertGCThingMustBeTenured(JSObject* obj) {
-  MOZ_ASSERT(obj->isTenured() &&
-             (!IsNurseryAllocable(obj->asTenured().getAllocKind()) ||
-              obj->getClass()->hasFinalize()));
+  MOZ_ASSERT(obj->isTenured());
+  MOZ_ASSERT(obj->getClass()->hasFinalize() &&
+             !(obj->getClass()->flags & JSCLASS_SKIP_NURSERY_FINALIZE));
 }
 
 JS_PUBLIC_API void JS::AssertGCThingIsNotNurseryAllocable(Cell* cell) {
@@ -547,7 +547,7 @@ static bool GCBytesGetter(JSContext* cx, unsigned argc, Value* vp) {
 
 static bool MallocBytesGetter(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  double bytes = 0;
+  size_t bytes = 0;
   for (ZonesIter zone(cx->runtime(), WithAtoms); !zone.done(); zone.next()) {
     bytes += zone->mallocHeapSize.bytes();
   }

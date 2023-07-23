@@ -73,7 +73,7 @@ add_task(async function modifiedPreferences() {
     "network.proxy.troubleshoot",
     "print.print_to_filename",
   ];
-  prefs.forEach(function(p) {
+  prefs.forEach(function (p) {
     Services.prefs.setBoolPref(p, true);
     is(Services.prefs.getBoolPref(p), true, "The pref should be set: " + p);
   });
@@ -128,7 +128,7 @@ add_task(async function printingPreferences() {
     "print.print_bgimages",
     "print.print_to_filename",
   ];
-  prefs.forEach(function(p) {
+  prefs.forEach(function (p) {
     Services.prefs.setBoolPref(p, true);
     is(Services.prefs.getBoolPref(p), true, "The pref should be set: " + p);
   });
@@ -272,6 +272,18 @@ add_task(function normandyErrorHandling() {
       );
     }
   )();
+});
+
+add_task(async function themes() {
+  let snapshot = await Troubleshoot.snapshot();
+  let foundTheme = false;
+  for (let addon of snapshot.addons) {
+    if (addon.type == "theme") {
+      foundTheme = true;
+      break;
+    }
+  }
+  ok(foundTheme, "found a theme in the addons list");
 });
 
 // This is inspired by JSON Schema, or by the example on its Wikipedia page

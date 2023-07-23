@@ -99,7 +99,7 @@ httpServer.registerPathHandler(
     loadCounts[request.path] = (loadCounts[request.path] || 0) + 1;
     response.processAsync();
     // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
-    setTimeout(function() {
+    setTimeout(function () {
       response.setHeader("Content-Type", "application/javascript");
       response.write(`console.log("slow loading script")`);
       response.finish();
@@ -494,9 +494,7 @@ add_task(async function testFailingHtmlSource() {
   );
 
   ok(
-    getCM(dbg)
-      .getValue()
-      .includes("Could not load the source"),
+    getCM(dbg).getValue().includes("Could not load the source"),
     "Display failure error"
   );
 });
@@ -515,7 +513,7 @@ httpServer.registerPathHandler(
     loadCount2++;
     if (loadCount2 > 1) {
       response.processAsync();
-      slowLoadingPageResolution = function() {
+      slowLoadingPageResolution = function () {
         response.write(
           `<!DOCTYPE html><script>console.log("slow-loading-page:second-load");</script>`
         );
@@ -537,7 +535,7 @@ add_task(async function testLoadingHtmlSource() {
 
   const onSelected = selectSource(dbg, "slow-loading-page.html");
   await waitFor(
-    () => getCM(dbg).getValue() == `Loading…`,
+    () => getCM(dbg).getValue() == DEBUGGER_L10N.getStr("loadingText"),
     "Wait for the source to be displayed as loading"
   );
 
@@ -548,7 +546,7 @@ add_task(async function testLoadingHtmlSource() {
   );
   is(
     getCM(dbg).getValue(),
-    `Loading…`,
+    DEBUGGER_L10N.getStr("loadingText"),
     "The source is still loading until we release the network request"
   );
 

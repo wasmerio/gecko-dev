@@ -78,7 +78,7 @@ export function NarrateControls(win, languagePromise) {
   narrateStartStop.className = "narrate-start-stop";
   narrateControl.appendChild(narrateStartStop);
 
-  win.document.addEventListener("keydown", function(event) {
+  win.document.addEventListener("keydown", function (event) {
     if (win.document.hasFocus() && event.key === "n") {
       narrateStartStop.click();
     }
@@ -261,7 +261,7 @@ NarrateControls.prototype = {
         this.narrator
           .start(options)
           .catch(err => {
-            console.error(`Narrate failed: ${err}.`);
+            console.error("Narrate failed:", err);
           })
           .then(() => {
             this._updateSpeechControls(false);

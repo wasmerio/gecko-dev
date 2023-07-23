@@ -12,7 +12,7 @@ const { XPCOMUtils } = ChromeUtils.importESModule(
 const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
 );
-const { SCOPE_OLD_SYNC, LEGACY_SCOPE_WEBEXT_SYNC } = ChromeUtils.import(
+const { SCOPE_OLD_SYNC } = ChromeUtils.import(
   "resource://gre/modules/FxAccountsCommon.js"
 );
 
@@ -21,24 +21,10 @@ const MOCK_ACCOUNT_KEYS = {
   scopedKeys: {
     [SCOPE_OLD_SYNC]: {
       kid: "1234567890123-u7u7u7u7u7u7u7u7u7u7uw",
-      k:
-        "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg",
-      kty: "oct",
-    },
-    [LEGACY_SCOPE_WEBEXT_SYNC]: {
-      kid: "1234567890123-3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0",
-      k:
-        "zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzA",
+      k: "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg",
       kty: "oct",
     },
   },
-  kSync:
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  kXCS: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-  kExtSync:
-    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-  kExtKbHash:
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd ",
 };
 
 (function initFxAccountsTestingInfrastructure() {
@@ -49,4 +35,4 @@ const MOCK_ACCOUNT_KEYS = {
   );
 
   initTestLogging("Trace");
-}.call(this));
+}).call(this);

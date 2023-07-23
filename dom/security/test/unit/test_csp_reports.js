@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 
 var httpServer = new HttpServer();
@@ -19,7 +21,7 @@ const REPORT_SERVER_URI = "http://localhost";
  * or fails a test based on what it gets.
  */
 function makeReportHandler(testpath, message, expectedJSON) {
-  return function(request, response) {
+  return function (request, response) {
     // we only like "POST" submissions for reports!
     if (request.method !== "POST") {
       do_throw("violation report should be a POST request");
@@ -125,7 +127,7 @@ function run_test() {
       disposition: "enforce",
     },
     false,
-    function(csp) {
+    function (csp) {
       let inlineOK = true;
       inlineOK = csp.getAllowsInline(
         Ci.nsIContentSecurityPolicy.SCRIPT_SRC_ELEM_DIRECTIVE,
@@ -155,7 +157,7 @@ function run_test() {
       "column-number": 2,
     },
     false,
-    function(csp) {
+    function (csp) {
       let evalOK = true,
         oReportViolation = { value: false };
       evalOK = csp.getAllowsEval(oReportViolation);
@@ -183,27 +185,29 @@ function run_test() {
     }
   );
 
-  makeTest(2, { "blocked-uri": "http://blocked.test/foo.js" }, false, function(
-    csp
-  ) {
-    // shouldLoad creates and sends out the report here.
-    csp.shouldLoad(
-      Ci.nsIContentPolicy.TYPE_SCRIPT,
-      null, // nsICSPEventListener
-      NetUtil.newURI("http://blocked.test/foo.js"),
-      null,
-      true,
-      null,
-      false
-    );
-  });
+  makeTest(
+    2,
+    { "blocked-uri": "http://blocked.test/foo.js" },
+    false,
+    function (csp) {
+      // shouldLoad creates and sends out the report here.
+      csp.shouldLoad(
+        Ci.nsIContentPolicy.TYPE_SCRIPT,
+        null, // nsICSPEventListener
+        null, // aLoadInfo
+        NetUtil.newURI("http://blocked.test/foo.js"),
+        null,
+        true
+      );
+    }
+  );
 
   // test that inline script violations cause a report in report-only policy
   makeTest(
     3,
     { "blocked-uri": "inline", disposition: "report" },
     true,
-    function(csp) {
+    function (csp) {
       let inlineOK = true;
       inlineOK = csp.getAllowsInline(
         Ci.nsIContentSecurityPolicy.SCRIPT_SRC_ELEM_DIRECTIVE,
@@ -223,7 +227,7 @@ function run_test() {
   );
 
   // test that eval violations cause a report in report-only policy
-  makeTest(4, { "blocked-uri": "eval" }, true, function(csp) {
+  makeTest(4, { "blocked-uri": "eval" }, true, function (csp) {
     let evalOK = true,
       oReportViolation = { value: false };
     evalOK = csp.getAllowsEval(oReportViolation);
@@ -248,7 +252,7 @@ function run_test() {
   });
 
   // test that only the uri's scheme is reported for globally unique identifiers
-  makeTest(5, { "blocked-uri": "data" }, false, function(csp) {
+  makeTest(5, { "blocked-uri": "data" }, false, function (csp) {
     var base64data =
       "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12" +
       "P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==";
@@ -256,41 +260,38 @@ function run_test() {
     csp.shouldLoad(
       Ci.nsIContentPolicy.TYPE_IMAGE,
       null, // nsICSPEventListener
+      null, // nsILoadInfo
       NetUtil.newURI("data:image/png;base64," + base64data),
       null,
-      true,
-      null,
-      false
+      true
     );
   });
 
   // test that only the uri's scheme is reported for globally unique identifiers
-  makeTest(6, { "blocked-uri": "intent" }, false, function(csp) {
+  makeTest(6, { "blocked-uri": "intent" }, false, function (csp) {
     // shouldLoad creates and sends out the report here.
     csp.shouldLoad(
       Ci.nsIContentPolicy.TYPE_SUBDOCUMENT,
       null, // nsICSPEventListener
+      null, // nsILoadInfo
       NetUtil.newURI("intent://mymaps.com/maps?um=1&ie=UTF-8&fb=1&sll"),
       null,
-      true,
-      null,
-      false
+      true
     );
   });
 
   // test fragment removal
   var selfSpec =
     REPORT_SERVER_URI + ":" + REPORT_SERVER_PORT + "/foo/self/foo.js";
-  makeTest(7, { "blocked-uri": selfSpec }, false, function(csp) {
+  makeTest(7, { "blocked-uri": selfSpec }, false, function (csp) {
     // shouldLoad creates and sends out the report here.
     csp.shouldLoad(
       Ci.nsIContentPolicy.TYPE_SCRIPT,
       null, // nsICSPEventListener
+      null, // nsILoadInfo
       NetUtil.newURI(selfSpec + "#bar"),
       null,
-      true,
-      null,
-      false
+      true
     );
   });
 }

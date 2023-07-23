@@ -131,7 +131,8 @@
             })
             .catch(status =>
               console.error(
-                "Cannot initialize search service, bailing out: " + status
+                "Cannot initialize search service, bailing out:",
+                status
               )
             );
         });
@@ -366,9 +367,8 @@
       );
 
       if (selectedIndex == -1) {
-        isOneOff = this.textbox.popup.oneOffButtons.eventTargetIsAOneOff(
-          aEvent
-        );
+        isOneOff =
+          this.textbox.popup.oneOffButtons.eventTargetIsAOneOff(aEvent);
       }
 
       if (aWhere === "tab" && !!aParams.inBackground) {
@@ -405,9 +405,7 @@
           value: aData,
           source: engine.name,
         }).catch(error =>
-          console.error(
-            "Saving search to form history failed: " + error.message
-          )
+          console.error("Saving search to form history failed:", error)
         );
       }
 
@@ -612,9 +610,8 @@
         // Update disabled state of menu items
         for (let item of this._menupopup.querySelectorAll("menuitem[cmd]")) {
           let command = item.getAttribute("cmd");
-          let controller = document.commandDispatcher.getControllerForCommand(
-            command
-          );
+          let controller =
+            document.commandDispatcher.getControllerForCommand(command);
           item.disabled = !controller.isCommandEnabled(command);
         }
 
@@ -883,9 +880,8 @@
           default:
             let cmd = event.originalTarget.getAttribute("cmd");
             if (cmd) {
-              let controller = document.commandDispatcher.getControllerForCommand(
-                cmd
-              );
+              let controller =
+                document.commandDispatcher.getControllerForCommand(cmd);
               controller.doCommand(cmd);
             }
             break;

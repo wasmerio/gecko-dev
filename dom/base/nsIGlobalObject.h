@@ -249,12 +249,11 @@ class nsIGlobalObject : public nsISupports,
    * Check whether we should avoid leaking distinguishing information to JS/CSS.
    * https://w3c.github.io/fingerprinting-guidance/
    */
-  virtual bool ShouldResistFingerprinting(
-      RFPTarget aTarget = RFPTarget::Unknown) const = 0;
+  virtual bool ShouldResistFingerprinting(RFPTarget aTarget) const = 0;
 
   // CallerType::System callers never have to resist fingerprinting.
   bool ShouldResistFingerprinting(mozilla::dom::CallerType aCallerType,
-                                  RFPTarget aTarget = RFPTarget::Unknown) const;
+                                  RFPTarget aTarget) const;
 
   RTPCallerType GetRTPCallerType() const;
 
@@ -274,6 +273,14 @@ class nsIGlobalObject : public nsISupports,
       const mozilla::ipc::PrincipalInfo& aStorageKey);
 
   virtual mozilla::dom::StorageManager* GetStorageManager() { return nullptr; }
+
+  /**
+   * https://html.spec.whatwg.org/multipage/web-messaging.html#eligible-for-messaging
+   * * a Window object whose associated Document is fully active, or
+   * * a WorkerGlobalScope object whose closing flag is false and whose worker
+   *   is not a suspendable worker.
+   */
+  virtual bool IsEligibleForMessaging() { return false; };
 
  protected:
   virtual ~nsIGlobalObject();

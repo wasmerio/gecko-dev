@@ -18,11 +18,11 @@ var { EventDispatcher } = ChromeUtils.importESModule(
   "resource://gre/modules/Messaging.sys.mjs"
 );
 
-var { ExtensionCommon } = ChromeUtils.import(
-  "resource://gre/modules/ExtensionCommon.jsm"
+var { ExtensionCommon } = ChromeUtils.importESModule(
+  "resource://gre/modules/ExtensionCommon.sys.mjs"
 );
-var { ExtensionUtils } = ChromeUtils.import(
-  "resource://gre/modules/ExtensionUtils.jsm"
+var { ExtensionUtils } = ChromeUtils.importESModule(
+  "resource://gre/modules/ExtensionUtils.sys.mjs"
 );
 
 var { DefaultWeakMap, ExtensionError } = ExtensionUtils;
@@ -389,6 +389,12 @@ class Tab extends TabBase {
 
   get hidden() {
     return false;
+  }
+
+  get autoDiscardable() {
+    // This property reflects whether the browser is allowed to auto-discard.
+    // Since extensions cannot do so on Android, we return true here.
+    return true;
   }
 
   get sharingState() {

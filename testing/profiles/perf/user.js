@@ -71,7 +71,6 @@ user_pref("media.peerconnection.enabled", true);
 // relatively long time which may cause unnecessary intermittents and slow down
 // tests. This, like many things, will stop working correctly in 2038.
 user_pref("places.database.lastMaintenance", 2147483647);
-user_pref("plugin.state.flash", 0);
 user_pref("privacy.reduceTimerPrecision", false); // Bug 1445243 - reduces precision of tests
 user_pref("privacy.trackingprotection.annotate_channels", false);
 user_pref("privacy.trackingprotection.enabled", false);
@@ -96,3 +95,5 @@ user_pref("startup.homepage_welcome_url.additional", "");
 // tests (bug 1725270). Can be removed once non-about:blank intermediate pages
 // are used instead (bug 1724261).
 user_pref("browser.tabs.remote.systemTriggeredAboutBlankAnywhere", true);
+// Make sure speech dispatcher notification error does not impact how we measure visual perception in raptor tests
+user_pref("media.webspeech.synth.dont_notify_on_error", true);

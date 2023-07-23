@@ -13,6 +13,17 @@ XPCOMUtils.defineLazyGetter(lazy, "console", () => {
   });
 });
 
+ChromeUtils.defineESModuleGetters(lazy, {
+  LanguageDetector:
+    "resource://gre/modules/translation/LanguageDetector.sys.mjs",
+});
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "useFastTextPref",
+  "browser.translations.languageIdentification.useFastText"
+);
+
 /**
  * @typedef {import("./TranslationsChild.sys.mjs").LanguageIdEngine} LanguageIdEngine
  * @typedef {import("./TranslationsChild.sys.mjs").TranslationsEngine} TranslationsEngine
@@ -87,23 +98,27 @@ export class AboutTranslationsChild extends JSWindowActorChild {
   #convertToContentPromise(promise) {
     return new this.contentWindow.Promise((resolve, reject) =>
       promise.then(resolve, error => {
-        // Create an error in the content window, if the content window is still around.
-        if (this.contentWindow) {
-          let message = "An error occured in the AboutTranslations actor.";
-          if (typeof error === "string") {
-            message = error;
-          }
-          if (typeof error?.message === "string") {
-            message = error.message;
-          }
-          if (typeof error?.stack === "string") {
-            message += `\n\nOriginal stack:\n\n${error.stack}\n`;
-          }
-
-          reject(new this.contentWindow.Error(message));
-        } else {
+        let contentWindow;
+        try {
+          contentWindow = this.contentWindow;
+        } catch (error) {
+          // The content window is no longer available.
           reject();
+          return;
         }
+        // Create an error in the content window, if the content window is still around.
+        let message = "An error occured in the AboutTranslations actor.";
+        if (typeof error === "string") {
+          message = error;
+        }
+        if (typeof error?.message === "string") {
+          message = error.message;
+        }
+        if (typeof error?.stack === "string") {
+          message += `\n\nOriginal stack:\n\n${error.stack}\n`;
+        }
+
+        reject(new contentWindow.Error(message));
       })
     );
   }
@@ -179,7 +194,7 @@ export class AboutTranslationsChild extends JSWindowActorChild {
    */
   AT_isTranslationEngineSupported() {
     return this.#convertToContentPromise(
-      this.#getTranslationsChild().isTranslationsEngineSupported
+      this.#getTranslationsChild().isTranslationsEngineSupported()
     );
   }
 
@@ -202,7 +217,7 @@ export class AboutTranslationsChild extends JSWindowActorChild {
     }
     return this.#convertToContentPromise(
       this.#getTranslationsChild()
-        .createLanguageIdEngine()
+        .getOrCreateLanguageIdEngine()
         .then(engine => {
           this.languageIdEngine = engine;
         })
@@ -246,17 +261,29 @@ export class AboutTranslationsChild extends JSWindowActorChild {
    * @returns {Promise<{ langTag: string, confidence: number }>}
    */
   AT_identifyLanguage(message) {
-    if (!this.languageIdEngine) {
-      const { Promise, Error } = this.contentWindow;
-      return Promise.reject(
-        new Error("The language identification was not created.")
+    if (lazy.useFastTextPref) {
+      if (!this.languageIdEngine) {
+        const { Promise, Error } = this.contentWindow;
+        return Promise.reject(
+          new Error("The language identification was not created.")
+        );
+      }
+
+      return this.#convertToContentPromise(
+        this.languageIdEngine
+          .identifyLanguage(message)
+          .then(data => Cu.cloneInto(data, this.contentWindow))
       );
     }
-
     return this.#convertToContentPromise(
-      this.languageIdEngine
-        .identifyLanguage(message)
-        .then(data => Cu.cloneInto(data, this.contentWindow))
+      lazy.LanguageDetector.detectLanguage(message).then(data =>
+        Cu.cloneInto(
+          // This language detector reports confidence as a boolean instead of
+          // a percentage, so we need to map the confidence to 0.0 or 1.0.
+          { langTag: data.language, confidence: data.confident ? 1.0 : 0.0 },
+          this.contentWindow
+        )
+      )
     );
   }
 

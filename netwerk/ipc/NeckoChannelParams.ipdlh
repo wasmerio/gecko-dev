@@ -164,6 +164,7 @@ struct LoadInfoArgs
   bool allowListFutureDocumentsCreatedFromThisRedirectChain;
   bool needForCheckingAntiTrackingHeuristic;
   nsString                    cspNonce;
+  nsString                    integrityMetadata;
   bool                        skipContentSniffing;
   uint32_t                    httpsOnlyStatus;
   bool                        hstsStatus;
@@ -338,7 +339,6 @@ struct HttpChannelOpenArgs
   bool                        uploadStreamHasHeaders;
   bool                        allowSTS;
   bool                        resumeAt;
-  bool                        chooseApplicationCache;
   bool                        allowSpdy;
   bool                        allowHttp3;
   bool                        allowAltSvc;

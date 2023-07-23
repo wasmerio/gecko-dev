@@ -55,9 +55,73 @@ nimbus-qa-2:
       setPref: nimbus.qa.pref-2
       description: The value to set for the pref.
 
+# `search` is for search engine experimentation features which do not require
+# isEarlyStartup to be set.
 search:
-  description: The Search Services
+  description: Search engine experimentation support and testing features.
   owner: search-and-suggest-program@mozilla.com
+  hasExposure: false
+  variables:
+    extraParams:
+      type: json
+      description: >-
+        This allows extra parameters to be set for search engines requests including,
+        where calls to the suggestions API, the search engine configuration defines
+        those parameters.
+
+        The use of this field should be coordinated with the Search team.
+
+        The field value is an array of objects with key/value fields. For example:
+
+        [
+          {"key": "google_channel_row", "value": "foo"}
+        ]
+
+        This is matched to a section in the search configuration:
+
+        "extraParams": [
+          {
+            "name": "channel",
+            "pref": "google_channel_row",
+            "condition": "pref"
+          }
+        ],
+
+        In this case, the resulting URL for the appropriate search engine would have
+        `&channel=foo` added to the URL when doing searches.
+
+        If the key is not referenced in the search configuration, then no parameter
+        will be added. Only the search team can update the configuration.
+    cbhStudyUs:
+      type: string
+      setPref: browser.search.param.google_channel_us
+      description: >-
+        NOTE: Please use `extraParams` rather than this field.
+        A string pref set by Nimbus tests for US search cohort
+    cbhStudyRow:
+      type: string
+      setPref: browser.search.param.google_channel_row
+      description: >-
+        NOTE: Please use `extraParams` rather than this field.
+        A string pref set by Nimbus tests for Rest of World (ROW) search cohort
+    richSuggestionsFeatureGate:
+      type: boolean
+      setPref: browser.urlbar.richSuggestions.featureGate
+      description: >-
+        Feature gate that controls whether Rich Suggestions are enabled.
+    serpEventTelemetryEnabled:
+      type: boolean
+      setPref: browser.search.serpEventTelemetry.enabled
+      description: Whether the Glean SERP event telemetry is enabled.
+
+# `searchConfiguration` is for search experiment features for items that require
+# isEarlyStartup to be true. These items may require a reload of the search
+# engine configuration, and an additional reload may happen during the startup
+# process.
+searchConfiguration:
+  description: Search experimentation support for the engine configuration
+  owner: search-and-suggest-program@mozilla.com
+  isEarlyStartup: true
   hasExposure: false
   variables:
     experiment:
@@ -66,27 +130,12 @@ search:
       description: >-
         Used to activate only matching configurations that contain the value in
         `experiment`
-    extraParams:
-      type: json
-      description: Query parameters values for search engine configurations.
     seperatePrivateDefaultUIEnabled:
       type: boolean
       description: Whether the UI for the separate private default feature is enabled.
     seperatePrivateDefaultUrlbarResultEnabled:
       type: boolean
       description: Whether the urlbar result for the separate private default is shown.
-    cbhStudyUs:
-      type: string
-      setPref: browser.search.param.google_channel_us
-      description: A string pref set by Nimbus tests for US search cohort
-    cbhStudyRow:
-      type: string
-      setPref: browser.search.param.google_channel_row
-      description: A string pref set by Nimbus tests for Rest of World search cohort
-    serpEventTelemetryEnabled:
-      type: boolean
-      setPref: browser.search.serpEventTelemetry.enabled
-      description: Whether the Glean SERP event telemetry is enabled.
 
 urlbar:
   description: The Address Bar
@@ -97,25 +146,29 @@ urlbar:
     the event is recorded once per app session when the user first encounters
     the UI of the experiment in which they're enrolled.
   variables:
-    addonsKeywordsMinimumLength:
+    addonsFeatureGate:
+      type: boolean
+      fallbackPref: browser.urlbar.addons.featureGate
+      description: >-
+        Feature gate that controls whether all aspects of the addons suggestion
+        feature are exposed to the user.
+    addonsShowLessFrequentlyCap:
       type: int
       description: >-
-        If defined and non-zero, the addons suggestion will be triggered only by
-        the query that has number of chars more than this variable.
-        However, if there is a value in browser.urlbar.addons.minKeywordLength,
-        it will take priority.
-    addonsKeywordsMinimumLengthCap:
-      type: int
+        If defined and non-zero, this is the maximum number of times the user
+        will be able to click the "Show less frequently" command for addon
+        suggestions. If undefined or zero, the user will be able to click the
+        command without any limit.
+    addonsUITreatment:
+      type: string
+      enum:
+        - a
+        - b
       description: >-
-        If defined and non-zero, the user will not be able to increment the
-        minimum keyword length beyond this value. e.g., if this value is 6, the
-        current minimum length is 5, and the user clicks "Show less frequently",
-        then the minimum length will be incremented to 6, the "Show less
-        frequently" command will be hidden, and the user can continue to trigger
-        the weather suggestion by typing 6 characters, but they will not be able
-        to increment the minimum length any further.
-        If not defines a cap, no cap will be used, and the user will be able to
-        increment the minimum length without any limit.
+        Define the UI type for addon suggestions.
+        In case of "a", display rating stars and review volume on the bottom of
+        the suggestion. In case of "b", display a label explaining that the
+        addon suggestion is a recommendation.
     autoFillAdaptiveHistoryEnabled:
       type: boolean
       fallbackPref: browser.urlbar.autoFill.adaptiveHistory.enabled
@@ -180,6 +233,19 @@ urlbar:
       setPref: browser.urlbar.showExposureResults
       description: >-
         Boolean used to determine if the results defined in `exposureResults` should be shown in search results. Should be false for Control branch of an experiment.
+    pocketFeatureGate:
+      type: boolean
+      fallbackPref: browser.urlbar.pocket.featureGate
+      description: >-
+        Feature gate that controls whether all aspects of the Pocket suggestions
+        feature are exposed to the user.
+    pocketShowLessFrequentlyCap:
+      type: int
+      description: >-
+        If defined and non-zero, this is the maximum number of times the user
+        will be able to click the "Show less frequently" command for Pocket
+        suggestions. If undefined or zero, the user will be able to click the
+        command without any limit.
     quickSuggestAllowPositionInSuggestions:
       type: boolean
       fallbackPref: browser.urlbar.quicksuggest.allowPositionInSuggestions
@@ -231,6 +297,16 @@ urlbar:
         - history
         - offline
         - online
+    quickSuggestScoreMap:
+      type: json
+      description: >-
+        A JSON object that maps telemetry result types to suggestion scores. If
+        a telemetry result type is present in this map, the client will use the
+        corresponding score as the score for all suggestions of the type,
+        overriding all other sources of scores for the type. In other words,
+        the scores in this map will override scores that are set in remote
+        settings and Merino as well as scores that are hardcoded in the client.
+        Example entries: `"amo": 0.5`, `"adm_sponsored": 0.9`
     quickSuggestShouldShowOnboardingDialog:
       type: boolean
       fallbackPref: browser.urlbar.quicksuggest.shouldShowOnboardingDialog
@@ -299,6 +375,61 @@ urlbar:
         If neither Nimbus nor remote settings defines a cap, no cap will be
         used, and the user will be able to increment the minimum length without
         any limit.
+
+frecency:
+  description: "The address bar ranking algorithm"
+  owner: search-and-suggest-program@mozilla.com
+  hasExposure: false
+  isEarlyStartup: true
+  variables:
+    originsAlternativeEnable:
+      description: >-
+        Use an alternative ranking algorithm for autofilling origins, that is
+        mainly domains of Web pages. When the user types the beginning of an
+        origin, we autofill the whole origin. Whether autofill happens depends
+        on the ranking algorithm. Bookmarks are always autofilled anyway.
+      type: boolean
+      setPref: "places.frecency.origins.alternative.featureGate"
+    originsDaysCutOff:
+      description: >-
+        The alternative ranking algorithm only considers pages visited in the
+        last N days, where N is controlled by this variable.
+      type: int
+      setPref: "places.frecency.origins.alternative.daysCutOff"
+    pagesAlternativeEnable:
+      description: >-
+        Use an alternative ranking algorithm for sorting history and bookmarks
+        among the urlbar results.
+      type: boolean
+      setPref: "places.frecency.pages.alternative.featureGate"
+    pagesNumSampledVisits:
+      description: >-
+        The number of recent visits to sample when calculating the ranking of
+        a page. Examining all the visits would be expensive, so we only sample
+        recent visits.
+      type: int
+      setPref: "places.frecency.pages.alternative.numSampledVisits"
+    pagesHalfLifeDays:
+      description: >-
+        The number of days after which the ranking halves. This implements the
+        "recency" part of the algorithm.
+      type: int
+      setPref: "places.frecency.pages.alternative.halfLifeDays"
+    pagesHighWeight:
+      description: >-
+        The weight to use for the high importance bucket.
+      type: int
+      setPref: "places.frecency.pages.alternative.highWeight"
+    pagesMediumWeight:
+      description: >-
+        The weight to use for the medium importance bucket.
+      type: int
+      setPref: "places.frecency.pages.alternative.mediumWeight"
+    pagesLowWeight:
+      description: >-
+        The weight to use for the low importance bucket.
+      type: int
+      setPref: "places.frecency.pages.alternative.lowWeight"
 
 aboutwelcome:
   description: "The about:welcome page"
@@ -608,6 +739,16 @@ pocketNewtab:
       # Defined under `pocketNewtab` as it needs to be used along with other variables
       type: int
       description: The maximum number of sponsored Top Sites to be displayed
+    topSitesContileMaxSponsored:
+      # Defined under `pocketNewtab` as it needs to be used along with other variables
+      type: int
+      description: The maximum number of sponsored Top Sites used from Contile
+    topSitesContileSovEnabled:
+      # Defined under `pocketNewtab` as it needs to be used along with other variables
+      description: Enable the Share-of-Voice feature for Sponsored Topsites.
+      type: boolean
+      fallbackPref: >-
+        browser.topsites.contile.sov.enabled
 
 saveToPocket:
   description: The save to Pocket feature
@@ -644,6 +785,13 @@ password-autocomplete:
     directMigrateSingleProfile:
       type: boolean
       description: Enable direct migration?
+    firefoxRelayIntegration:
+      type: boolean
+      description: Can show Firefox Relay integration offer?
+    csvImport:
+      type: boolean
+      description: Can show CSV Import in about:logins or Migration Wizard
+      setPref: "signon.management.page.fileImport.enabled"
 
 shellService:
   description: "Interface with OS, e.g., pinning and set default"
@@ -740,20 +888,19 @@ spotlight:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
+# fxms-message-* placeholder feature ids
 #
-# Before each Nightly leaves the station for Beta, we're currently
-# experimenting with ensuring that we have enough fx-messages-* messages to
-# accomodate all the rollout possibilities for Release that we're aware of,
-# plus one for a buffer just-in-case.
+# https://docs.google.com/spreadsheets/d/119YbeKStLL0Fg2QkK-yN93mrtD1rlneGZGTl_jAwtyw/edit#gid=1903378504
+# has info on using these placeholder feature ids, as well as (very short) instructions on
+# checking to see if we need more (which we do once per Nightly) and how to add them.
 #
-# When adding an fxms-message-* feature id, be sure to also add it to the
-# MESSAGING_EXPERIMENTS_DEFAULT_FEATURES list in ASRouter.
+# Instructions for adding a new fxms-message-* placeholder feature id
+# 1) clone an existing one here
+# 2) update the YAML feature id to the next unused number
+# 3) update the YAML description
+# 4) add the new feature id to MESSAGING_EXPERIMENTS_DEFAULT_FEATURES list in ASRouter.jsm
+# 5) add the new feature id and the version it landed to the spreadsheet tab linked to above
 
-# currently in use by 107+ exp/rollout pair of Import Bookmarks Infrequent
-# Existing Users with 5 bookmarks:
-# https://experimenter.services.mozilla.com/nimbus/import-infrequent-rollout-make-yourself-at-home/summary
 fxms-message-1:
   description: "A Firefox Messaging System message"
   owner: omc@mozilla.com
@@ -766,10 +913,6 @@ fxms-message-1:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next planned use: 110+ exp/rollout pair of Fox Doodle: Pin experiment winner
-# (Existing Users)
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-2:
   description: "Firefox Messaging System message 2"
   owner: omc@mozilla.com
@@ -782,10 +925,6 @@ fxms-message-2:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next planned use: 110+ exp/rollout pair of Fox Doodle: Set Default (Existing
-# Users)
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-3:
   description: "Firefox Messaging System message 3"
   owner: omc@mozilla.com
@@ -798,11 +937,6 @@ fxms-message-3:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next potential planned use: 111+ exp/rollout pair for PDF annotations callout
-# (https://mozilla-hub.atlassian.net/browse/FXE-83) experiment.
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-4:
   description: "Firefox Messaging System message 4"
   owner: omc@mozilla.com
@@ -815,11 +949,6 @@ fxms-message-4:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next potential planned use: 112+ holdback/rollout pair for default PDF handler
-# (https://mozilla-hub.atlassian.net/browse/FXE-91) experiment.
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-5:
   description: "Firefox Messaging System message 5"
   owner: omc@mozilla.com
@@ -832,11 +961,6 @@ fxms-message-5:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next potential planned use: 114+ possible holdback/rollout pair (Device Migration):
-# https://mozilla-hub.atlassian.net/browse/FXE-271
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-6:
   description: "Firefox Messaging System message 6"
   owner: omc@mozilla.com
@@ -849,10 +973,6 @@ fxms-message-6:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next planned use: buffer, for the unexpected
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-7:
   description: "Firefox Messaging System message 7"
   owner: omc@mozilla.com
@@ -865,11 +985,6 @@ fxms-message-7:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-
-# next planned use: buffer, for the unexpected
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-8:
   description: "Firefox Messaging System message 8"
   owner: omc@mozilla.com
@@ -882,10 +997,6 @@ fxms-message-8:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next planned use: buffer, for the unexpected
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-9:
   description: "Firefox Messaging System message 9"
   owner: omc@mozilla.com
@@ -898,10 +1009,6 @@ fxms-message-9:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next planned use: buffer, for the unexpected
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-10:
   description: "Firefox Messaging System message 10"
   owner: omc@mozilla.com
@@ -914,10 +1021,6 @@ fxms-message-10:
     path: "browser/components/newtab/content-src/asrouter/schemas/MessagingExperiment.schema.json"
   variables: {}
 
-# next planned use: buffer, for the unexpected
-#
-# More info about the fx-message-* feature id prototype is available at:
-# https://docs.google.com/document/d/1KdtaNycZL5j240nXofbibm9yKh7qVvu1-uZFLdmYM7Y/
 fxms-message-11:
   description: "Firefox Messaging System message 11"
   owner: omc@mozilla.com
@@ -993,7 +1096,7 @@ glean:
     gleanMetricConfiguration:
       type: json
       description: >-
-        "A map of metric base-identifiers to booleans representing the state of the 'disabled' flag for that metric"
+        A map of metric base-identifiers to booleans representing the state of the 'enabled' flag for that metric.
 
 majorRelease2022:
   description: Major Release 2022
@@ -1178,6 +1281,14 @@ networking:
       description: Whether Early Hints preconnect is enabled
       type: boolean
       setPref: "network.early-hints.preconnect.enabled"
+    dnsMaxPriorityThreads:
+      description: The maximum number of high priority DNS threads that can be created.
+      type: int
+      setPref: "network.dns.max_high_priority_threads"
+    dnsMaxAnyPriorityThreads:
+      description: The maximum number of DNS threads that can be created to handle any priority DNS requests.
+      type: int
+      setPref: "network.dns.max_any_priority_threads"
 
 pingsender:
   description: "In-product usage of the pingsender telemetry reporter."
@@ -1213,17 +1324,6 @@ etpLevel2PBMPref:
       description: Whether to enable ETP level 2 list in the private browsing mode.
       type: boolean
       setPref: "privacy.annotate_channels.strict_list.pbmode.enabled"
-
-accessibilityCache:
-  description: Caches all accessibility information from all documents in the Firefox main process.
-  owner: jteh@mozilla.com
-  hasExposure: false
-  isEarlyStartup: true
-  variables:
-    enabled:
-      description: Whether to enable the accessibility cache.
-      type: boolean
-      setPref: accessibility.cache.enabled
 
 fxaButtonVisibility:
   description: Prefs to control the visibility of the Firefox Accounts toolbar button when not signed in.
@@ -1292,6 +1392,26 @@ fontvisibility:
       setPref: layout.css.font-visibility.private
       description: Set the Font Visibility level for private browsing (will override ETP)
 
+fingerprintingProtection:
+  description: Control Fingerprinting Protection
+  owner: tihuang@mozilla.com
+  hasExposure: false
+  variables:
+    enabledNormal:
+      type: boolean
+      setPref: privacy.fingerprintingProtection
+      description: Enables / disables fingerprinting protection in normal browsing mode.
+    enabledPrivate:
+      type: boolean
+      setPref: privacy.fingerprintingProtection.pbmode
+      description: Enables / disables fingerprinting protection in private browsing mode.
+    overrides:
+      type: string
+      setPref: privacy.fingerprintingProtection.overrides
+      description: >-
+        The protection overrides to add or remove fingerprinting protection
+        targets. Please check RFPTargets.inc for all supported targets.
+
 migrationWizard:
   description: Prefs to control the Migration Wizard UI.
   owner: mconley@mozilla.com
@@ -1329,12 +1449,20 @@ migrationWizard:
           The migration wizard will open in a new top-level content
           window.
 
+        "legacy":
+          The legacy wizard will be opened from about:welcome, even if
+          the new wizard is enabled by default.
+
         "default" / other
           The user will be directed to the migration wizard in
           about:preferences. The tab will not close once the
           user closes the wizard.
       type: string
       setPref: browser.migrate.content-modal.about-welcome-behavior
+    migrateExtensions:
+      description: True if importing extensions is enabled.
+      type: boolean
+      setPref: browser.migrate.chrome.extensions.enabled
 
 mixedContentUpgrading:
   description: Prefs to control whether we upgrade mixed passive content (images, audio, video) from http to https
@@ -1440,3 +1568,102 @@ deviceMigration:
       description: True if new help menu item should be hidden
       type: boolean
       fallbackPref: browser.device-migration.help-menu.hidden
+
+shopping2023:
+  description: Prefs to control the 2023 shopping experiment.
+  owner: jhirsch@mozilla.com
+  hasExposure: true
+  exposureDescription: >-
+    The timing of the exposure event depends on the experiment, but generally
+    the event is recorded when the user first encounters onboarding UI for
+    the shopping feature.
+  variables:
+    enabled:
+      description: True if the experience is enabled
+      type: boolean
+      fallbackPref: browser.shopping.experience2023.enabled
+
+opaqueResponseBlocking:
+  description: Prefs to enable Opaque Response Blocking
+  owner: farre@mozilla.com
+  isEarlyStartup: true
+  hasExposure: true
+  exposureDescription: Exposure is sent when a response is blocked
+  variables:
+    enabled:
+      description: Whether ORB is enabled
+      type: boolean
+      setPref: "browser.opaqueResponseBlocking"
+    javascriptValidator:
+      description: Whether JavaScript validation for ORB is enabled
+      type: boolean
+      setPref: "browser.opaqueResponseBlocking.javascriptValidator"
+    filterFetchResponse:
+      description: Whether filtering of internal responses in the parent ORB is enabled
+      type: int
+      setPref: "browser.opaqueResponseBlocking.filterFetchResponse"
+    mediaExceptionsStrategy:
+      description: >-
+        If we partially or wholly allow audio and video MIME types in conflict with spec.
+      type: int
+      setPref: "browser.opaqueResponseBlocking.mediaExceptionsStrategy"
+
+updatePrompt:
+  description: Prefs to control content and behavior of update notifications
+  owner: omc@mozilla.com
+  hasExposure: true
+  exposureDescription: >-
+    Exposure is sent at most once per browsing session when an update
+    notification prompt is displayed.
+  isEarlyStartup: true
+  variables:
+    showReleaseNotesLink:
+      type: boolean
+      description: >-
+        If true, the "Learn More" link will be shown in the update prompt. If
+        false or omitted, the link will only be shown for supported locales.
+    releaseNotesURL:
+      type: string
+      fallbackPref: app.releaseNotesURL.prompt
+      description: >-
+        Template for the URL opened when the user clicks the "Learn More" link
+        in the update prompt. If an empty string, the link will not be shown.
+
+powerSaver:
+  description: Prefs to control power saving behaviors
+  owner: florian@mozilla.com
+  hasExposure: false
+  isEarlyStartup: true
+  variables:
+    reduceFrameRates:
+      type: int
+      setPref: "gfx.display.max-frame-rate"
+      description: >-
+        Limit the number of frames displayed per second.
+        If omitted, the refresh rate of the screen will be used.
+    mediaAutoPlay:
+      type: int
+      setPref: "media.autoplay.default"
+      description: >-
+        Control if media is allowed to auto-play, with and without sound.
+    backgroundTimerMinTime:
+      type: int
+      setPref: "dom.min_background_timeout_value"
+      description: >-
+        Limit how frequently timers are allowed to run in background tabs.
+    backgroundTimerRegenerationRate:
+      type: int
+      setPref: "dom.timeout.background_budget_regeneration_rate"
+      description: >-
+        Limit how quickly the background tab timer budget regenerates.
+
+firefoxViewNext:
+  description: Next Iteration of Firefox View
+  owner: firefoxview@mozilla.com
+  hasExposure: false
+  isEarlyStartup: true
+  variables:
+    enabled:
+      type: boolean
+      fallbackPref: "browser.tabs.firefox-view-next"
+      description: "Whether or not to enable the new Firefox View"

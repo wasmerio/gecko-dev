@@ -9,8 +9,7 @@
 %>
 
 <%def name="predefined_type(name, type, initial_value, parse_method='parse',
-            vector=False,
-            computed_type=None, initial_specified_value=None,
+            vector=False, initial_specified_value=None,
             allow_quirks='No', allow_empty=False, **kwargs)">
     <%def name="predefined_type_inner(name, type, initial_value, parse_method)">
         #[allow(unused_imports)]
@@ -23,11 +22,7 @@
         use smallvec::SmallVec;
         pub use crate::values::specified::${type} as SpecifiedValue;
         pub mod computed_value {
-            % if computed_type:
-            pub use ${computed_type} as T;
-            % else:
             pub use crate::values::computed::${type} as T;
-            % endif
         }
         % if initial_value:
         #[inline] pub fn get_initial_value() -> computed_value::T { ${initial_value} }
@@ -436,13 +431,7 @@
             declaration: &PropertyDeclaration,
             context: &mut computed::Context,
         ) {
-            context.for_non_inherited_property =
-                % if property.style_struct.inherited:
-                    None;
-                % else:
-                    Some(LonghandId::${property.camel_case});
-                % endif
-
+            context.for_non_inherited_property = ${"false" if property.style_struct.inherited else "true"};
             let specified_value = match *declaration {
                 PropertyDeclaration::${property.camel_case}(ref value) => value,
                 PropertyDeclaration::CSSWideKeyword(ref declaration) => {

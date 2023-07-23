@@ -57,20 +57,20 @@ const StatusCode = createFactory(
   require("resource://devtools/client/netmonitor/src/components/StatusCode.js")
 );
 
-loader.lazyGetter(this, "MDNLink", function() {
+loader.lazyGetter(this, "MDNLink", function () {
   return createFactory(
     require("resource://devtools/client/shared/components/MdnLink.js")
   );
 });
-loader.lazyGetter(this, "Rep", function() {
+loader.lazyGetter(this, "Rep", function () {
   return require("resource://devtools/client/shared/components/reps/index.js")
     .REPS.Rep;
 });
-loader.lazyGetter(this, "MODE", function() {
+loader.lazyGetter(this, "MODE", function () {
   return require("resource://devtools/client/shared/components/reps/index.js")
     .MODE;
 });
-loader.lazyGetter(this, "TreeRow", function() {
+loader.lazyGetter(this, "TreeRow", function () {
   return createFactory(
     require("resource://devtools/client/shared/components/tree/TreeRow.js")
   );
@@ -113,7 +113,7 @@ const HEADERS_ETP = L10N.getStr(
   "netmonitor.trackingResource.enhancedTrackingProtection"
 );
 const HEADERS_PRIORITY = L10N.getStr("netmonitor.headers.requestPriority");
-
+const HEADERS_DNS = L10N.getStr("netmonitor.headers.dns");
 /**
  * Headers panel component
  * Lists basic information about the request
@@ -556,6 +556,7 @@ class HeadersPanel extends Component {
         isThirdPartyTrackingResource,
         contentSize,
         transferredSize,
+        isResolvedByTRR,
       },
       openRequestBlockingAndAddUrl,
       openHTTPCustomRequestTab,
@@ -755,12 +756,22 @@ class HeadersPanel extends Component {
       ? this.renderSummary(HEADERS_PRIORITY, getRequestPriorityAsText(priority))
       : null;
 
+    const summaryDNS = this.renderSummary(
+      HEADERS_DNS,
+      L10N.getStr(
+        isResolvedByTRR
+          ? "netmonitor.headers.dns.overHttps"
+          : "netmonitor.headers.dns.basic"
+      )
+    );
+
     const summaryItems = [
       summaryStatus,
       summaryVersion,
       summarySize,
       summaryReferrerPolicy,
       summaryPriority,
+      summaryDNS,
       trackingProtectionStatus,
       trackingProtectionDetails,
     ].filter(summaryItem => summaryItem !== null);

@@ -51,6 +51,7 @@ class nsIPersistentProperties;
 class nsIProxyInfo;
 class nsIRandomAccessStream;
 class nsIRequestObserver;
+class nsISerialEventTarget;
 class nsIStreamListener;
 class nsIStreamLoader;
 class nsIStreamLoaderObserver;
@@ -346,11 +347,10 @@ nsresult NS_NewInputStreamChannel(nsIChannel** outChannel, nsIURI* aUri,
                                   nsContentPolicyType aContentPolicyType,
                                   bool aIsSrcdocChannel = false);
 
-nsresult NS_NewInputStreamPump(nsIInputStreamPump** aResult,
-                               already_AddRefed<nsIInputStream> aStream,
-                               uint32_t aSegsize = 0, uint32_t aSegcount = 0,
-                               bool aCloseWhenDone = false,
-                               nsIEventTarget* aMainThreadTarget = nullptr);
+nsresult NS_NewInputStreamPump(
+    nsIInputStreamPump** aResult, already_AddRefed<nsIInputStream> aStream,
+    uint32_t aSegsize = 0, uint32_t aSegcount = 0, bool aCloseWhenDone = false,
+    nsISerialEventTarget* aMainThreadTarget = nullptr);
 
 nsresult NS_NewLoadGroup(nsILoadGroup** result, nsIRequestObserver* obs);
 
@@ -991,6 +991,12 @@ bool SchemeIsData(nsIURI* aURI);
 bool SchemeIsViewSource(nsIURI* aURI);
 bool SchemeIsResource(nsIURI* aURI);
 bool SchemeIsFTP(nsIURI* aURI);
+
+// Helper functions for SetProtocol methods to follow
+// step 2.1 in https://url.spec.whatwg.org/#scheme-state
+bool SchemeIsSpecial(const nsACString&);
+bool IsSchemeChangePermitted(nsIURI*, const nsACString&);
+already_AddRefed<nsIURI> TryChangeProtocol(nsIURI*, const nsAString&);
 
 struct LinkHeader {
   nsString mHref;

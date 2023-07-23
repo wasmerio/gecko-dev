@@ -8,6 +8,7 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  generateUUID: "chrome://remote/content/shared/UUID.sys.mjs",
   Log: "chrome://remote/content/shared/Log.sys.mjs",
   truncate: "chrome://remote/content/shared/Format.sys.mjs",
   WebSocketTransport:
@@ -24,10 +25,7 @@ export class WebSocketConnection {
    *     Reference to the httpd.js's connection needed for clean-up.
    */
   constructor(webSocket, httpdConnection) {
-    this.id = Services.uuid
-      .generateUUID()
-      .toString()
-      .slice(1, -1);
+    this.id = lazy.generateUUID();
 
     this.httpdConnection = httpdConnection;
 
@@ -64,11 +62,6 @@ export class WebSocketConnection {
    */
   close() {
     this.transport.close();
-
-    // In addition to the WebSocket transport, we also have to close the
-    // connection used internally within httpd.js. Otherwise the server doesn't
-    // shut down correctly, and keeps these Connection instances alive.
-    this.httpdConnection.close();
   }
 
   /**
@@ -130,8 +123,18 @@ export class WebSocketConnection {
   /**
    * Called by the `transport` when the connection is closed.
    */
-  onClosed(status) {
+  onConnectionClose(status) {
     lazy.logger.debug(`${this.constructor.name} ${this.id} closed`);
+  }
+
+  /**
+   * Called when the socket is closed.
+   */
+  onSocketClose() {
+    // In addition to the WebSocket transport, we also have to close the
+    // connection used internally within httpd.js. Otherwise the server doesn't
+    // shut down correctly, and keeps these Connection instances alive.
+    this.httpdConnection.close();
   }
 
   /**

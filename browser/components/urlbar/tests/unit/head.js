@@ -8,14 +8,11 @@ const { AppConstants } = ChromeUtils.importESModule(
   "resource://gre/modules/AppConstants.sys.mjs"
 );
 
-var {
-  UrlbarMuxer,
-  UrlbarProvider,
-  UrlbarQueryContext,
-  UrlbarUtils,
-} = ChromeUtils.importESModule("resource:///modules/UrlbarUtils.sys.mjs");
+var { UrlbarMuxer, UrlbarProvider, UrlbarQueryContext, UrlbarUtils } =
+  ChromeUtils.importESModule("resource:///modules/UrlbarUtils.sys.mjs");
 
 ChromeUtils.defineESModuleGetters(this, {
+  AddonTestUtils: "resource://testing-common/AddonTestUtils.sys.mjs",
   PlacesTestUtils: "resource://testing-common/PlacesTestUtils.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   PromiseUtils: "resource://gre/modules/PromiseUtils.sys.mjs",
@@ -27,13 +24,11 @@ ChromeUtils.defineESModuleGetters(this, {
   UrlbarProviderOpenTabs: "resource:///modules/UrlbarProviderOpenTabs.sys.mjs",
   UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.sys.mjs",
   UrlbarResult: "resource:///modules/UrlbarResult.sys.mjs",
-  UrlbarTestUtils: "resource://testing-common/UrlbarTestUtils.sys.mjs",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
 });
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  AddonTestUtils: "resource://testing-common/AddonTestUtils.jsm",
   HttpServer: "resource://testing-common/httpd.js",
 });
 
@@ -48,6 +43,14 @@ XPCOMUtils.defineLazyGetter(this, "QuickSuggestTestUtils", () => {
 XPCOMUtils.defineLazyGetter(this, "MerinoTestUtils", () => {
   const { MerinoTestUtils: module } = ChromeUtils.importESModule(
     "resource://testing-common/MerinoTestUtils.sys.mjs"
+  );
+  module.init(this);
+  return module;
+});
+
+ChromeUtils.defineLazyGetter(this, "UrlbarTestUtils", () => {
+  const { UrlbarTestUtils: module } = ChromeUtils.importESModule(
+    "resource://testing-common/UrlbarTestUtils.sys.mjs"
   );
   module.init(this);
   return module;
@@ -70,10 +73,6 @@ AddonTestUtils.createAppInfo(
 
 const SUGGESTIONS_ENGINE_NAME = "Suggestions";
 const TAIL_SUGGESTIONS_ENGINE_NAME = "Tail Suggestions";
-
-add_setup(async function initXPCShellDependencies() {
-  await UrlbarTestUtils.initXPCShellDependencies();
-});
 
 /**
  * Gets the database connection.  If the Places connection is invalid it will
@@ -387,7 +386,6 @@ function testEngine_setup() {
 
 async function cleanupPlaces() {
   Services.prefs.clearUserPref("browser.urlbar.autoFill");
-  Services.prefs.clearUserPref("browser.urlbar.autoFill.searchEngines");
 
   await PlacesUtils.bookmarks.eraseEverything();
   await PlacesUtils.history.clear();
@@ -581,41 +579,6 @@ function makeKeywordSearchResult(
 }
 
 /**
- * Creates a UrlbarResult for a priority search result.
- *
- * @param {UrlbarQueryContext} queryContext
- *   The context that this result will be displayed in.
- * @param {object} options
- *   Options for the result.
- * @param {string} [options.engineName]
- *   The name of the engine providing the suggestion. Leave blank if there
- *   is no suggestion.
- * @param {string} [options.engineIconUri]
- *   A URI for the engine's icon.
- * @param {boolean} [options.heuristic]
- *   True if this is a heuristic result. Defaults to false.
- * @returns {UrlbarResult}
- */
-function makePrioritySearchResult(
-  queryContext,
-  { engineName, engineIconUri, heuristic }
-) {
-  let result = new UrlbarResult(
-    UrlbarUtils.RESULT_TYPE.SEARCH,
-    UrlbarUtils.RESULT_SOURCE.SEARCH,
-    ...UrlbarResult.payloadAndSimpleHighlights(queryContext.tokens, {
-      engine: [engineName, UrlbarUtils.HIGHLIGHT.TYPED],
-      icon: engineIconUri,
-    })
-  );
-
-  if (heuristic) {
-    result.heuristic = heuristic;
-  }
-  return result;
-}
-
-/**
  * Creates a UrlbarResult for a remote tab result.
  *
  * @param {UrlbarQueryContext} queryContext
@@ -796,9 +759,10 @@ function makeSearchResult(
   );
 
   if (typeof suggestion == "string") {
-    result.payload.lowerCaseSuggestion = result.payload.suggestion.toLocaleLowerCase();
+    result.payload.lowerCaseSuggestion =
+      result.payload.suggestion.toLocaleLowerCase();
     result.payload.trending = trending;
-    result.payload.isRichSuggestion = isRichSuggestion;
+    result.isRichSuggestion = isRichSuggestion;
   }
 
   if (providerName) {

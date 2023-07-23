@@ -256,11 +256,7 @@ ICEntry& WarpScriptOracle::getICEntryAndFallback(BytecodeLocation loc,
 
 WarpEnvironment WarpScriptOracle::createEnvironment() {
   // Don't do anything if the script doesn't use the environment chain.
-  // Always make an environment chain if the script needs an arguments object
-  // because ArgumentsObject construction requires the environment chain to be
-  // passed in.
-  if (!script_->jitScript()->usesEnvironmentChain() &&
-      !script_->needsArgsObj()) {
+  if (!script_->jitScript()->usesEnvironmentChain()) {
     return WarpEnvironment(NoEnvironment());
   }
 
@@ -801,6 +797,17 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
 
   ICCacheIRStub* stub = firstStub->toCacheIRStub();
 
+  // Don't transpile if this IC ever encountered a case where it had
+  // no stub to attach.
+  if (fallbackStub->state().hasFailures()) {
+    [[maybe_unused]] unsigned line, column;
+    LineNumberAndColumn(script_, loc, &line, &column);
+
+    JitSpew(JitSpew_WarpTranspiler, "Failed to attach for JSOp::%s @ %s:%u:%u",
+            CodeName(loc.getOp()), script_->filename(), line, column);
+    return Ok();
+  }
+
   // Don't transpile if there are other stubs with entered-count > 0. Counters
   // are reset when a new stub is attached so this means the stub that was added
   // most recently didn't handle all cases.
@@ -1025,7 +1032,9 @@ AbortReasonOr<bool> WarpScriptOracle::maybeInlineCall(
         // If the target script can't be warp-compiled, mark it as
         // uninlineable, clean up, and fall through to the non-inlined path.
         ICEntry* entry = icScript_->icEntryForStub(fallbackStub);
-        fallbackStub->unlinkStub(cx_->zone(), entry, /*prev=*/nullptr, stub);
+        if (entry->firstStub() == stub) {
+          fallbackStub->unlinkStub(cx_->zone(), entry, /*prev=*/nullptr, stub);
+        }
         targetScript->setUninlineable();
         info_->inlineScriptTree()->removeCallee(inlineScriptTree);
         if (isTrialInlined) {
@@ -1151,6 +1160,10 @@ bool WarpScriptOracle::replaceNurseryAndAllocSitePointers(
         static_assert(std::is_convertible_v<BaseScript*, gc::TenuredCell*>,
                       "Code assumes scripts are tenured");
         break;
+      case StubField::Type::JitCode:
+        static_assert(std::is_convertible_v<JitCode*, gc::TenuredCell*>,
+                      "Code assumes JitCodes are tenured");
+        break;
       case StubField::Type::JSObject: {
         JSObject* obj =
             stubInfo->getStubField<ICCacheIRStub, JSObject*>(stub, offset);
@@ -1194,7 +1207,7 @@ bool WarpScriptOracle::replaceNurseryAndAllocSitePointers(
       case StubField::Type::AllocSite: {
         uintptr_t oldWord = stubInfo->getStubRawWord(stub, offset);
         auto* site = reinterpret_cast<gc::AllocSite*>(oldWord);
-        gc::InitialHeap initialHeap = site->initialHeap();
+        gc::Heap initialHeap = site->initialHeap();
         uintptr_t newWord = uintptr_t(initialHeap);
         stubInfo->replaceStubRawWord(stubDataCopy, offset, oldWord, newWord);
         break;

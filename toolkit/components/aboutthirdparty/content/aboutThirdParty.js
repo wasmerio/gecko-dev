@@ -52,6 +52,21 @@ function moduleCompareForDisplay(a, b) {
 async function fetchData() {
   let data = null;
   try {
+    // Wait until the module load events are ready (bug 1833152)
+    const sleep = delayInMs =>
+      new Promise(resolve => setTimeout(resolve, delayInMs));
+    let loadEventsReady = Services.telemetry.areUntrustedModuleLoadEventsReady;
+    let numberOfAttempts = 0;
+    // Just to make sure we don't infinite loop here. (this is normally quite
+    // quick) If we do hit this limit, the page will return an empty list of
+    // modules.
+    const MAX_ATTEMPTS = 30;
+    while (!loadEventsReady && numberOfAttempts < MAX_ATTEMPTS) {
+      await sleep(1000);
+      numberOfAttempts++;
+      loadEventsReady = Services.telemetry.areUntrustedModuleLoadEventsReady;
+    }
+
     data = await Services.telemetry.getUntrustedModuleLoadEvents(
       Services.telemetry.INCLUDE_OLD_LOADEVENTS |
         Services.telemetry.KEEP_LOADEVENTS_NEW |
@@ -158,7 +173,7 @@ function setContent(element, text, l10n) {
   if (text) {
     element.textContent = text;
   } else if (l10n) {
-    element.setAttribute("data-l10n-id", l10n);
+    document.l10n.setAttributes(element, l10n);
   }
 }
 
@@ -172,17 +187,13 @@ function onClickOpenDir(event) {
 
 // Returns whether we should restart.
 async function confirmRestartPrompt() {
-  let [
-    msg,
-    title,
-    restartButtonText,
-    restartLaterButtonText,
-  ] = await document.l10n.formatValues([
-    { id: "third-party-blocking-requires-restart" },
-    { id: "third-party-should-restart-title" },
-    { id: "third-party-restart-now" },
-    { id: "third-party-restart-later" },
-  ]);
+  let [msg, title, restartButtonText, restartLaterButtonText] =
+    await document.l10n.formatValues([
+      { id: "third-party-blocking-requires-restart" },
+      { id: "third-party-should-restart-title" },
+      { id: "third-party-restart-now" },
+      { id: "third-party-restart-later" },
+    ]);
   let buttonFlags =
     Services.prompt.BUTTON_POS_0 * Services.prompt.BUTTON_TITLE_IS_STRING +
     Services.prompt.BUTTON_POS_1 * Services.prompt.BUTTON_TITLE_IS_STRING +
@@ -222,13 +233,13 @@ async function onBlock(event) {
     event.target.classList.toggle("module-blocked");
     let blockButtonL10nId;
     if (wasBlocked) {
-      blockButtonL10nId = "third-party-button-to-block";
+      blockButtonL10nId = "third-party-button-to-block-module";
     } else {
       blockButtonL10nId = AboutThirdParty.isDynamicBlocklistDisabled
-        ? "third-party-button-to-unblock-disabled"
-        : "third-party-button-to-unblock";
+        ? "third-party-button-to-unblock-module-disabled"
+        : "third-party-button-to-unblock-module";
     }
-    event.target.setAttribute("data-l10n-id", blockButtonL10nId);
+    document.l10n.setAttributes(event.target, blockButtonL10nId);
     updatedBlocklist = true;
   } catch (ex) {
     console.error("Failed to update the blocklist file - ", ex.result);
@@ -388,11 +399,11 @@ function setUpBlockButton(aCard, isBlocklistDisabled, aModule) {
     blockButton.classList.add("blocklist-disabled");
   }
   if (blockButton.classList.contains("module-blocked")) {
-    blockButton.setAttribute(
-      "data-l10n-id",
+    document.l10n.setAttributes(
+      blockButton,
       isBlocklistDisabled
-        ? "third-party-button-to-unblock-disabled"
-        : "third-party-button-to-unblock"
+        ? "third-party-button-to-unblock-module-disabled"
+        : "third-party-button-to-unblock-module"
     );
   }
 }
@@ -468,9 +479,8 @@ function visualizeData(aData) {
       modTagsContainer.querySelector(".tag-shellex").hidden = false;
     }
 
-    newCard.querySelector(
-      ".blocked-by-builtin"
-    ).hidden = !module.isBlockedByBuiltin;
+    newCard.querySelector(".blocked-by-builtin").hidden =
+      !module.isBlockedByBuiltin;
     if (isBlocklistAvailable) {
       setUpBlockButton(newCard, isBlocklistDisabled, module);
     }
@@ -640,6 +650,9 @@ async function onLoad() {
   Promise.all(backgroundTasks)
     .then(() => {
       gBackgroundTasksDone = true;
+      // Reload button will either show or is not needed, so we can hide the
+      // loading indicator.
+      document.getElementById("background-data-loading").hidden = true;
       if (!hasData) {
         // If all async tasks were completed before fetchData,
         // or there was no data available, visualizeData shows

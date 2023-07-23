@@ -1412,7 +1412,8 @@ nsresult imgLoader::RemoveEntriesInternal(nsIPrincipal* aPrincipal,
 
   nsAutoString origin;
   if (aPrincipal) {
-    nsresult rv = nsContentUtils::GetUTFOrigin(aPrincipal, origin);
+    nsresult rv =
+        nsContentUtils::GetWebExposedOriginSerialization(aPrincipal, origin);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -1433,7 +1434,8 @@ nsresult imgLoader::RemoveEntriesInternal(nsIPrincipal* aPrincipal,
         }
 
         nsAutoString imageOrigin;
-        nsresult rv = nsContentUtils::GetUTFOrigin(key.URI(), imageOrigin);
+        nsresult rv = nsContentUtils::GetWebExposedOriginSerialization(
+            key.URI(), imageOrigin);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return false;
         }
@@ -1502,23 +1504,24 @@ nsresult imgLoader::RemoveEntriesInternal(nsIPrincipal* aPrincipal,
   return NS_OK;
 }
 
+constexpr auto AllCORSModes() {
+  return MakeInclusiveEnumeratedRange(kFirstCORSMode, kLastCORSMode);
+}
+
 NS_IMETHODIMP
 imgLoader::RemoveEntry(nsIURI* aURI, Document* aDoc) {
-  if (aURI) {
-    OriginAttributes attrs;
-    if (aDoc) {
-      nsCOMPtr<nsIPrincipal> principal = aDoc->NodePrincipal();
-      if (principal) {
-        attrs = principal->OriginAttributesRef();
-      }
-    }
-
-    ImageCacheKey key(aURI, attrs, aDoc);
-    if (RemoveFromCache(key)) {
-      return NS_OK;
-    }
+  if (!aURI) {
+    return NS_OK;
   }
-  return NS_ERROR_NOT_AVAILABLE;
+  OriginAttributes attrs;
+  if (aDoc) {
+    attrs = aDoc->NodePrincipal()->OriginAttributesRef();
+  }
+  for (auto corsMode : AllCORSModes()) {
+    ImageCacheKey key(aURI, corsMode, attrs, aDoc);
+    RemoveFromCache(key);
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1534,20 +1537,22 @@ imgLoader::FindEntryProperties(nsIURI* uri, Document* aDoc,
     }
   }
 
-  ImageCacheKey key(uri, attrs, aDoc);
-  RefPtr<imgCacheEntry> entry;
-  if (mCache.Get(key, getter_AddRefs(entry)) && entry) {
+  for (auto corsMode : AllCORSModes()) {
+    ImageCacheKey key(uri, corsMode, attrs, aDoc);
+    RefPtr<imgCacheEntry> entry;
+    if (!mCache.Get(key, getter_AddRefs(entry)) || !entry) {
+      continue;
+    }
     if (mCacheTracker && entry->HasNoProxies()) {
       mCacheTracker->MarkUsed(entry);
     }
-
     RefPtr<imgRequest> request = entry->GetRequest();
     if (request) {
       nsCOMPtr<nsIProperties> properties = request->Properties();
       properties.forget(_retval);
+      return NS_OK;
     }
   }
-
   return NS_OK;
 }
 
@@ -2228,8 +2233,8 @@ static void MakeRequestStaticIfNeeded(
 bool imgLoader::IsImageAvailable(nsIURI* aURI,
                                  nsIPrincipal* aTriggeringPrincipal,
                                  CORSMode aCORSMode, Document* aDocument) {
-  ImageCacheKey key(aURI, aTriggeringPrincipal->OriginAttributesRef(),
-                    aDocument);
+  ImageCacheKey key(aURI, aCORSMode,
+                    aTriggeringPrincipal->OriginAttributesRef(), aDocument);
   RefPtr<imgCacheEntry> entry;
   if (!mCache.Get(key, getter_AddRefs(entry)) || !entry) {
     return false;
@@ -2406,7 +2411,7 @@ nsresult imgLoader::LoadImage(
   if (aTriggeringPrincipal) {
     attrs = aTriggeringPrincipal->OriginAttributesRef();
   }
-  ImageCacheKey key(aURI, attrs, aLoadingDocument);
+  ImageCacheKey key(aURI, corsmode, attrs, aLoadingDocument);
   if (mCache.Get(key, getter_AddRefs(entry)) && entry) {
     bool newChannelCreated = false;
     if (ValidateEntry(entry, aURI, aInitialDocumentURI, aReferrerInfo,
@@ -2643,7 +2648,9 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
 
   OriginAttributes attrs = loadInfo->GetOriginAttributes();
 
-  ImageCacheKey key(uri, attrs, aLoadingDocument);
+  // TODO: Get a meaningful cors mode from the caller probably?
+  const auto corsMode = CORS_NONE;
+  ImageCacheKey key(uri, corsMode, attrs, aLoadingDocument);
 
   nsLoadFlags requestFlags = nsIRequest::LOAD_NORMAL;
   channel->GetLoadFlags(&requestFlags);
@@ -2676,7 +2683,7 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
 
       if (ValidateEntry(entry, uri, nullptr, nullptr, nullptr, aObserver,
                         aLoadingDocument, requestFlags, policyType, false,
-                        nullptr, nullptr, nullptr, CORS_NONE, false, 0)) {
+                        nullptr, nullptr, nullptr, corsMode, false, 0)) {
         request = entry->GetRequest();
       } else {
         nsCOMPtr<nsICacheInfoChannel> cacheChan(do_QueryInterface(channel));
@@ -2753,7 +2760,8 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
     // constructed above with the *current URI* and not the *original URI*. I'm
     // pretty sure this is a bug, and it's preventing us from ever getting a
     // cache hit in LoadImageWithChannel when redirects are involved.
-    ImageCacheKey originalURIKey(originalURI, attrs, aLoadingDocument);
+    ImageCacheKey originalURIKey(originalURI, corsMode, attrs,
+                                 aLoadingDocument);
 
     // Default to doing a principal check because we don't know who
     // started that load and whether their principal ended up being
@@ -2772,7 +2780,7 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
     // can set aHadInsecureRedirect to false here.
     rv = request->Init(originalURI, uri, /* aHadInsecureRedirect = */ false,
                        channel, channel, entry, aLoadingDocument, nullptr,
-                       CORS_NONE, nullptr);
+                       corsMode, nullptr);
     NS_ENSURE_SUCCESS(rv, rv);
 
     RefPtr<ProxyListener> pl =
@@ -3314,13 +3322,10 @@ imgCacheValidator::OnRedirectVerifyCallback(nsresult aResult) {
   // an external application, e.g. mailto:
   nsCOMPtr<nsIURI> uri;
   mRedirectChannel->GetURI(getter_AddRefs(uri));
-  bool doesNotReturnData = false;
-  NS_URIChainHasFlags(uri, nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA,
-                      &doesNotReturnData);
 
   nsresult result = NS_OK;
 
-  if (doesNotReturnData) {
+  if (nsContentUtils::IsExternalProtocol(uri)) {
     result = NS_ERROR_ABORT;
   }
 

@@ -3,7 +3,6 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 import {
-  getSource,
   getFrames,
   getBlackBoxRanges,
   getSelectedFrame,
@@ -13,9 +12,12 @@ import { isFrameBlackBoxed } from "../../utils/source";
 
 import assert from "../../utils/assert";
 import { getOriginalLocation } from "../../utils/source-maps";
-import { createLocation } from "../../utils/location";
-
+import {
+  debuggerToSourceMapLocation,
+  sourceMapToDebuggerLocation,
+} from "../../utils/location";
 import { isGeneratedId } from "devtools/client/shared/source-map-loader/index";
+import { annotateFramesWithLibrary } from "../../utils/pause/frames/annotateFrames";
 
 function getSelectedFrameId(state, thread, frames) {
   let selectedFrame = getSelectedFrame(state, thread);
@@ -36,6 +38,10 @@ async function updateFrameLocation(frame, thunkArgs) {
     return Promise.resolve(frame);
   }
   const location = await getOriginalLocation(frame.location, thunkArgs, true);
+  // Avoid instantiating new frame objects if the frame location isn't mapped
+  if (location == frame.location) {
+    return frame;
+  }
   return {
     ...frame,
     location,
@@ -53,8 +59,8 @@ function updateFrameLocations(frames, thunkArgs) {
   );
 }
 
-function isWasmOriginalSourceFrame(frame, getState) {
-  if (isGeneratedId(frame.location.sourceId)) {
+function isWasmOriginalSourceFrame(frame) {
+  if (isGeneratedId(frame.location.source.id)) {
     return false;
   }
 
@@ -65,12 +71,12 @@ async function expandFrames(frames, { getState, sourceMapLoader }) {
   const result = [];
   for (let i = 0; i < frames.length; ++i) {
     const frame = frames[i];
-    if (frame.isOriginal || !isWasmOriginalSourceFrame(frame, getState)) {
+    if (frame.isOriginal || !isWasmOriginalSourceFrame(frame)) {
       result.push(frame);
       continue;
     }
     const originalFrames = await sourceMapLoader.getOriginalStackFrames(
-      frame.generatedLocation
+      debuggerToSourceMapLocation(frame.generatedLocation)
     );
     if (!originalFrames) {
       result.push(frame);
@@ -95,12 +101,10 @@ async function expandFrames(frames, { getState, sourceMapLoader }) {
       result.push({
         id,
         displayName: originalFrame.displayName,
-        // SourceMapLoader doesn't known about debugger's source objects
-        // so that we have to fetch it from here
-        location: createLocation({
-          ...originalFrame.location,
-          source: getSource(getState(), originalFrame.location.sourceId),
-        }),
+        location: sourceMapToDebuggerLocation(
+          getState(),
+          originalFrame.location
+        ),
         index: frame.index,
         source: null,
         thread: frame.thread,
@@ -130,7 +134,7 @@ async function expandFrames(frames, { getState, sourceMapLoader }) {
  * @static
  */
 export function mapFrames(cx) {
-  return async function(thunkArgs) {
+  return async function (thunkArgs) {
     const { dispatch, getState } = thunkArgs;
     const frames = getFrames(getState(), cx.thread);
     if (!frames) {
@@ -140,6 +144,9 @@ export function mapFrames(cx) {
     let mappedFrames = await updateFrameLocations(frames, thunkArgs);
 
     mappedFrames = await expandFrames(mappedFrames, thunkArgs);
+
+    // Add the "library" attribute on all frame objects (if relevant)
+    annotateFramesWithLibrary(mappedFrames);
 
     const selectedFrameId = getSelectedFrameId(
       getState(),

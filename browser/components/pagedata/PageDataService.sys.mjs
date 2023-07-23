@@ -9,16 +9,13 @@ import { EventEmitter } from "resource://gre/modules/EventEmitter.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
   HiddenFrame: "resource://gre/modules/HiddenFrame.sys.mjs",
   PromiseUtils: "resource://gre/modules/PromiseUtils.sys.mjs",
 });
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-});
-
-XPCOMUtils.defineLazyGetter(lazy, "logConsole", function() {
+XPCOMUtils.defineLazyGetter(lazy, "logConsole", function () {
   return console.createInstance({
     prefix: "PageData",
     maxLogLevel: Services.prefs.getBoolPref("browser.pagedata.log", false)
@@ -364,9 +361,10 @@ export const PageDataService = new (class PageDataService extends EventEmitter {
       if (!win.closed) {
         // Ask any existing tabs to report
         for (let tab of win.gBrowser.tabs) {
-          let parent = tab.linkedBrowser.browsingContext?.currentWindowGlobal.getActor(
-            "PageData"
-          );
+          let parent =
+            tab.linkedBrowser.browsingContext?.currentWindowGlobal.getActor(
+              "PageData"
+            );
 
           parent.sendAsyncMessage("PageData:CheckLoaded");
         }

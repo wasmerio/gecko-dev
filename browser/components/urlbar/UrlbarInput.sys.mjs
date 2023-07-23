@@ -10,8 +10,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserSearchTelemetry: "resource:///modules/BrowserSearchTelemetry.sys.mjs",
-  CONTEXTUAL_SERVICES_PING_TYPES:
-    "resource:///modules/PartnerLinkAttribution.sys.mjs",
+  BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
   ExtensionSearchHandler:
     "resource://gre/modules/ExtensionSearchHandler.sys.mjs",
   PartnerLinkAttribution: "resource:///modules/PartnerLinkAttribution.sys.mjs",
@@ -32,7 +31,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserUIUtils: "resource:///modules/BrowserUIUtils.jsm",
   ObjectUtils: "resource://gre/modules/ObjectUtils.jsm",
 });
 
@@ -329,6 +327,25 @@ export class UrlbarInput {
     this._suppressPrimaryAdjustment = false;
   }
 
+  setSelectionRange(selectionStart, selectionEnd) {
+    this.focus();
+
+    let beforeSelect = new CustomEvent("beforeselect", {
+      bubbles: true,
+      cancelable: true,
+    });
+    this.inputField.dispatchEvent(beforeSelect);
+    if (beforeSelect.defaultPrevented) {
+      return;
+    }
+
+    // See _on_select().  HTMLInputElement.select() dispatches a "select"
+    // event but does not set the primary selection.
+    this._suppressPrimaryAdjustment = true;
+    this.inputField.setSelectionRange(selectionStart, selectionEnd);
+    this._suppressPrimaryAdjustment = false;
+  }
+
   /**
    * Sets the URI to display in the location bar.
    *
@@ -361,9 +378,10 @@ export class UrlbarInput {
         !dontShowSearchTerms &&
         lazy.UrlbarPrefs.isPersistedSearchTermsEnabled()
       ) {
-        this.window.gBrowser.selectedBrowser.searchTerms = lazy.UrlbarSearchUtils.getSearchTermIfDefaultSerpUri(
-          this.window.gBrowser.selectedBrowser.originalURI ?? uri
-        );
+        this.window.gBrowser.selectedBrowser.searchTerms =
+          lazy.UrlbarSearchUtils.getSearchTermIfDefaultSerpUri(
+            this.window.gBrowser.selectedBrowser.originalURI ?? uri
+          );
       }
     }
 
@@ -449,7 +467,7 @@ export class UrlbarInput {
 
     this.value = value;
     this.valueIsTyped = !valid;
-    this.removeAttribute("usertyping");
+    this.toggleAttribute("usertyping", !valid && value);
 
     if (this.focused && value != previousUntrimmedValue) {
       if (
@@ -748,7 +766,7 @@ export class UrlbarInput {
     // the appropriate engine submission url.
     let browser = this.window.gBrowser.selectedBrowser;
     let lastLocationChange = browser.lastLocationChange;
-    lazy.UrlbarUtils.getHeuristicResultFor(url)
+    lazy.UrlbarUtils.getHeuristicResultFor(url, this.window)
       .then(newResult => {
         // Because this happens asynchronously, we must verify that the browser
         // location did not change in the meanwhile.
@@ -772,10 +790,8 @@ export class UrlbarInput {
           if (this.isPrivate) {
             flags |= Ci.nsIURIFixup.FIXUP_FLAG_PRIVATE_CONTEXT;
           }
-          let {
-            preferredURI: uri,
-            postData,
-          } = Services.uriFixup.getFixupURIInfo(url, flags);
+          let { preferredURI: uri, postData } =
+            Services.uriFixup.getFixupURIInfo(url, flags);
           if (
             where != "current" ||
             browser.lastLocationChange == lastLocationChange
@@ -1242,16 +1258,6 @@ export class UrlbarInput {
           `urlbar_${position}`,
           1
         );
-        lazy.PartnerLinkAttribution.sendContextualServicesPing(
-          {
-            position,
-            source: "urlbar",
-            tile_id: result.payload.sponsoredTileId || -1,
-            reporting_url: result.payload.sponsoredClickUrl,
-            advertiser: result.payload.title.toLocaleLowerCase(),
-          },
-          lazy.CONTEXTUAL_SERVICES_PING_TYPES.TOPSITES_SELECTION
-        );
       }
     }
 
@@ -1549,9 +1555,8 @@ export class UrlbarInput {
       maxResults: lazy.UrlbarPrefs.get("maxRichResults"),
       searchString,
       view: this.view,
-      userContextId: this.window.gBrowser.selectedBrowser.getAttribute(
-        "usercontextid"
-      ),
+      userContextId:
+        this.window.gBrowser.selectedBrowser.getAttribute("usercontextid"),
       currentPage: this.window.gBrowser.currentURI.spec,
       formHistoryName: this.formHistoryName,
       prohibitRemoteResults:
@@ -1839,7 +1844,7 @@ export class UrlbarInput {
     // shortcut to honor historical behaviour.
     this.searchMode = {
       source: lazy.UrlbarUtils.RESULT_SOURCE.SEARCH,
-      engineName: lazy.UrlbarSearchUtils.getDefaultEngine(this.isPrivate).name,
+      engineName: lazy.UrlbarSearchUtils.getDefaultEngine(this.isPrivate)?.name,
       entry: "shortcut",
     };
     // The searchMode setter clears the input if pageproxystate is valid, so
@@ -2133,7 +2138,8 @@ export class UrlbarInput {
       return Services.uriFixup.getFixupURIInfo(searchString, flags);
     } catch (ex) {
       console.error(
-        `An error occured while trying to fixup "${searchString}": ${ex}`
+        `An error occured while trying to fixup "${searchString}"`,
+        ex
       );
     }
     return null;
@@ -2146,6 +2152,7 @@ export class UrlbarInput {
     }
     this._gotFocusChange = this._gotTabSelect = false;
 
+    this.formatValue();
     this._resetSearchState();
 
     // Switching tabs doesn't always change urlbar focus, so we must try to
@@ -2618,7 +2625,7 @@ export class UrlbarInput {
       );
       value = info.fixedURI.spec;
     } catch (ex) {
-      console.error(`An error occured while trying to fixup "${value}": ${ex}`);
+      console.error(`An error occured while trying to fixup "${value}"`, ex);
     }
 
     this.value = value;
@@ -2944,9 +2951,8 @@ export class UrlbarInput {
         stripOnShare.setAttribute("hidden", true);
         return;
       }
-      let controller = this.document.commandDispatcher.getControllerForCommand(
-        "cmd_copy"
-      );
+      let controller =
+        this.document.commandDispatcher.getControllerForCommand("cmd_copy");
       // url bar is empty
       if (!controller.isCommandEnabled("cmd_copy")) {
         stripOnShare.setAttribute("hidden", true);
@@ -2993,9 +2999,8 @@ export class UrlbarInput {
       // because paste and go doesn't want a result selection.
       this.view.close();
 
-      let controller = this.document.commandDispatcher.getControllerForCommand(
-        "cmd_paste"
-      );
+      let controller =
+        this.document.commandDispatcher.getControllerForCommand("cmd_paste");
       let enabled = controller.isCommandEnabled("cmd_paste");
       if (enabled) {
         pasteAndGo.removeAttribute("disabled");
@@ -3197,17 +3202,25 @@ export class UrlbarInput {
     this._isHandoffSession = false;
     this.removeAttribute("focused");
 
-    if (this._autofillPlaceholder && this.window.gBrowser.userTypedValue) {
+    if (this._revertOnBlurValue == this.value) {
+      this.handleRevert();
+    } else if (
+      this._autofillPlaceholder &&
+      this.window.gBrowser.userTypedValue
+    ) {
       // If we were autofilling, remove the autofilled portion, by restoring
       // the value to the last typed one.
       this.value = this.window.gBrowser.userTypedValue;
     } else if (this.value == this._focusUntrimmedValue) {
       // If the value was untrimmed by _on_focus and didn't change, trim it.
       this.value = this._focusUntrimmedValue;
+    } else {
+      // We're not updating the value, so just format it.
+      this.formatValue();
     }
     this._focusUntrimmedValue = null;
+    this._revertOnBlurValue = null;
 
-    this.formatValue();
     this._resetSearchState();
 
     // In certain cases, like holding an override key and confirming an entry,
@@ -3226,11 +3239,6 @@ export class UrlbarInput {
     if (!lazy.UrlbarPrefs.get("ui.popup.disable_autohide")) {
       this.view.close();
     }
-
-    if (this._revertOnBlurValue == this.value) {
-      this.handleRevert();
-    }
-    this._revertOnBlurValue = null;
 
     // If there were search terms shown in the URL bar and the user
     // didn't end up modifying the userTypedValue while it was
@@ -3320,7 +3328,8 @@ export class UrlbarInput {
         }
       }
       if (untrim) {
-        this.inputField.value = this._focusUntrimmedValue = this._untrimmedValue;
+        this._focusUntrimmedValue = this._untrimmedValue;
+        this._setValue(this._focusUntrimmedValue, false);
       }
     }
 
@@ -3466,11 +3475,7 @@ export class UrlbarInput {
       this._compositionClosedPopup = false;
     }
 
-    if (value) {
-      this.setAttribute("usertyping", "true");
-    } else {
-      this.removeAttribute("usertyping");
-    }
+    this.toggleAttribute("usertyping", value);
     this.removeAttribute("actiontype");
 
     if (
@@ -3595,7 +3600,7 @@ export class UrlbarInput {
       return;
     }
 
-    let oldValue = this.inputField.value;
+    let oldValue = this.value;
     let oldStart = oldValue.substring(0, this.selectionStart);
     // If there is already non-whitespace content in the URL bar
     // preceding the pasted content, it's not necessary to check
@@ -3616,11 +3621,16 @@ export class UrlbarInput {
 
     let pasteData;
     if (keywordAsSent) {
-      // For only keywords, replace any white spaces including line break with
-      // white space.
-      pasteData = originalPasteData.replace(/\s/g, " ");
+      // For performance reasons, we don't want to beautify a long string.
+      if (originalPasteData.length < 500) {
+        // For only keywords, replace any white spaces including line break
+        // with white space.
+        pasteData = originalPasteData.replace(/\s/g, " ");
+      } else {
+        pasteData = originalPasteData;
+      }
     } else if (
-      fixedURI?.scheme === "data" &&
+      fixedURI?.scheme == "data" &&
       !fixedURI.spec.match(/^data:.+;base64,/)
     ) {
       // For data url without base64, replace line break with white space.
@@ -3639,21 +3649,18 @@ export class UrlbarInput {
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      this.inputField.value = oldStart + pasteData + oldEnd;
-      this._untrimmedValue = this.inputField.value;
+      const value = oldStart + pasteData + oldEnd;
+      this._setValue(value);
+      this.window.gBrowser.userTypedValue = value;
 
-      if (this._untrimmedValue) {
-        this.setAttribute("usertyping", "true");
-      } else {
-        this.removeAttribute("usertyping");
-      }
+      this.toggleAttribute("usertyping", this._untrimmedValue);
 
       // Fix up cursor/selection:
       let newCursorPos = oldStart.length + pasteData.length;
       this.inputField.setSelectionRange(newCursorPos, newCursorPos);
 
       this.startQuery({
-        searchString: this.inputField.value,
+        searchString: this.value,
         allowAutofill: false,
         resetSearchState: false,
         event,
@@ -3911,9 +3918,8 @@ function getDroppableData(event) {
       // If we succeed, try to pass security checks. If this works, return the
       // URL object. If the *security checks* fail, return null.
       try {
-        let principal = Services.droppedLinkHandler.getTriggeringPrincipal(
-          event
-        );
+        let principal =
+          Services.droppedLinkHandler.getTriggeringPrincipal(event);
         Services.scriptSecurityManager.checkLoadURIStrWithPrincipal(
           principal,
           url.href,
@@ -4155,11 +4161,9 @@ class AddSearchEngineHelper {
     elt.setAttribute("anonid", `add-engine-${index}`);
     elt.classList.add("menuitem-iconic");
     elt.classList.add("context-menu-add-engine");
-    elt.setAttribute("data-l10n-id", "search-one-offs-add-engine");
-    elt.setAttribute(
-      "data-l10n-args",
-      JSON.stringify({ engineName: engine.title })
-    );
+    this.input.document.l10n.setAttributes(elt, "search-one-offs-add-engine", {
+      engineName: engine.title,
+    });
     elt.setAttribute("uri", engine.uri);
     if (engine.icon) {
       elt.setAttribute("image", engine.icon);
@@ -4175,7 +4179,10 @@ class AddSearchEngineHelper {
     elt.setAttribute("anonid", "add-engine-menu");
     elt.classList.add("menu-iconic");
     elt.classList.add("context-menu-add-engine");
-    elt.setAttribute("data-l10n-id", "search-one-offs-add-engine-menu");
+    this.input.document.l10n.setAttributes(
+      elt,
+      "search-one-offs-add-engine-menu"
+    );
     if (engine.icon) {
       elt.setAttribute("image", engine.icon);
     }
@@ -4190,9 +4197,8 @@ class AddSearchEngineHelper {
     // Certain operations, like customization, destroy and recreate widgets,
     // so we cannot rely on cached elements.
     if (!this.input.querySelector(".menuseparator-add-engine")) {
-      this.contextSeparator = this.input.document.createXULElement(
-        "menuseparator"
-      );
+      this.contextSeparator =
+        this.input.document.createXULElement("menuseparator");
       this.contextSeparator.setAttribute("anonid", "add-engine-separator");
       this.contextSeparator.classList.add("menuseparator-add-engine");
       this.contextSeparator.collapsed = true;

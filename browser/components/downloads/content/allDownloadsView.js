@@ -8,16 +8,13 @@ var { XPCOMUtils } = ChromeUtils.importESModule(
 );
 
 ChromeUtils.defineESModuleGetters(this, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   Downloads: "resource://gre/modules/Downloads.sys.mjs",
   DownloadsCommon: "resource:///modules/DownloadsCommon.sys.mjs",
   DownloadsViewUI: "resource:///modules/DownloadsViewUI.sys.mjs",
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+  NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(this, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-  NetUtil: "resource://gre/modules/NetUtil.jsm",
 });
 
 /**
@@ -240,9 +237,8 @@ function DownloadsPlacesView(
   // Pause the download indicator as user is interacting with downloads. This is
   // skipped on about:downloads because it handles this by itself.
   if (aSuppressionFlag === DownloadsCommon.SUPPRESS_ALL_DOWNLOADS_OPEN) {
-    DownloadsCommon.getIndicatorData(
-      window
-    ).attentionSuppressed |= aSuppressionFlag;
+    DownloadsCommon.getIndicatorData(window).attentionSuppressed |=
+      aSuppressionFlag;
   }
 
   // Make sure to unregister the view if the window is closed.
@@ -251,9 +247,8 @@ function DownloadsPlacesView(
     () => {
       window.controllers.removeController(this);
       // Unpause the main window's download indicator.
-      DownloadsCommon.getIndicatorData(
-        window
-      ).attentionSuppressed &= ~aSuppressionFlag;
+      DownloadsCommon.getIndicatorData(window).attentionSuppressed &=
+        ~aSuppressionFlag;
       this._downloadsData.removeView(this);
       this.result = null;
     },
@@ -751,12 +746,11 @@ DownloadsPlacesView.prototype = {
     // this here instead of in DownloadsViewUI because DownloadsView doesn't
     // allow selecting multiple downloads, so in that view the menuitem will be
     // shown according to whether just the selected item has a source URL.
-    contextMenu.querySelector(
-      ".downloadCopyLocationMenuItem"
-    ).hidden = !Array.prototype.some.call(
-      this._richlistbox.selectedItems,
-      el => !!el._shell.download.source?.url
-    );
+    contextMenu.querySelector(".downloadCopyLocationMenuItem").hidden =
+      !Array.prototype.some.call(
+        this._richlistbox.selectedItems,
+        el => !!el._shell.download.source?.url
+      );
 
     let download = element._shell.download;
     if (!download.stopped) {
@@ -895,7 +889,7 @@ Object.setPrototypeOf(
 );
 
 for (let methodName of ["load", "applyFilter", "selectNode", "selectItems"]) {
-  DownloadsPlacesView.prototype[methodName] = function() {
+  DownloadsPlacesView.prototype[methodName] = function () {
     throw new Error(
       "|" + methodName + "| is not implemented by the downloads view."
     );
@@ -914,21 +908,21 @@ function goUpdateDownloadCommands() {
   updateCommandsForObject(HistoryDownloadElementShell.prototype);
 }
 
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", function () {
   let richListBox = document.getElementById("downloadsListBox");
-  richListBox.addEventListener("scroll", function(event) {
+  richListBox.addEventListener("scroll", function (event) {
     return this._placesView.onScroll();
   });
-  richListBox.addEventListener("keypress", function(event) {
+  richListBox.addEventListener("keypress", function (event) {
     return this._placesView.onKeyPress(event);
   });
-  richListBox.addEventListener("dblclick", function(event) {
+  richListBox.addEventListener("dblclick", function (event) {
     return this._placesView.onDoubleClick(event);
   });
-  richListBox.addEventListener("contextmenu", function(event) {
+  richListBox.addEventListener("contextmenu", function (event) {
     return this._placesView.onContextMenu(event);
   });
-  richListBox.addEventListener("dragstart", function(event) {
+  richListBox.addEventListener("dragstart", function (event) {
     this._placesView.onDragStart(event);
   });
   let dropNode = richListBox;
@@ -938,13 +932,13 @@ document.addEventListener("DOMContentLoaded", function() {
   if (document.documentElement.id == "contentAreaDownloadsView") {
     dropNode = richListBox.parentNode;
   }
-  dropNode.addEventListener("dragover", function(event) {
+  dropNode.addEventListener("dragover", function (event) {
     richListBox._placesView.onDragOver(event);
   });
-  dropNode.addEventListener("drop", function(event) {
+  dropNode.addEventListener("drop", function (event) {
     richListBox._placesView.onDrop(event);
   });
-  richListBox.addEventListener("select", function(event) {
+  richListBox.addEventListener("select", function (event) {
     this._placesView.onSelect();
   });
   richListBox.addEventListener("focus", goUpdateDownloadCommands);

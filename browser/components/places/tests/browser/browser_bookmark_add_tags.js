@@ -29,6 +29,14 @@ registerCleanupFunction(async () => {
 add_task(async function test_add_bookmark_tags_from_bookmarkProperties() {
   const TEST_URL = "about:robots";
 
+  await PlacesUtils.bookmarks.insert({
+    parentGuid: PlacesUtils.bookmarks.unfiledGuid,
+    url: "about:buildconfig",
+    title: "Bookmark Title",
+  });
+
+  PlacesUtils.tagging.tagURI(makeURI("about:buildconfig"), ["tag0"]);
+
   let win = await BrowserTestUtils.openNewBrowserWindow();
   let tab = await BrowserTestUtils.openNewForegroundTab({
     gBrowser: win.gBrowser,
@@ -43,7 +51,7 @@ add_task(async function test_add_bookmark_tags_from_bookmarkProperties() {
   bookmarkStar = win.BookmarkingUI.star;
 
   // Cleanup.
-  registerCleanupFunction(async function() {
+  registerCleanupFunction(async function () {
     BrowserTestUtils.removeTab(tab);
     BrowserTestUtils.closeWindow(win);
   });
@@ -140,7 +148,7 @@ add_task(async function test_add_bookmark_tags_from_library() {
   let library = await promiseLibrary("UnfiledBookmarks");
 
   // Cleanup.
-  registerCleanupFunction(async function() {
+  registerCleanupFunction(async function () {
     await promiseLibraryClosed(library);
   });
 
@@ -186,7 +194,7 @@ add_task(async function test_add_bookmark_tags_from_sidebar() {
     title: "Bookmark Title",
   });
 
-  await withSidebarTree("bookmarks", async function(tree) {
+  await withSidebarTree("bookmarks", async function (tree) {
     tree.selectItems([bookmarks.guid]);
     // Add one tag.
     await addTags(["tag1"], tree, ["tag1"]);

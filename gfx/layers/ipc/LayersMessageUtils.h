@@ -16,7 +16,6 @@
 #include "chrome/common/ipc_message_utils.h"
 #include "ipc/EnumSerializer.h"
 #include "ipc/IPCMessageUtils.h"
-#include "mozilla/MotionPathUtils.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ipc/ByteBuf.h"
 #include "mozilla/layers/APZInputBridge.h"
@@ -636,6 +635,7 @@ struct ParamTraits<mozilla::layers::TextureFactoryIdentifier> {
     WriteParam(aWriter, aParam.mSupportsTextureBlitting);
     WriteParam(aWriter, aParam.mSupportsPartialUploads);
     WriteParam(aWriter, aParam.mSupportsComponentAlpha);
+    WriteParam(aWriter, aParam.mSupportsD3D11NV12);
     WriteParam(aWriter, aParam.mSyncHandle);
   }
 
@@ -651,6 +651,7 @@ struct ParamTraits<mozilla::layers::TextureFactoryIdentifier> {
                   ReadParam(aReader, &aResult->mSupportsTextureBlitting) &&
                   ReadParam(aReader, &aResult->mSupportsPartialUploads) &&
                   ReadParam(aReader, &aResult->mSupportsComponentAlpha) &&
+                  ReadParam(aReader, &aResult->mSupportsD3D11NV12) &&
                   ReadParam(aReader, &aResult->mSyncHandle);
     return result;
   }
@@ -1072,21 +1073,6 @@ struct ParamTraits<mozilla::layers::CompositionPayload> {
 };
 
 template <>
-struct ParamTraits<mozilla::RayReferenceData> {
-  typedef mozilla::RayReferenceData paramType;
-
-  static void Write(MessageWriter* aWriter, const paramType& aParam) {
-    WriteParam(aWriter, aParam.mInitialPosition);
-    WriteParam(aWriter, aParam.mContainingBlockRect);
-  }
-
-  static bool Read(MessageReader* aReader, paramType* aResult) {
-    return (ReadParam(aReader, &aResult->mInitialPosition) &&
-            ReadParam(aReader, &aResult->mContainingBlockRect));
-  }
-};
-
-template <>
 struct ParamTraits<mozilla::layers::CantZoomOutBehavior>
     : public ContiguousEnumSerializerInclusive<
           mozilla::layers::CantZoomOutBehavior,
@@ -1143,6 +1129,7 @@ IMPL_PARAMTRAITS_BY_SERDE(LengthPercentage)
 IMPL_PARAMTRAITS_BY_SERDE(StyleOffsetPath)
 IMPL_PARAMTRAITS_BY_SERDE(StyleOffsetRotate)
 IMPL_PARAMTRAITS_BY_SERDE(StylePositionOrAuto)
+IMPL_PARAMTRAITS_BY_SERDE(StyleOffsetPosition)
 IMPL_PARAMTRAITS_BY_SERDE(StyleRotate)
 IMPL_PARAMTRAITS_BY_SERDE(StyleScale)
 IMPL_PARAMTRAITS_BY_SERDE(StyleTranslate)

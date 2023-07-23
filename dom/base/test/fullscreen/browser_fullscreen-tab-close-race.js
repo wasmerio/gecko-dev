@@ -17,7 +17,7 @@ Services.scriptloader.loadSubScript(
 // error.
 SimpleTest.ignoreAllUncaughtExceptions(true);
 
-add_setup(async function() {
+add_setup(async function () {
   await pushPrefs(
     ["full-screen-api.transition-duration.enter", "0 0"],
     ["full-screen-api.transition-duration.leave", "0 0"],
@@ -25,7 +25,7 @@ add_setup(async function() {
   );
 });
 
-async function startTests(setupFun, name) {
+async function startTests(setupAndCompletionFn, name) {
   TEST_URLS.forEach(url => {
     add_task(async () => {
       info(`Test ${name}, url: ${url}`);
@@ -34,19 +34,20 @@ async function startTests(setupFun, name) {
           gBrowser,
           url,
         },
-        async function(browser) {
+        async function (browser) {
           let promiseFsState = waitForFullscreenExit(document);
-          setupFun(browser);
+          let promiseSetup = setupAndCompletionFn(browser);
           // Trigger click event in inner most iframe
-          SpecialPowers.spawn(
+          await SpecialPowers.spawn(
             browser.browsingContext.children[0].children[0],
             [],
-            function() {
+            function () {
               content.setTimeout(() => {
                 content.document.getElementById("div").click();
               }, 0);
             }
           );
+          await promiseSetup;
           await promiseFsState;
 
           // Ensure the browser exits fullscreen state.
@@ -65,7 +66,7 @@ async function startTests(setupFun, name) {
 }
 
 async function WaitRemoveDocumentAndCloseTab(aBrowser, aBrowsingContext) {
-  await SpecialPowers.spawn(aBrowsingContext, [], async function() {
+  await SpecialPowers.spawn(aBrowsingContext, [], function () {
     return new Promise(resolve => {
       content.document.addEventListener(
         "fullscreenchange",
@@ -82,19 +83,22 @@ async function WaitRemoveDocumentAndCloseTab(aBrowser, aBrowsingContext) {
   BrowserTestUtils.removeTab(tab);
 }
 
-startTests(async browser => {
+startTests(browser => {
   // toplevel
-  WaitRemoveDocumentAndCloseTab(browser, browser.browsingContext);
+  return WaitRemoveDocumentAndCloseTab(browser, browser.browsingContext);
 }, "tab_close_toplevel");
 
 startTests(browser => {
   // middle iframe
-  WaitRemoveDocumentAndCloseTab(browser, browser.browsingContext.children[0]);
+  return WaitRemoveDocumentAndCloseTab(
+    browser,
+    browser.browsingContext.children[0]
+  );
 }, "tab_close_middle_frame");
 
-startTests(async browser => {
+startTests(browser => {
   // innermost iframe
-  WaitRemoveDocumentAndCloseTab(
+  return WaitRemoveDocumentAndCloseTab(
     browser,
     browser.browsingContext.children[0].children[0]
   );

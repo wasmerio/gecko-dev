@@ -84,6 +84,14 @@ add_task(async function setup_fakePaths() {
 });
 
 add_task(async function test_credit_cards() {
+  if (!OSKeyStoreTestUtils.canTestOSKeyStoreLogin()) {
+    todo_check_true(
+      OSKeyStoreTestUtils.canTestOSKeyStoreLogin(),
+      "Cannot test OS key store login on official builds."
+    );
+    return;
+  }
+
   let loginCrypto;
   let profilePathSegments;
 
@@ -173,6 +181,32 @@ add_task(async function test_credit_cards() {
   Assert.ok(
     await migrator.isSourceAvailable(),
     "Sanity check the source exists"
+  );
+
+  Services.prefs.setBoolPref(
+    "browser.migrate.chrome.payment_methods.enabled",
+    false
+  );
+  Assert.ok(
+    !(
+      (await migrator.getMigrateData(PROFILE)) &
+      MigrationUtils.resourceTypes.PAYMENT_METHODS
+    ),
+    "Should be able to disable migrating payment methods"
+  );
+  // Clear the cached resources now so that a re-check for payment methods
+  // will look again.
+  delete migrator._resourcesByProfile[PROFILE.id];
+
+  Services.prefs.setBoolPref(
+    "browser.migrate.chrome.payment_methods.enabled",
+    true
+  );
+
+  Assert.ok(
+    (await migrator.getMigrateData(PROFILE)) &
+      MigrationUtils.resourceTypes.PAYMENT_METHODS,
+    "Should be able to enable migrating payment methods"
   );
 
   let { formAutofillStorage } = ChromeUtils.importESModule(

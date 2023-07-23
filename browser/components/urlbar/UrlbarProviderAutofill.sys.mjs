@@ -18,7 +18,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarResult: "resource:///modules/UrlbarResult.sys.mjs",
-  UrlbarSearchUtils: "resource:///modules/UrlbarSearchUtils.sys.mjs",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.sys.mjs",
 });
 
@@ -43,13 +42,18 @@ const ORIGIN_FRECENCY_FIELD = ORIGIN_USE_ALT_FRECENCY
 // the mean of all moz_origins.frecency values + stddevMultiplier * one standard
 // deviation.  This is inlined directly in the SQL (as opposed to being a custom
 // Sqlite function for example) in order to be as efficient as possible.
+// For alternative frecency, a NULL frecency will be normalized to 0.0, and when
+// it will graduate, it will likely become 1 (official frecency is NOT NULL).
+// Thus we set a minimum threshold of 2.0, otherwise if all the visits are older
+// than the cutoff, we end up checking 0.0 (frecency) >= 0.0 (threshold) and
+// autofill everything instead of nothing.
 const SQL_AUTOFILL_WITH = ORIGIN_USE_ALT_FRECENCY
   ? `
     WITH
     autofill_frecency_threshold(value) AS (
       SELECT IFNULL(
         (SELECT value FROM moz_meta WHERE key = 'origin_alt_frecency_threshold'),
-        0.0
+        2.0
       )
     )
     `
@@ -407,15 +411,6 @@ class ProviderAutofill extends UrlbarProvider {
    * @returns {number} The provider's priority for the given query.
    */
   getPriority(queryContext) {
-    // Priority search results are restricting.
-    if (
-      this._autofillData &&
-      this._autofillData.instance == this.queryInstance &&
-      this._autofillData.result.type == UrlbarUtils.RESULT_TYPE.SEARCH
-    ) {
-      return 1;
-    }
-
     return 0;
   }
 
@@ -602,11 +597,7 @@ class ProviderAutofill extends UrlbarProvider {
     }
 
     let host = hostMatch[0].toLowerCase();
-    let revHost =
-      host
-        .split("")
-        .reverse()
-        .join("") + ".";
+    let revHost = host.split("").reverse().join("") + ".";
 
     // Build a string that's the URL stripped of its prefix, i.e., the host plus
     // everything after.  Use queryContext.trimmedSearchString instead of
@@ -920,12 +911,6 @@ class ProviderAutofill extends UrlbarProvider {
       return result;
     }
 
-    // Or we may want to fill a search engine domain regardless of the threshold.
-    result = await this._matchSearchEngineDomain(queryContext);
-    if (result) {
-      return result;
-    }
-
     return null;
   }
 
@@ -1019,76 +1004,6 @@ class ProviderAutofill extends UrlbarProvider {
       }
     }
     return null;
-  }
-
-  async _matchSearchEngineDomain(queryContext) {
-    if (
-      !lazy.UrlbarPrefs.get("autoFill.searchEngines") ||
-      !this._searchString.length
-    ) {
-      return null;
-    }
-
-    // enginesForDomainPrefix only matches against engine domains.
-    // Remove an eventual trailing slash from the search string (without the
-    // prefix) and check if the resulting string is worth matching.
-    // Later, we'll verify that the found result matches the original
-    // searchString and eventually discard it.
-    let searchStr = this._searchString;
-    if (searchStr.indexOf("/") == searchStr.length - 1) {
-      searchStr = searchStr.slice(0, -1);
-    }
-    // If the search string looks more like a url than a domain, bail out.
-    if (
-      !lazy.UrlbarTokenizer.looksLikeOrigin(searchStr, {
-        ignoreKnownDomains: true,
-      })
-    ) {
-      return null;
-    }
-
-    // Since we are autofilling, we can only pick one matching engine. Use the
-    // first.
-    let engine = (
-      await lazy.UrlbarSearchUtils.enginesForDomainPrefix(searchStr)
-    )[0];
-    if (!engine) {
-      return null;
-    }
-    let url = engine.searchForm;
-    let domain = engine.searchUrlDomain;
-    // Verify that the match we got is acceptable. Autofilling "example/" to
-    // "example.com/" would not be good.
-    if (
-      (this._strippedPrefix && !url.startsWith(this._strippedPrefix)) ||
-      !(domain + "/").includes(this._searchString)
-    ) {
-      return null;
-    }
-
-    // The value that's autofilled in the input is the prefix the user typed, if
-    // any, plus the portion of the engine domain that the user typed.  Append a
-    // trailing slash too, as is usual with autofill.
-    let value =
-      this._strippedPrefix + domain.substr(domain.indexOf(searchStr)) + "/";
-
-    let result = new lazy.UrlbarResult(
-      UrlbarUtils.RESULT_TYPE.SEARCH,
-      UrlbarUtils.RESULT_SOURCE.SEARCH,
-      ...lazy.UrlbarResult.payloadAndSimpleHighlights(queryContext.tokens, {
-        engine: [engine.name, UrlbarUtils.HIGHLIGHT.TYPED],
-        icon: engine.iconURI?.spec,
-      })
-    );
-    let autofilledValue =
-      queryContext.searchString +
-      value.substring(queryContext.searchString.length);
-    result.autofill = {
-      value: autofilledValue,
-      selectionStart: queryContext.searchString.length,
-      selectionEnd: autofilledValue.length,
-    };
-    return result;
   }
 }
 

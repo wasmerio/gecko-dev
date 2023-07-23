@@ -10,7 +10,6 @@
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
-#[cfg(feature = "servo")]
 use app_units::Au;
 use arrayvec::{ArrayVec, Drain as ArrayVecDrain};
 use servo_arc::{Arc, UniqueArc};
@@ -19,8 +18,7 @@ use std::{ops, ptr};
 use std::fmt::{self, Write};
 use std::mem;
 
-use cssparser::{Parser, TokenSerializationType};
-use cssparser::ParserInput;
+use cssparser::{Parser, ParserInput, TokenSerializationType};
 #[cfg(feature = "servo")] use euclid::SideOffsets2D;
 use crate::context::QuirksMode;
 #[cfg(feature = "gecko")] use crate::gecko_bindings::structs::{self, nsCSSPropertyID};
@@ -37,15 +35,12 @@ use crate::selector_parser::PseudoElement;
 use style_traits::{CssWriter, KeywordsCollectFn, ParseError, ParsingMode};
 use style_traits::{SpecifiedValueInfo, StyleParseErrorKind, ToCss};
 use to_shmem::impl_trivial_to_shmem;
-use crate::stylesheets::{CssRuleType, Origin, UrlExtraData};
+use crate::stylesheets::{CssRuleType, CssRuleTypes, Origin, UrlExtraData};
 use crate::use_counters::UseCounters;
 use crate::values::generics::text::LineHeight;
-use crate::values::{computed, resolved};
-use crate::values::computed::NonNegativeLength;
-use crate::values::serialize_atom_name;
+use crate::values::{computed, resolved, serialize_atom_name};
 use crate::values::specified::font::SystemFont;
 use crate::rule_tree::StrongRuleNode;
-use crate::Zero;
 use crate::str::{CssString, CssStringWriter};
 use std::cell::Cell;
 use super::declaration_block::AppendableValue;
@@ -109,32 +104,6 @@ pub mod shorthands {
     use crate::parser::{Parse, ParserContext};
     use style_traits::{ParseError, StyleParseErrorKind};
     use crate::values::specified;
-
-    use style_traits::{CssWriter, ToCss};
-    use crate::values::specified::{BorderStyle, Color};
-    use std::fmt::{self, Write};
-
-    fn serialize_directional_border<W, I,>(
-        dest: &mut CssWriter<W>,
-        width: &I,
-        style: &BorderStyle,
-        color: &Color,
-    ) -> fmt::Result
-    where
-        W: Write,
-        I: ToCss,
-    {
-        width.to_css(dest)?;
-        // FIXME(emilio): Should we really serialize the border style if it's
-        // `solid`?
-        dest.write_char(' ')?;
-        style.to_css(dest)?;
-        if *color != Color::CurrentColor {
-            dest.write_char(' ')?;
-            color.to_css(dest)?;
-        }
-        Ok(())
-    }
 
     % for style_struct in data.style_structs:
     include!("${repr(os.path.join(OUT_DIR, 'shorthands/{}.rs'.format(style_struct.name_lower)))[1:-1]}");
@@ -573,30 +542,29 @@ impl NonCustomPropertyId {
 
     /// Returns whether a given rule allows a given property.
     #[inline]
-    pub fn allowed_in_rule(self, rule_type: CssRuleType) -> bool {
+    pub fn allowed_in_rule(self, rule_types: CssRuleTypes) -> bool {
         debug_assert!(
-            matches!(
-                rule_type,
-                CssRuleType::Keyframe | CssRuleType::Page | CssRuleType::Style
-            ),
+            rule_types.contains(CssRuleType::Keyframe) ||
+            rule_types.contains(CssRuleType::Page) ||
+            rule_types.contains(CssRuleType::Style),
             "Declarations are only expected inside a keyframe, page, or style rule."
         );
 
-        static MAP: [u8; NON_CUSTOM_PROPERTY_ID_COUNT] = [
+        static MAP: [u32; NON_CUSTOM_PROPERTY_ID_COUNT] = [
             % for property in data.longhands + data.shorthands + data.all_aliases():
-            ${property.rule_types_allowed},
+            % for name in RULE_VALUES:
+            % if property.rule_types_allowed & RULE_VALUES[name] != 0:
+            CssRuleType::${name}.bit() |
+            % endif
+            % endfor
+            0,
             % endfor
         ];
-        match rule_type {
-            % for name in RULE_VALUES:
-                CssRuleType::${name} => MAP[self.0] & ${RULE_VALUES[name]} != 0,
-            % endfor
-            _ => true
-        }
+        MAP[self.0] & rule_types.bits() != 0
     }
 
     fn allowed_in(self, context: &ParserContext) -> bool {
-        if !self.allowed_in_rule(context.rule_type()) {
+        if !self.allowed_in_rule(context.rule_types()) {
             return false;
         }
 
@@ -729,7 +697,7 @@ impl From<AliasId> for NonCustomPropertyId {
 }
 
 /// A set of all properties
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Default)]
 pub struct NonCustomPropertyIdSet {
     storage: [u32; (NON_CUSTOM_PROPERTY_ID_COUNT - 1 + 32) / 32]
 }
@@ -1187,7 +1155,8 @@ impl CSSWideKeyword {
         })
     }
 
-    fn parse(input: &mut Parser) -> Result<Self, ()> {
+    /// Parses a CSS wide keyword completely.
+    pub fn parse(input: &mut Parser) -> Result<Self, ()> {
         let keyword = {
             let ident = input.expect_ident().map_err(|_| ())?;
             Self::from_ident(ident)?
@@ -1199,6 +1168,7 @@ impl CSSWideKeyword {
 
 bitflags! {
     /// A set of flags for properties.
+    #[derive(Clone, Copy)]
     pub struct PropertyFlags: u16 {
         /// This longhand property applies to ::first-letter.
         const APPLIES_TO_FIRST_LETTER = 1 << 1;
@@ -1428,7 +1398,7 @@ impl LonghandId {
                 0,
             % endfor
         ];
-        PropertyFlags::from_bits_truncate(FLAGS[self as usize])
+        PropertyFlags::from_bits_retain(FLAGS[self as usize])
     }
 
     /// Returns true if the property is one that is ignored when document
@@ -1603,7 +1573,7 @@ impl ShorthandId {
                 0,
             % endfor
         ];
-        PropertyFlags::from_bits_truncate(FLAGS[self as usize])
+        PropertyFlags::from_bits_retain(FLAGS[self as usize])
     }
 
     /// Returns whether this property is a legacy shorthand.
@@ -1781,7 +1751,7 @@ impl UnparsedValue {
             Some(shorthand) => shorthand,
         };
 
-        let mut decls = SourcePropertyDeclaration::new();
+        let mut decls = SourcePropertyDeclaration::default();
         // parse_into takes care of doing `parse_entirely` for us.
         if shorthand.parse_into(&mut decls, &context, &mut input).is_err() {
             return invalid_at_computed_value_time();
@@ -2595,6 +2565,7 @@ pub type SubpropertiesVec<T> = ArrayVec<T, SUB_PROPERTIES_ARRAY_CAP>;
 /// A stack-allocated vector of `PropertyDeclaration`
 /// large enough to parse one CSS `key: value` declaration.
 /// (Shorthands expand to multiple `PropertyDeclaration`s.)
+#[derive(Default)]
 pub struct SourcePropertyDeclaration {
     /// The storage for the actual declarations (except for all).
     pub declarations: SubpropertiesVec<PropertyDeclaration>,
@@ -2607,19 +2578,10 @@ pub struct SourcePropertyDeclaration {
 size_of_test!(SourcePropertyDeclaration, 632);
 
 impl SourcePropertyDeclaration {
-    /// Create one. It’s big, try not to move it around.
-    #[inline]
-    pub fn new() -> Self {
-        SourcePropertyDeclaration {
-            declarations: ::arrayvec::ArrayVec::new(),
-            all_shorthand: AllShorthand::NotSet,
-        }
-    }
-
     /// Create one with a single PropertyDeclaration.
     #[inline]
     pub fn with_one(decl: PropertyDeclaration) -> Self {
-        let mut result = Self::new();
+        let mut result = Self::default();
         result.declarations.push(decl);
         result
     }
@@ -2664,6 +2626,12 @@ pub enum AllShorthand {
     CSSWideKeyword(CSSWideKeyword),
     /// An all shorthand with var() references that we can't resolve right now.
     WithVariables(Arc<UnparsedValue>)
+}
+
+impl Default for AllShorthand {
+    fn default() -> Self {
+        Self::NotSet
+    }
 }
 
 impl AllShorthand {
@@ -4133,7 +4101,7 @@ pub fn adjust_border_width(style: &mut StyleBuilder) {
         // Like calling to_computed_value, which wouldn't type check.
         if style.get_border().clone_border_${side}_style().none_or_hidden() &&
            style.get_border().border_${side}_has_nonzero_width() {
-            style.set_border_${side}_width(NonNegativeLength::zero());
+            style.set_border_${side}_width(Au(0));
         }
     % endfor
 }

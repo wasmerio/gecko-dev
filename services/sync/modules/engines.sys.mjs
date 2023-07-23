@@ -17,6 +17,7 @@ import {
   ENGINE_DOWNLOAD_FAIL,
   ENGINE_UPLOAD_FAIL,
   VERSION_OUT_OF_DATE,
+  PREFS_BRANCH,
 } from "resource://services-sync/constants.sys.mjs";
 
 import {
@@ -355,7 +356,7 @@ export function Store(name, engine) {
 
   this._log = Log.repository.getLogger(`Sync.Engine.${name}.Store`);
 
-  XPCOMUtils.defineLazyGetter(this, "_timer", function() {
+  XPCOMUtils.defineLazyGetter(this, "_timer", function () {
     return Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
   });
 }
@@ -558,7 +559,7 @@ EngineManager.prototype = {
     // Return an array of engines if we have an array of names
     if (Array.isArray(name)) {
       let engines = [];
-      name.forEach(function(name) {
+      name.forEach(function (name) {
         let engine = this.get(name);
         if (engine) {
           engines.push(engine);
@@ -646,7 +647,10 @@ EngineManager.prototype = {
   },
 
   persistDeclined() {
-    Svc.Prefs.set("declinedEngines", [...this._declined].join(","));
+    Svc.PrefBranch.setCharPref(
+      "declinedEngines",
+      [...this._declined].join(",")
+    );
   },
 
   /**
@@ -872,7 +876,11 @@ SyncEngine.prototype = {
   async initialize() {
     await this._toFetchStorage.load();
     await this._previousFailedStorage.load();
-    Svc.Prefs.observe(`engine.${this.prefName}`, this.asyncObserver);
+    Services.prefs.addObserver(
+      `${PREFS_BRANCH}engine.${this.prefName}`,
+      this.asyncObserver,
+      true
+    );
     this._log.debug("SyncEngine initialized", this.name);
   },
 
@@ -886,7 +894,7 @@ SyncEngine.prototype = {
 
   set enabled(val) {
     if (!!val != this._enabled) {
-      Svc.Prefs.set("engine." + this.prefName, !!val);
+      Svc.PrefBranch.setBoolPref("engine." + this.prefName, !!val);
     }
   },
 
@@ -995,8 +1003,8 @@ SyncEngine.prototype = {
       return existingSyncID;
     }
     this._log.debug("Engine syncIDs: " + [newSyncID, existingSyncID]);
-    Svc.Prefs.set(this.name + ".syncID", newSyncID);
-    Svc.Prefs.set(this.name + ".lastSync", "0");
+    Svc.PrefBranch.setStringPref(this.name + ".syncID", newSyncID);
+    Svc.PrefBranch.setCharPref(this.name + ".lastSync", "0");
     return newSyncID;
   },
 
@@ -1041,7 +1049,7 @@ SyncEngine.prototype = {
   },
   async setLastSync(lastSync) {
     // Store the value as a string to keep floating point precision
-    Svc.Prefs.set(this.name + ".lastSync", lastSync.toString());
+    Svc.PrefBranch.setCharPref(this.name + ".lastSync", lastSync.toString());
   },
   async resetLastSync() {
     this._log.debug("Resetting " + this.name + " last sync time");
@@ -1402,7 +1410,14 @@ SyncEngine.prototype = {
 
     count.newFailed = 0;
     for (let item of this.previousFailed) {
-      if (!failedInPreviousSync.has(item)) {
+      // Anything that failed in the current sync that also failed in
+      // the previous sync means there is likely something wrong with
+      // the record, we remove it from trying again to prevent
+      // infinitely syncing corrupted records
+      if (failedInPreviousSync.has(item)) {
+        this.previousFailed.delete(item);
+      } else {
+        // otherwise it's a new failed and we count it as so
         ++count.newFailed;
       }
     }
@@ -2166,7 +2181,10 @@ SyncEngine.prototype = {
   },
 
   async finalize() {
-    Svc.Prefs.ignore(`engine.${this.prefName}`, this.asyncObserver);
+    Services.prefs.removeObserver(
+      `${PREFS_BRANCH}engine.${this.prefName}`,
+      this.asyncObserver
+    );
     await this.asyncObserver.promiseObserversComplete();
     await this._tracker.finalize();
     await this._toFetchStorage.finalize();

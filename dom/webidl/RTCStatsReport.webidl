@@ -127,6 +127,7 @@ dictionary RTCOutboundRtpStreamStats : RTCSentRtpStreamStats {
   unsigned long long totalEncodedBytesTarget;
   unsigned long frameWidth;
   unsigned long frameHeight;
+  double framesPerSecond;
   unsigned long framesSent;
   unsigned long hugeFramesSent;
   double totalEncodeTime;
@@ -140,6 +141,13 @@ dictionary RTCRemoteOutboundRtpStreamStats : RTCSentRtpStreamStats {
 dictionary RTCMediaSourceStats : RTCStats {
   required DOMString trackIdentifier;
   required DOMString kind;
+};
+
+dictionary RTCVideoSourceStats : RTCMediaSourceStats {
+  unsigned long   width;
+  unsigned long   height;
+  unsigned long   frames;
+  double          framesPerSecond;
 };
 
 dictionary RTCPeerConnectionStats : RTCStats {
@@ -266,6 +274,7 @@ dictionary RTCStatsCollection {
   sequence<RTCRemoteInboundRtpStreamStats>  remoteInboundRtpStreamStats = [];
   sequence<RTCRemoteOutboundRtpStreamStats> remoteOutboundRtpStreamStats = [];
   sequence<RTCMediaSourceStats>             mediaSourceStats = [];
+  sequence<RTCVideoSourceStats>             videoSourceStats = [];
   sequence<RTCPeerConnectionStats>          peerConnectionStats = [];
   sequence<RTCRTPContributingSourceStats>   rtpContributingSourceStats = [];
   sequence<RTCIceCandidatePairStats>        iceCandidatePairStats = [];
@@ -299,6 +308,11 @@ dictionary RTCConfigurationInternal {
   DOMString                      sdpSemantics;
 };
 
+dictionary RTCSdpHistoryInternal {
+  required DOMString pcid;
+  sequence<RTCSdpHistoryEntryInternal> sdpHistory = [];
+};
+
 // A collection of RTCStats dictionaries, plus some other info. Used by
 // WebrtcGlobalInformation for about:webrtc, and telemetry.
 dictionary RTCStatsReportInternal : RTCStatsCollection {
@@ -306,8 +320,7 @@ dictionary RTCStatsReportInternal : RTCStatsCollection {
   required unsigned long                    browserId;
   RTCConfigurationInternal                  configuration;
   DOMString                                 jsepSessionErrors;
-  DOMString                                 localSdp;
-  DOMString                                 remoteSdp;
+  // TODO demux from RTCStatsReportInternal in bug 1830824
   sequence<RTCSdpHistoryEntryInternal>      sdpHistory = [];
   required DOMHighResTimeStamp              timestamp;
   double                                    callDurationMs;

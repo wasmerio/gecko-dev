@@ -39,7 +39,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 /**
  * @typedef {object} FetchTimingInfo
- * @property {number} originTime
+ * @property {number} timeOrigin
  * @property {number} requestTime
  * @property {number} redirectStart
  * @property {number} redirectEnd
@@ -223,13 +223,8 @@ class NetworkModule extends Module {
   };
 
   #onResponseEvent = (name, data) => {
-    const {
-      contextId,
-      requestData,
-      responseData,
-      timestamp,
-      redirectCount,
-    } = data;
+    const { contextId, requestData, responseData, timestamp, redirectCount } =
+      data;
 
     const baseParameters = {
       context: contextId,

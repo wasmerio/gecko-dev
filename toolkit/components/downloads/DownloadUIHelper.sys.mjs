@@ -13,11 +13,8 @@ const lazy = {};
 
 // BrowserWindowTracker and PrivateBrowsingUtils are only used when opening downloaded files into a browser window
 ChromeUtils.defineESModuleGetters(lazy, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(
@@ -126,7 +123,7 @@ export var DownloadUIHelper = {
  *        The nsIDOMWindow to which prompts should be attached, or null to
  *        attach prompts to the most recently active window.
  */
-var DownloadPrompter = function(aParent) {
+var DownloadPrompter = function (aParent) {
   this._prompter = Services.ww.getNewPrompter(aParent);
 };
 

@@ -474,7 +474,7 @@ GCRuntime::GCRuntime(JSRuntime* rt)
 using CharRange = mozilla::Range<const char>;
 using CharRangeVector = Vector<CharRange, 0, SystemAllocPolicy>;
 
-static bool SplitStringBy(CharRange text, char delimiter,
+static bool SplitStringBy(const CharRange& text, char delimiter,
                           CharRangeVector* result) {
   auto start = text.begin();
   for (auto ptr = start; ptr != text.end(); ptr++) {
@@ -489,10 +489,12 @@ static bool SplitStringBy(CharRange text, char delimiter,
   return result->emplaceBack(start, text.end());
 }
 
-static bool ParseTimeDuration(CharRange text, TimeDuration* durationOut) {
+static bool ParseTimeDuration(const CharRange& text,
+                              TimeDuration* durationOut) {
   const char* str = text.begin().get();
   char* end;
-  *durationOut = TimeDuration::FromMilliseconds(strtol(str, &end, 10));
+  long millis = strtol(str, &end, 10);
+  *durationOut = TimeDuration::FromMilliseconds(double(millis));
   return str != end && end == text.end().get();
 }
 
@@ -507,7 +509,7 @@ void js::gc::ReadProfileEnv(const char* envName, const char* helpText,
                             TimeDuration* thresholdOut) {
   *enableOut = false;
   *workersOut = false;
-  *thresholdOut = TimeDuration();
+  *thresholdOut = TimeDuration::Zero();
 
   const char* env = getenv(envName);
   if (!env) {
@@ -589,7 +591,6 @@ const char gc::ZealModeHelpText[] =
     "    14: (Compact) Perform a shrinking collection every N allocations\n"
     "    15: (CheckHeapAfterGC) Walk the heap to check its integrity after "
     "every GC\n"
-    "    16: (CheckNursery) Check nursery integrity on minor GC\n"
     "    17: (YieldBeforeSweepingAtoms) Incremental GC in two slices that "
     "yields\n"
     "        before sweeping the atoms table\n"
@@ -698,7 +699,7 @@ void GCRuntime::unsetZeal(uint8_t zeal) {
 
 void GCRuntime::setNextScheduled(uint32_t count) { nextScheduled = count; }
 
-static bool ParseZealModeName(CharRange text, uint32_t* modeOut) {
+static bool ParseZealModeName(const CharRange& text, uint32_t* modeOut) {
   struct ModeInfo {
     const char* name;
     size_t length;
@@ -722,7 +723,8 @@ static bool ParseZealModeName(CharRange text, uint32_t* modeOut) {
   return false;
 }
 
-static bool ParseZealModeNumericParam(CharRange text, uint32_t* paramOut) {
+static bool ParseZealModeNumericParam(const CharRange& text,
+                                      uint32_t* paramOut) {
   if (text.length() == 0) {
     return false;
   }
@@ -1188,14 +1190,6 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key) {
 
 uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
   switch (key) {
-    case JSGC_MAX_BYTES:
-      return uint32_t(tunables.gcMaxBytes());
-    case JSGC_MIN_NURSERY_BYTES:
-      MOZ_ASSERT(tunables.gcMinNurseryBytes() < UINT32_MAX);
-      return uint32_t(tunables.gcMinNurseryBytes());
-    case JSGC_MAX_NURSERY_BYTES:
-      MOZ_ASSERT(tunables.gcMaxNurseryBytes() < UINT32_MAX);
-      return uint32_t(tunables.gcMaxNurseryBytes());
     case JSGC_BYTES:
       return uint32_t(heapSize.bytes());
     case JSGC_NURSERY_BYTES:
@@ -1219,28 +1213,6 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       MOZ_RELEASE_ASSERT(defaultTimeBudgetMS_ >= 0);
       MOZ_RELEASE_ASSERT(defaultTimeBudgetMS_ <= UINT32_MAX);
       return uint32_t(defaultTimeBudgetMS_);
-    case JSGC_HIGH_FREQUENCY_TIME_LIMIT:
-      return tunables.highFrequencyThreshold().ToMilliseconds();
-    case JSGC_SMALL_HEAP_SIZE_MAX:
-      return tunables.smallHeapSizeMaxBytes() / 1024 / 1024;
-    case JSGC_LARGE_HEAP_SIZE_MIN:
-      return tunables.largeHeapSizeMinBytes() / 1024 / 1024;
-    case JSGC_HIGH_FREQUENCY_SMALL_HEAP_GROWTH:
-      return uint32_t(tunables.highFrequencySmallHeapGrowth() * 100);
-    case JSGC_HIGH_FREQUENCY_LARGE_HEAP_GROWTH:
-      return uint32_t(tunables.highFrequencyLargeHeapGrowth() * 100);
-    case JSGC_LOW_FREQUENCY_HEAP_GROWTH:
-      return uint32_t(tunables.lowFrequencyHeapGrowth() * 100);
-    case JSGC_BALANCED_HEAP_LIMITS_ENABLED:
-      return uint32_t(tunables.balancedHeapLimitsEnabled());
-    case JSGC_HEAP_GROWTH_FACTOR:
-      return uint32_t(tunables.heapGrowthFactor());
-    case JSGC_ALLOCATION_THRESHOLD:
-      return tunables.gcZoneAllocThresholdBase() / 1024 / 1024;
-    case JSGC_SMALL_HEAP_INCREMENTAL_LIMIT:
-      return uint32_t(tunables.smallHeapIncrementalLimit() * 100);
-    case JSGC_LARGE_HEAP_INCREMENTAL_LIMIT:
-      return uint32_t(tunables.largeHeapIncrementalLimit() * 100);
     case JSGC_MIN_EMPTY_CHUNK_COUNT:
       return minEmptyChunkCount(lock);
     case JSGC_MAX_EMPTY_CHUNK_COUNT:
@@ -1251,31 +1223,6 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       return parallelMarkingEnabled;
     case JSGC_INCREMENTAL_WEAKMAP_ENABLED:
       return marker().incrementalWeakMapMarkingEnabled;
-    case JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION:
-      return tunables.nurseryFreeThresholdForIdleCollection();
-    case JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT:
-      return uint32_t(tunables.nurseryFreeThresholdForIdleCollectionFraction() *
-                      100.0f);
-    case JSGC_NURSERY_TIMEOUT_FOR_IDLE_COLLECTION_MS:
-      return tunables.nurseryTimeoutForIdleCollection().ToMilliseconds();
-    case JSGC_PRETENURE_THRESHOLD:
-      return uint32_t(tunables.pretenureThreshold() * 100);
-    case JSGC_PRETENURE_GROUP_THRESHOLD:
-      return tunables.pretenureGroupThreshold();
-    case JSGC_PRETENURE_STRING_THRESHOLD:
-      return uint32_t(tunables.pretenureStringThreshold() * 100);
-    case JSGC_STOP_PRETENURE_STRING_THRESHOLD:
-      return uint32_t(tunables.stopPretenureStringThreshold() * 100);
-    case JSGC_MIN_LAST_DITCH_GC_PERIOD:
-      return tunables.minLastDitchGCPeriod().ToSeconds();
-    case JSGC_ZONE_ALLOC_DELAY_KB:
-      return tunables.zoneAllocDelayBytes() / 1024;
-    case JSGC_MALLOC_THRESHOLD_BASE:
-      return tunables.mallocThresholdBase() / 1024 / 1024;
-    case JSGC_URGENT_THRESHOLD_MB:
-      return tunables.urgentThresholdBytes() / 1024 / 1024;
-    case JSGC_PARALLEL_MARKING_THRESHOLD_KB:
-      return tunables.parallelMarkingThresholdBytes() / 1024;
     case JSGC_CHUNK_BYTES:
       return ChunkSize;
     case JSGC_HELPER_THREAD_RATIO:
@@ -1291,7 +1238,7 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
     case JSGC_SYSTEM_PAGE_SIZE_KB:
       return SystemPageSize() / 1024;
     default:
-      MOZ_CRASH("Unknown parameter key");
+      return tunables.getParameter(key);
   }
 }
 
@@ -1335,9 +1282,10 @@ void GCRuntime::updateHelperThreadCount() {
   }
 
   // Calculate the target thread count for GC parallel tasks.
-  double cpuCount = GetHelperThreadCPUCount();
-  helperThreadCount = std::clamp(size_t(cpuCount * helperThreadRatio.ref()),
-                                 size_t(1), maxHelperThreads.ref());
+  size_t cpuCount = GetHelperThreadCPUCount();
+  helperThreadCount =
+      std::clamp(size_t(double(cpuCount) * helperThreadRatio.ref()), size_t(1),
+                 maxHelperThreads.ref());
 
   // Calculate the overall target thread count taking into account the separate
   // parameter for parallel marking threads. Add spare threads to avoid blocking
@@ -1380,12 +1328,17 @@ size_t GCRuntime::markingWorkerCount() const {
 
 #ifdef DEBUG
 void GCRuntime::assertNoMarkingWork() const {
-  for (auto& marker : markers) {
+  for (const auto& marker : markers) {
     MOZ_ASSERT(marker->isDrained());
   }
   MOZ_ASSERT(!hasDelayedMarking());
 }
 #endif
+
+static size_t GetGCParallelThreadCount() {
+  AutoLockHelperThreadState lock;
+  return HelperThreadState().getGCParallelThreadCount(lock);
+}
 
 bool GCRuntime::updateMarkersVector() {
   MOZ_ASSERT(helperThreadCount >= 1,
@@ -1395,8 +1348,8 @@ bool GCRuntime::updateMarkersVector() {
 
   // Limit worker count to number of GC parallel tasks that can run
   // concurrently, otherwise one thread can deadlock waiting on another.
-  size_t targetCount = std::min(markingWorkerCount(),
-                                HelperThreadState().getGCParallelThreadCount());
+  size_t targetCount =
+      std::min(markingWorkerCount(), GetGCParallelThreadCount());
 
   if (markers.length() > targetCount) {
     return markers.resize(targetCount);
@@ -1498,7 +1451,7 @@ void GCRuntime::removeFinalizeCallback(JSFinalizeCallback callback) {
 
 void GCRuntime::callFinalizeCallbacks(JS::GCContext* gcx,
                                       JSFinalizeStatus status) const {
-  for (auto& p : finalizeCallbacks.ref()) {
+  for (const auto& p : finalizeCallbacks.ref()) {
     p.op(gcx, status, p.data);
   }
 }
@@ -1656,20 +1609,22 @@ SliceBudget::SliceBudget(WorkBudget work)
 int SliceBudget::describe(char* buffer, size_t maxlen) const {
   if (isUnlimited()) {
     return snprintf(buffer, maxlen, "unlimited");
-  } else if (isWorkBudget()) {
-    return snprintf(buffer, maxlen, "work(%" PRId64 ")", workBudget());
-  } else {
-    const char* interruptStr = "";
-    if (interruptRequested) {
-      interruptStr = interrupted ? "INTERRUPTED " : "interruptible ";
-    }
-    const char* extra = "";
-    if (idle) {
-      extra = extended ? " (started idle but extended)" : " (idle)";
-    }
-    return snprintf(buffer, maxlen, "%s%" PRId64 "ms%s", interruptStr,
-                    timeBudget(), extra);
   }
+
+  if (isWorkBudget()) {
+    return snprintf(buffer, maxlen, "work(%" PRId64 ")", workBudget());
+  }
+
+  const char* interruptStr = "";
+  if (interruptRequested) {
+    interruptStr = interrupted ? "INTERRUPTED " : "interruptible ";
+  }
+  const char* extra = "";
+  if (idle) {
+    extra = extended ? " (started idle but extended)" : " (idle)";
+  }
+  return snprintf(buffer, maxlen, "%s%" PRId64 "ms%s", interruptStr,
+                  timeBudget(), extra);
 }
 
 bool SliceBudget::checkOverBudget() {
@@ -1706,18 +1661,7 @@ void GCRuntime::requestMajorGC(JS::GCReason reason) {
   }
 
   majorGCTriggerReason = reason;
-  rt->mainContextFromAnyThread()->requestInterrupt(InterruptReason::GC);
-}
-
-void Nursery::requestMinorGC(JS::GCReason reason) const {
-  MOZ_ASSERT(CurrentThreadCanAccessRuntime(runtime()));
-
-  if (minorGCRequested()) {
-    return;
-  }
-
-  minorGCTriggerReason_ = reason;
-  runtime()->mainContextFromOwnThread()->requestInterrupt(InterruptReason::GC);
+  rt->mainContextFromAnyThread()->requestInterrupt(InterruptReason::MajorGC);
 }
 
 bool GCRuntime::triggerGC(JS::GCReason reason) {
@@ -1879,9 +1823,9 @@ JS::GCReason GCRuntime::wantMajorGC(bool eagerOk) {
 
 bool GCRuntime::checkEagerAllocTrigger(const HeapSize& size,
                                        const HeapThreshold& threshold) {
-  double thresholdBytes =
+  size_t thresholdBytes =
       threshold.eagerAllocTrigger(schedulingState.inHighFrequencyGCMode());
-  double usedBytes = size.bytes();
+  size_t usedBytes = size.bytes();
   if (usedBytes <= 1024 * 1024 || usedBytes < thresholdBytes) {
     return false;
   }
@@ -2340,15 +2284,12 @@ class CompartmentCheckTracer final : public JS::CallbackTracer {
  public:
   explicit CompartmentCheckTracer(JSRuntime* rt)
       : JS::CallbackTracer(rt, JS::TracerKind::CompartmentCheck,
-                           JS::WeakEdgeTraceAction::Skip),
-        src(nullptr),
-        zone(nullptr),
-        compartment(nullptr) {}
+                           JS::WeakEdgeTraceAction::Skip) {}
 
-  Cell* src;
-  JS::TraceKind srcKind;
-  Zone* zone;
-  Compartment* compartment;
+  Cell* src = nullptr;
+  JS::TraceKind srcKind = JS::TraceKind::Null;
+  Zone* zone = nullptr;
+  Compartment* compartment = nullptr;
 };
 
 static bool InCrossCompartmentMap(JSRuntime* rt, JSObject* src,
@@ -3169,8 +3110,10 @@ GCRuntime::MarkQueueProgress GCRuntime::processTestMarkQueue() {
       JSLinearString* str = &val.toString()->asLinear();
       if (js::StringEqualsLiteral(str, "yield") && isIncrementalGc()) {
         return QueueYielded;
-      } else if (js::StringEqualsLiteral(str, "enter-weak-marking-mode") ||
-                 js::StringEqualsLiteral(str, "abort-weak-marking-mode")) {
+      }
+
+      if (js::StringEqualsLiteral(str, "enter-weak-marking-mode") ||
+          js::StringEqualsLiteral(str, "abort-weak-marking-mode")) {
         if (marker().isRegularMarking()) {
           // We can't enter weak marking mode at just any time, so instead
           // we'll stop processing the queue and continue on with the GC. Once
@@ -3337,7 +3280,7 @@ void GCRuntime::updateAllocationRates() {
   }
 
   lastAllocRateUpdateTime = currentTime;
-  collectorTimeSinceAllocRateUpdate = TimeDuration();
+  collectorTimeSinceAllocRateUpdate = TimeDuration::Zero();
 }
 
 static const char* GCHeapStateToLabel(JS::HeapState heapState) {
@@ -3998,13 +3941,13 @@ bool GCRuntime::maybeIncreaseSliceBudget(SliceBudget& budget) {
 
 // Return true if the budget is actually extended after rounding.
 static bool ExtendBudget(SliceBudget& budget, double newDuration) {
-  long newDurationMS = lround(newDuration);
-  if (newDurationMS <= budget.timeBudget()) {
+  long millis = lround(newDuration);
+  if (millis <= budget.timeBudget()) {
     return false;
   }
 
   bool idleTriggered = budget.idle;
-  budget = SliceBudget(TimeBudget(newDuration), nullptr);  // Uninterruptible.
+  budget = SliceBudget(TimeBudget(millis), nullptr);  // Uninterruptible.
   budget.idle = idleTriggered;
   budget.extended = true;
   return true;
@@ -4270,6 +4213,9 @@ gcstats::ZoneGCStats GCRuntime::scanZonesBeforeGC() {
   for (ZonesIter zone(this, WithAtoms); !zone.done(); zone.next()) {
     zoneStats.zoneCount++;
     zoneStats.compartmentCount += zone->compartments().length();
+    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
+      zoneStats.realmCount += comp->realms().length();
+    }
     if (zone->isGCScheduled()) {
       zoneStats.collectedZoneCount++;
       zoneStats.collectedCompartmentCount += zone->compartments().length();
@@ -4652,7 +4598,6 @@ void GCRuntime::collectNursery(JS::GCOptions options, JS::GCReason reason,
 
   gcstats::AutoPhase ap(stats(), phase);
 
-  nursery().clearMinorGCRequest();
   nursery().collect(options, reason);
   MOZ_ASSERT(nursery().isEmpty());
 
@@ -5052,7 +4997,7 @@ JS_PUBLIC_API bool js::gc::detail::CanCheckGrayBits(const TenuredCell* cell) {
 
   MOZ_ASSERT(cell);
 
-  auto runtime = cell->runtimeFromAnyThread();
+  auto* runtime = cell->runtimeFromAnyThread();
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(runtime));
 
   if (!runtime->gc.areGrayBitsValid()) {
@@ -5091,7 +5036,7 @@ JS_PUBLIC_API void js::gc::detail::AssertCellIsNotGray(const Cell* cell) {
   // of cells that will be marked black by the next GC slice in an incremental
   // GC. For performance reasons we don't do this in CellIsMarkedGrayIfKnown.
 
-  auto tc = &cell->asTenured();
+  const auto* tc = &cell->asTenured();
   if (!tc->isMarkedGray() || !CanCheckGrayBits(tc)) {
     return;
   }

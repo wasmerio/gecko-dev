@@ -54,11 +54,9 @@ ChromeUtils.defineESModuleGetters(this, {
   SaveToPocket: "chrome://pocket/content/SaveToPocket.sys.mjs",
 });
 
-const POCKET_ONSAVERECS_PREF = "extensions.pocket.onSaveRecs";
-const POCKET_ONSAVERECS_LOCLES_PREF = "extensions.pocket.onSaveRecs.locales";
 const POCKET_HOME_PREF = "extensions.pocket.showHome";
 
-var pktUI = (function() {
+var pktUI = (function () {
   let _titleToSave = "";
   let _urlToSave = "";
 
@@ -83,20 +81,9 @@ var pktUI = (function() {
     },
   };
 
-  var onSaveRecsEnabledPref;
-  var onSaveRecsLocalesPref;
   var pocketHomePref;
 
   function initPrefs() {
-    onSaveRecsEnabledPref = Services.prefs.getBoolPref(
-      POCKET_ONSAVERECS_PREF,
-      false
-    );
-    onSaveRecsLocalesPref = Services.prefs.getStringPref(
-      POCKET_ONSAVERECS_LOCLES_PREF,
-      ""
-    );
-
     pocketHomePref = Services.prefs.getBoolPref(POCKET_HOME_PREF);
   }
   initPrefs();
@@ -138,7 +125,7 @@ var pktUI = (function() {
    * Show the sign-up panel
    */
   function showSignUp() {
-    getFirefoxAccountSignedInUser(function(userdata) {
+    getFirefoxAccountSignedInUser(function (userdata) {
       showPanel(
         "about:pocket-signup?" +
           "emailButton=" +
@@ -149,27 +136,10 @@ var pktUI = (function() {
   }
 
   /**
-   * Get a list of recs for item and show them in the panel.
-   */
-  function getAndShowRecsForItem(item, options) {
-    var onSaveRecsEnabled =
-      onSaveRecsEnabledPref && onSaveRecsLocalesPref.includes(getUILocale());
-
-    if (
-      onSaveRecsEnabled &&
-      item &&
-      item.resolved_id &&
-      item.resolved_id !== "0"
-    ) {
-      pktApi.getRecsForItem(item.resolved_id, options);
-    }
-  }
-
-  /**
    * Show the logged-out state / sign-up panel
    */
   function saveAndShowConfirmation() {
-    getFirefoxAccountSignedInUser(function(userdata) {
+    getFirefoxAccountSignedInUser(function (userdata) {
       showPanel(
         "about:pocket-saved?premiumStatus=" +
           (pktApi.isPremiumUser() ? "1" : "0") +
@@ -184,9 +154,8 @@ var pktUI = (function() {
    * Show the Pocket home panel state
    */
   function showPocketHome() {
-    const hideRecentSaves = NimbusFeatures.saveToPocket.getVariable(
-      "hideRecentSaves"
-    );
+    const hideRecentSaves =
+      NimbusFeatures.saveToPocket.getVariable("hideRecentSaves");
     const locale = getUILocale();
     let panel = `home_no_topics`;
     if (locale.startsWith("en-")) {
@@ -380,28 +349,6 @@ var pktUI = (function() {
             pktUIMessaging.sendMessageToPanel("PKT_getArticleInfoAttempted");
           }
         }
-
-        getAndShowRecsForItem(item, {
-          success(data) {
-            pktUIMessaging.sendMessageToPanel("PKT_renderItemRecs", data);
-            if (data?.recommendations?.[0]?.experiment) {
-              const payload = pktTelemetry.createPingPayload({
-                // This is the ML model used to recommend the story.
-                // Right now this value is the same for all three items returned together,
-                // so we can just use the first item's value for all.
-                model: data.recommendations[0].experiment,
-                // Create an impression event for each item rendered.
-                events: data.recommendations.map((item, index) => ({
-                  action: "impression",
-                  position: index,
-                  source: "on_save_recs",
-                })),
-              });
-              // Send view impression ping.
-              pktTelemetry.sendStructuredIngestionEvent(payload);
-            }
-          },
-        });
       },
       error(error, request) {
         // If user is not authorized show singup page
@@ -568,9 +515,7 @@ var pktUI = (function() {
   function closePanel() {
     // The panel frame doesn't exist until the Pocket panel is showing.
     // So we ensure it is open before attempting to hide it.
-    getPanelFrame()
-      ?.closest("panel")
-      ?.hidePopup();
+    getPanelFrame()?.closest("panel")?.hidePopup();
   }
 
   var toolbarPanelFrame;
@@ -622,7 +567,6 @@ var pktUI = (function() {
     onShowSignup,
     onShowHome,
 
-    getAndShowRecsForItem,
     tryToSaveUrl,
     tryToSaveCurrentPage,
     resizePanel,
@@ -631,7 +575,7 @@ var pktUI = (function() {
 })();
 
 // -- Communication to Background -- //
-var pktUIMessaging = (function() {
+var pktUIMessaging = (function () {
   /**
    * Send a message to the panel's frame
    */
@@ -642,9 +586,8 @@ var pktUIMessaging = (function() {
       return;
     }
 
-    const aboutPocketActor = panelFrame?.browsingContext?.currentWindowGlobal?.getActor(
-      "AboutPocket"
-    );
+    const aboutPocketActor =
+      panelFrame?.browsingContext?.currentWindowGlobal?.getActor("AboutPocket");
 
     // Send message to panel
     aboutPocketActor?.sendAsyncMessage(messageId, payload);

@@ -3,12 +3,8 @@
 
 "use strict";
 
-const {
-  SearchSERPTelemetry,
-  SearchSERPTelemetryUtils,
-} = ChromeUtils.importESModule(
-  "resource:///modules/SearchSERPTelemetry.sys.mjs"
-);
+const { SearchSERPTelemetry, SearchSERPTelemetryUtils } =
+  ChromeUtils.importESModule("resource:///modules/SearchSERPTelemetry.sys.mjs");
 
 const WINDOW_HEIGHT = 768;
 const WINDOW_WIDTH = 1024;
@@ -18,7 +14,8 @@ const WINDOW_WIDTH = 1024;
 const TEST_PROVIDER_INFO = [
   {
     telemetryId: "example",
-    searchPageRegexp: /^https:\/\/example.org\/browser\/browser\/components\/search\/test\/browser\/searchTelemetryAd_components_/,
+    searchPageRegexp:
+      /^https:\/\/example.org\/browser\/browser\/components\/search\/test\/browser\/searchTelemetryAd/,
     queryParamName: "s",
     codeParamName: "abc",
     taggedCodes: ["ff"],
@@ -43,11 +40,11 @@ const TEST_PROVIDER_INFO = [
         type: SearchSERPTelemetryUtils.COMPONENTS.REFINED_SEARCH_BUTTONS,
         included: {
           parent: {
-            selector: ".moz-rich-suggestions",
+            selector: ".refined-search-buttons",
           },
           children: [
             {
-              selector: ".moz-rich-suggestion a",
+              selector: "a",
             },
           ],
         },
@@ -119,7 +116,7 @@ async function waitForIdle() {
   }
 }
 
-add_setup(async function() {
+add_setup(async function () {
   SearchSERPTelemetry.overrideSearchTelemetryForTests(TEST_PROVIDER_INFO);
   await waitForIdle();
   // Enable local telemetry recording for the duration of the tests.
@@ -271,9 +268,9 @@ add_task(async function test_ad_impressions_with_hidden_carousels() {
   assertAdImpressionEvents([
     {
       component: SearchSERPTelemetryUtils.COMPONENTS.AD_CAROUSEL,
-      ads_loaded: "3",
+      ads_loaded: "4",
       ads_visible: "0",
-      ads_hidden: "3",
+      ads_hidden: "4",
     },
   ]);
 
@@ -387,9 +384,7 @@ add_task(async function test_ad_visibility() {
 
 add_task(async function test_impressions_without_ads() {
   resetTelemetry();
-  let url = getSERPUrl(
-    "searchTelemetryAd_components_refined_search_button.html"
-  );
+  let url = getSERPUrl("searchTelemetryAd_searchbox_with_content.html");
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, url);
 
   await promiseAdImpressionReceived();

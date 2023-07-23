@@ -265,8 +265,6 @@ exports.CSS_PROPERTIES = {
       "radiomenuitem",
       "range",
       "range-thumb",
-      "resizer",
-      "resizerpanel",
       "revert",
       "revert-layer",
       "scrollbar-horizontal",
@@ -288,7 +286,6 @@ exports.CSS_PROPERTIES = {
       "spinner-upbutton",
       "splitter",
       "statusbar",
-      "statusbarpanel",
       "tab",
       "tab-scroll-arrow-back",
       "tab-scroll-arrow-forward",
@@ -333,9 +330,9 @@ exports.CSS_PROPERTIES = {
   "-moz-border-end": {
     "isInherited": false,
     "subproperties": [
-      "border-inline-end-color",
+      "border-inline-end-width",
       "border-inline-end-style",
-      "border-inline-end-width"
+      "border-inline-end-color"
     ],
     "supports": [
       "color"
@@ -495,9 +492,9 @@ exports.CSS_PROPERTIES = {
   "-moz-border-start": {
     "isInherited": false,
     "subproperties": [
-      "border-inline-start-color",
+      "border-inline-start-width",
       "border-inline-start-style",
-      "border-inline-start-width"
+      "border-inline-start-color"
     ],
     "supports": [
       "color"
@@ -1538,8 +1535,6 @@ exports.CSS_PROPERTIES = {
       "radiomenuitem",
       "range",
       "range-thumb",
-      "resizer",
-      "resizerpanel",
       "revert",
       "revert-layer",
       "scrollbar-horizontal",
@@ -1561,7 +1556,6 @@ exports.CSS_PROPERTIES = {
       "spinner-upbutton",
       "splitter",
       "statusbar",
-      "statusbarpanel",
       "tab",
       "tab-scroll-arrow-back",
       "tab-scroll-arrow-forward",
@@ -3022,6 +3016,7 @@ exports.CSS_PROPERTIES = {
       "float",
       "clear",
       "vertical-align",
+      "baseline-source",
       "overflow-clip-box-inline",
       "overflow-clip-box-block",
       "overflow-x",
@@ -3591,8 +3586,6 @@ exports.CSS_PROPERTIES = {
       "radiomenuitem",
       "range",
       "range-thumb",
-      "resizer",
-      "resizerpanel",
       "revert",
       "revert-layer",
       "scrollbar-horizontal",
@@ -3614,7 +3607,6 @@ exports.CSS_PROPERTIES = {
       "spinner-upbutton",
       "splitter",
       "statusbar",
-      "statusbarpanel",
       "tab",
       "tab-scroll-arrow-back",
       "tab-scroll-arrow-forward",
@@ -4016,6 +4008,23 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "baseline-source": {
+    "isInherited": false,
+    "subproperties": [
+      "baseline-source"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "first",
+      "inherit",
+      "initial",
+      "last",
+      "revert",
+      "revert-layer",
+      "unset"
+    ]
+  },
   "block-size": {
     "isInherited": false,
     "subproperties": [
@@ -4038,18 +4047,18 @@ exports.CSS_PROPERTIES = {
   "border": {
     "isInherited": false,
     "subproperties": [
-      "border-top-color",
-      "border-top-style",
       "border-top-width",
-      "border-right-color",
-      "border-right-style",
+      "border-top-style",
+      "border-top-color",
       "border-right-width",
-      "border-bottom-color",
-      "border-bottom-style",
+      "border-right-style",
+      "border-right-color",
       "border-bottom-width",
-      "border-left-color",
-      "border-left-style",
+      "border-bottom-style",
+      "border-bottom-color",
       "border-left-width",
+      "border-left-style",
+      "border-left-color",
       "border-image-outset",
       "border-image-repeat",
       "border-image-slice",
@@ -4176,9 +4185,9 @@ exports.CSS_PROPERTIES = {
   "border-block-end": {
     "isInherited": false,
     "subproperties": [
-      "border-block-end-color",
+      "border-block-end-width",
       "border-block-end-style",
-      "border-block-end-width"
+      "border-block-end-color"
     ],
     "supports": [
       "color"
@@ -4292,9 +4301,9 @@ exports.CSS_PROPERTIES = {
   "border-block-start": {
     "isInherited": false,
     "subproperties": [
-      "border-block-start-color",
+      "border-block-start-width",
       "border-block-start-style",
-      "border-block-start-width"
+      "border-block-start-color"
     ],
     "supports": [
       "color"
@@ -4451,9 +4460,9 @@ exports.CSS_PROPERTIES = {
   "border-bottom": {
     "isInherited": false,
     "subproperties": [
-      "border-bottom-color",
+      "border-bottom-width",
       "border-bottom-style",
-      "border-bottom-width"
+      "border-bottom-color"
     ],
     "supports": [
       "color"
@@ -4895,9 +4904,9 @@ exports.CSS_PROPERTIES = {
   "border-inline-end": {
     "isInherited": false,
     "subproperties": [
-      "border-inline-end-color",
+      "border-inline-end-width",
       "border-inline-end-style",
-      "border-inline-end-width"
+      "border-inline-end-color"
     ],
     "supports": [
       "color"
@@ -5011,9 +5020,9 @@ exports.CSS_PROPERTIES = {
   "border-inline-start": {
     "isInherited": false,
     "subproperties": [
-      "border-inline-start-color",
+      "border-inline-start-width",
       "border-inline-start-style",
-      "border-inline-start-width"
+      "border-inline-start-color"
     ],
     "supports": [
       "color"
@@ -5170,9 +5179,9 @@ exports.CSS_PROPERTIES = {
   "border-left": {
     "isInherited": false,
     "subproperties": [
-      "border-left-color",
+      "border-left-width",
       "border-left-style",
-      "border-left-width"
+      "border-left-color"
     ],
     "supports": [
       "color"
@@ -5303,9 +5312,9 @@ exports.CSS_PROPERTIES = {
   "border-right": {
     "isInherited": false,
     "subproperties": [
-      "border-right-color",
+      "border-right-width",
       "border-right-style",
-      "border-right-width"
+      "border-right-color"
     ],
     "supports": [
       "color"
@@ -5488,9 +5497,9 @@ exports.CSS_PROPERTIES = {
   "border-top": {
     "isInherited": false,
     "subproperties": [
-      "border-top-color",
+      "border-top-width",
       "border-top-style",
-      "border-top-width"
+      "border-top-color"
     ],
     "supports": [
       "color"
@@ -9357,20 +9366,31 @@ exports.CSS_PROPERTIES = {
     "supports": [],
     "values": [
       "auto",
+      "border-box",
       "bottom",
       "center",
+      "circle",
+      "content-box",
+      "ellipse",
+      "fill-box",
       "inherit",
       "initial",
+      "inset",
       "left",
       "none",
+      "normal",
+      "padding-box",
       "path",
+      "polygon",
       "ray",
       "reverse",
       "revert",
       "revert-layer",
       "right",
+      "stroke-box",
       "top",
-      "unset"
+      "unset",
+      "view-box"
     ]
   },
   "offset-anchor": {
@@ -9414,14 +9434,24 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
+      "border-box",
+      "circle",
+      "content-box",
+      "ellipse",
+      "fill-box",
       "inherit",
       "initial",
+      "inset",
       "none",
+      "padding-box",
       "path",
+      "polygon",
       "ray",
       "revert",
       "revert-layer",
-      "unset"
+      "stroke-box",
+      "unset",
+      "view-box"
     ]
   },
   "offset-position": {
@@ -9437,6 +9467,7 @@ exports.CSS_PROPERTIES = {
       "inherit",
       "initial",
       "left",
+      "normal",
       "revert",
       "revert-layer",
       "right",
@@ -11002,6 +11033,7 @@ exports.CSS_PROPERTIES = {
       "margin-box",
       "none",
       "padding-box",
+      "path",
       "polygon",
       "radial-gradient",
       "repeating-conic-gradient",
@@ -12302,6 +12334,7 @@ exports.PSEUDO_ELEMENTS = [
   "::cue",
   "::first-letter",
   "::first-line",
+  "::highlight",
   "::selection",
   "::-moz-focus-inner",
   "::-moz-progress-bar",

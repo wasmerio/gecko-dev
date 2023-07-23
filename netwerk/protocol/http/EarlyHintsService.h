@@ -8,6 +8,7 @@
 #ifndef mozilla_net_EarlyHintsService_h
 #define mozilla_net_EarlyHintsService_h
 
+#include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
@@ -16,6 +17,7 @@
 
 class nsIChannel;
 class nsIURI;
+class nsIInterfaceRequestor;
 
 namespace mozilla::net {
 
@@ -28,12 +30,13 @@ class EarlyHintsService {
   ~EarlyHintsService();
   void EarlyHint(const nsACString& aLinkHeader, nsIURI* aBaseURI,
                  nsIChannel* aChannel, const nsACString& aReferrerPolicy,
-                 const nsACString& aCSPHeader);
+                 const nsACString& aCSPHeader,
+                 nsIInterfaceRequestor* aCallbacks);
   void FinalResponse(uint32_t aResponseStatus);
   void Cancel(const nsACString& aReason);
 
   void RegisterLinksAndGetConnectArgs(
-      nsTArray<EarlyHintConnectArgs>& aOutLinks);
+      dom::ContentParentId aCpId, nsTArray<EarlyHintConnectArgs>& aOutLinks);
 
   uint32_t LinkType() const { return mLinkType; }
 

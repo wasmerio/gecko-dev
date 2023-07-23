@@ -13,13 +13,11 @@ import {
 } from "resource://gre/modules/addons/siteperms-addon-utils.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
-
 const lazy = {};
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  AddonManager: "resource://gre/modules/AddonManager.jsm",
-  AddonManagerPrivate: "resource://gre/modules/AddonManager.jsm",
+ChromeUtils.defineESModuleGetters(lazy, {
+  AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
+  AddonManagerPrivate: "resource://gre/modules/AddonManager.sys.mjs",
 });
 XPCOMUtils.defineLazyGetter(
   lazy,
@@ -84,9 +82,10 @@ class SitePermsAddonWrapper {
    */
   constructor(siteOriginNoSuffix, permissions = []) {
     this.siteOrigin = siteOriginNoSuffix;
-    this.principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(
-      this.siteOrigin
-    );
+    this.principal =
+      Services.scriptSecurityManager.createContentPrincipalFromOrigin(
+        this.siteOrigin
+      );
     // Use a template string for the concat in case `siteOrigin` isn't a string.
     const saltedValue = `${this.siteOrigin}${getSalt()}`;
     this.id = `${computeSha256HashAsString(

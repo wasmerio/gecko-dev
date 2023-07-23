@@ -17,18 +17,15 @@ let supportsPrimary = Services.clipboard.isClipboardTypeSupported(
 const NON_EMPTY_URL = "data:text/html,Hello";
 const TEXT_FOR_PRIMARY = "Text for PRIMARY selection";
 
-add_task(async function() {
+add_task(async function () {
   tabs.push(
     await BrowserTestUtils.openNewForegroundTab(gBrowser, NON_EMPTY_URL)
   );
 
   // Bug 1457355 reproduced only when the url had a non-empty selection.
   gURLBar.select();
-  Assert.equal(gURLBar.inputField.selectionStart, 0);
-  Assert.equal(
-    gURLBar.inputField.selectionEnd,
-    gURLBar.inputField.value.length
-  );
+  Assert.equal(gURLBar.selectionStart, 0);
+  Assert.equal(gURLBar.selectionEnd, gURLBar.value.length);
 
   if (supportsPrimary) {
     clipboardHelper.copyStringToClipboard(

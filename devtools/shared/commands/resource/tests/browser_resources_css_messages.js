@@ -15,14 +15,17 @@ httpServer.registerPathHandler(`/test_css_messages.html`, (req, res) => {
   res.write(`<meta charset=utf8>
     <style>
       html {
-        color: bloup;
+        body {
+          color: bloup;
+        }
       }
     </style>Test CSS Messages`);
 });
 
 const TEST_URI = `http://localhost:${httpServer.identity.primaryPort}/test_css_messages.html`;
 
-add_task(async function() {
+add_task(async function () {
+  await pushPref("layout.css.nesting.enabled", true);
   await testWatchingCssMessages();
   await testWatchingCachedCssMessages();
 });
@@ -81,7 +84,7 @@ async function testWatchingCachedCssMessages() {
   // By default, the CSS Parser does not emit warnings at all, for performance matter.
   // Since we actually want the Parser to emit those messages _before_ we start listening
   // for CSS messages, we need to set the cssErrorReportingEnabled flag on the docShell.
-  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], function() {
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], function () {
     content.docShell.cssErrorReportingEnabled = true;
   });
 
@@ -138,7 +141,7 @@ function setupOnAvailableFunction(
         error: false,
         warning: true,
       },
-      cssSelectors: "html",
+      cssSelectors: ":is(html) body",
       isAlreadyExistingResource,
     },
     {

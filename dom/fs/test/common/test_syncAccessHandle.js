@@ -3,7 +3,7 @@
 
 const allowCreate = { create: true };
 
-exported_symbols.test0 = async function() {
+exported_symbols.test0 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(root, "Can we access the root directory?");
 
@@ -15,7 +15,7 @@ exported_symbols.test0 = async function() {
   }
 };
 
-exported_symbols.test1 = async function() {
+exported_symbols.test1 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(root, "Can we access the root directory?");
 
@@ -29,11 +29,11 @@ exported_symbols.test1 = async function() {
   await handle.close();
 };
 
-exported_symbols.test2 = async function() {
+exported_symbols.test2 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(root, "Can we access the root directory?");
 
-  const testFile = await root.getFileHandle("test.txt");
+  const testFile = await root.getFileHandle("test.txt", allowCreate);
   Assert.ok(!!testFile, "Can't open file");
   let handle = await testFile.createSyncAccessHandle();
   Assert.ok(!!handle, "Can't create SyncAccessHandle");
@@ -51,7 +51,7 @@ exported_symbols.test2 = async function() {
   }
 };
 
-exported_symbols.test3 = async function() {
+exported_symbols.test3 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(!!root, "Can we access the root directory?");
 
@@ -87,7 +87,7 @@ exported_symbols.test3 = async function() {
   await handle.close();
 };
 
-exported_symbols.test4 = async function() {
+exported_symbols.test4 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(!!root, "Can we access the root directory?");
 
@@ -120,11 +120,11 @@ exported_symbols.test4 = async function() {
   await handle.close();
 };
 
-exported_symbols.test5 = async function() {
+exported_symbols.test5 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(!!root, "Can we access the root directory?");
 
-  const testFile = await root.getFileHandle("test.txt");
+  const testFile = await root.getFileHandle("test.txt", allowCreate);
   Assert.ok(!!testFile, "Can't create file");
   let handle = await testFile.createSyncAccessHandle();
   Assert.ok(!!handle, "Can't create SyncAccessHandle");
@@ -143,11 +143,11 @@ exported_symbols.test5 = async function() {
   await handle.close();
 };
 
-exported_symbols.test6 = async function() {
+exported_symbols.test6 = async function () {
   let root = await navigator.storage.getDirectory();
   Assert.ok(root, "Can we access the root directory?");
 
-  const testFile = await root.getFileHandle("test.txt");
+  const testFile = await root.getFileHandle("test.txt", allowCreate);
   Assert.ok(!!testFile, "Can't get file");
   let handle = await testFile.createSyncAccessHandle();
   Assert.ok(!!handle, "Can't create SyncAccessHandle");
@@ -185,9 +185,9 @@ exported_symbols.test6 = async function() {
   }
 };
 
-exported_symbols.quotaTest = async function() {
+exported_symbols.quotaTest = async function () {
   const shrinkedStorageSizeKB = 5 * 1024;
-  const defaultDatabaseSize = 294912;
+  const defaultDatabaseSize = 458752;
 
   // Shrink storage size to 5MB.
   await Utils.shrinkStorageSize(shrinkedStorageSizeKB);
@@ -196,7 +196,7 @@ exported_symbols.quotaTest = async function() {
   Assert.ok(root, "Can we access the root directory?");
 
   // Fill entire storage.
-  const fileHandle = await root.getFileHandle("test.txt");
+  const fileHandle = await root.getFileHandle("test.txt", allowCreate);
   Assert.ok(!!fileHandle, "Can we get file handle?");
 
   const accessHandle = await fileHandle.createSyncAccessHandle();
@@ -211,7 +211,7 @@ exported_symbols.quotaTest = async function() {
   Assert.equal(written, buffer.byteLength, "Can we write entire buffer?");
 
   // Try to write one more byte.
-  const fileHandle2 = await root.getFileHandle("test2.txt");
+  const fileHandle2 = await root.getFileHandle("test2.txt", allowCreate);
   Assert.ok(!!fileHandle2, "Can we get file handle?");
 
   const accessHandle2 = await fileHandle2.createSyncAccessHandle();

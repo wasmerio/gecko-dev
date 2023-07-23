@@ -38,17 +38,17 @@ let JSPROCESSACTORS = {
 
   ExtensionContent: {
     child: {
-      moduleURI: "resource://gre/modules/ExtensionContent.jsm",
+      esModuleURI: "resource://gre/modules/ExtensionContent.sys.mjs",
     },
     includeParent: true,
   },
 
   ProcessConduits: {
     parent: {
-      moduleURI: "resource://gre/modules/ConduitsParent.jsm",
+      esModuleURI: "resource://gre/modules/ConduitsParent.sys.mjs",
     },
     child: {
-      moduleURI: "resource://gre/modules/ConduitsChild.jsm",
+      esModuleURI: "resource://gre/modules/ConduitsChild.sys.mjs",
     },
   },
 };
@@ -105,7 +105,7 @@ let JSWINDOWACTORS = {
       },
     },
     matches: ["about:translations"],
-
+    remoteTypes: ["privilegedabout"],
     enablePreference: "browser.translations.enable",
   },
 
@@ -195,11 +195,11 @@ let JSWINDOWACTORS = {
 
   Conduits: {
     parent: {
-      moduleURI: "resource://gre/modules/ConduitsParent.jsm",
+      esModuleURI: "resource://gre/modules/ConduitsParent.sys.mjs",
     },
 
     child: {
-      moduleURI: "resource://gre/modules/ConduitsChild.jsm",
+      esModuleURI: "resource://gre/modules/ConduitsChild.sys.mjs",
     },
 
     allFrames: true,
@@ -328,7 +328,7 @@ let JSWINDOWACTORS = {
 
   ManifestMessages: {
     child: {
-      moduleURI: "resource://gre/modules/ManifestMessagesChild.jsm",
+      esModuleURI: "resource://gre/modules/ManifestMessagesChild.sys.mjs",
     },
   },
 
@@ -489,12 +489,18 @@ let JSWINDOWACTORS = {
     child: {
       esModuleURI: "resource://gre/actors/TranslationsChild.sys.mjs",
       events: {
-        pageshow: {},
-        DOMHeadElementParsed: {},
-        DOMDocElementInserted: {},
         DOMContentLoaded: {},
       },
     },
+    matches: [
+      "http://*/*",
+      "https://*/*",
+      "file:///*",
+
+      // The actor is explicitly loaded by this page,
+      // so it needs to be allowed for it.
+      "about:translations",
+    ],
     enablePreference: "browser.translations.enable",
   },
 

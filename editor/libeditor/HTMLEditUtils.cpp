@@ -431,9 +431,7 @@ bool HTMLEditUtils::IsNamedAnchor(const nsINode* aNode) {
   }
 
   nsAutoString text;
-  return aNode->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::name,
-                                     text) &&
-         !text.IsEmpty();
+  return aNode->AsElement()->GetAttr(nsGkAtoms::name, text) && !text.IsEmpty();
 }
 
 /**
@@ -2148,19 +2146,12 @@ HTMLEditUtils::ComputePointToPutCaretInElementIfOutside(
   // FYI: This was moved from
   // https://searchfox.org/mozilla-central/rev/d3c2f51d89c3ca008ff0cb5a057e77ccd973443e/editor/libeditor/HTMLEditSubActionHandler.cpp#9193
 
-  // Use ranges and RangeUtils::CompareNodeToRange() to compare selection
-  // start to new block.
-  RefPtr<StaticRange> staticRange =
-      StaticRange::Create(aCurrentPoint.ToRawRangeBoundary(),
-                          aCurrentPoint.ToRawRangeBoundary(), IgnoreErrors());
-  if (MOZ_UNLIKELY(!staticRange)) {
-    NS_WARNING("StaticRange::Create() failed");
-    return Err(NS_ERROR_FAILURE);
-  }
-
+  // Use range boundaries and RangeUtils::CompareNodeToRange() to compare
+  // selection start to new block.
   bool nodeBefore, nodeAfter;
-  nsresult rv = RangeUtils::CompareNodeToRange(
-      const_cast<Element*>(&aElement), staticRange, &nodeBefore, &nodeAfter);
+  nsresult rv = RangeUtils::CompareNodeToRangeBoundaries(
+      const_cast<Element*>(&aElement), aCurrentPoint.ToRawRangeBoundary(),
+      aCurrentPoint.ToRawRangeBoundary(), &nodeBefore, &nodeAfter);
   if (NS_FAILED(rv)) {
     NS_WARNING("RangeUtils::CompareNodeToRange() failed");
     return Err(rv);
@@ -2213,7 +2204,7 @@ bool HTMLEditUtils::IsInlineStyleSetByElement(
       return true;
     }
     nsAutoString value;
-    element->GetAttr(kNameSpaceID_None, aStyle.mAttribute, value);
+    element->GetAttr(aStyle.mAttribute, value);
     if (aOutValue) {
       *aOutValue = value;
     }

@@ -71,7 +71,8 @@ nsListControlFrame::nsListControlFrame(ComputedStyle* aStyle,
 nsListControlFrame::~nsListControlFrame() = default;
 
 Maybe<nscoord> nsListControlFrame::GetNaturalBaselineBOffset(
-    WritingMode aWM, BaselineSharingGroup aBaselineGroup) const {
+    WritingMode aWM, BaselineSharingGroup aBaselineGroup,
+    BaselineExportContext) const {
   // Unlike scroll frames which we inherit from, we don't export a baseline.
   return Nothing{};
 }
@@ -663,7 +664,7 @@ void nsListControlFrame::SetInitialChildList(ChildListID aListID,
                                              nsFrameList&& aChildList) {
   if (aListID == FrameChildListID::Principal) {
     // First check to see if all the content has been added
-    mIsAllContentHere = mContent->IsDoneAddingChildren();
+    mIsAllContentHere = Select().IsDoneAddingChildren();
     if (!mIsAllContentHere) {
       mIsAllFramesHere = false;
       mHasBeenInitialized = false;
@@ -812,7 +813,7 @@ nsListControlFrame::AddOption(int32_t aIndex) {
 #endif
 
   if (!mIsAllContentHere) {
-    mIsAllContentHere = mContent->IsDoneAddingChildren();
+    mIsAllContentHere = Select().IsDoneAddingChildren();
     if (!mIsAllContentHere) {
       mIsAllFramesHere = false;
       mHasBeenInitialized = false;

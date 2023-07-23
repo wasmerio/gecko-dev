@@ -172,7 +172,6 @@ class XPCShellTestThread(Thread):
         self.testingModulesDir = kwargs.get("testingModulesDir")
         self.debuggerInfo = kwargs.get("debuggerInfo")
         self.jsDebuggerInfo = kwargs.get("jsDebuggerInfo")
-        self.httpdJSPath = kwargs.get("httpdJSPath")
         self.headJSPath = kwargs.get("headJSPath")
         self.testharnessdir = kwargs.get("testharnessdir")
         self.profileName = kwargs.get("profileName")
@@ -1120,7 +1119,7 @@ class XPCShellTests(object):
 
     def setAbsPath(self):
         """
-        Set the absolute path for xpcshell, httpdjspath and xrepath. These 3 variables
+        Set the absolute path for xpcshell and xrepath. These 3 variables
         depend on input from the command line and we need to allow for absolute paths.
         This function is overloaded for a remote solution as os.path* won't work remotely.
         """
@@ -1145,10 +1144,6 @@ class XPCShellTests(object):
                     self.xrePath = appBundlePath
         else:
             self.xrePath = os.path.abspath(self.xrePath)
-
-        # httpd.js belongs in xrePath/components, which is Contents/Resources on mac
-        self.httpdJSPath = os.path.join(self.xrePath, "components", "httpd.js")
-        self.httpdJSPath = self.httpdJSPath.replace("\\", "/")
 
         if self.mozInfo is None:
             self.mozInfo = os.path.join(self.testharnessdir, "mozinfo.json")
@@ -1710,6 +1705,7 @@ class XPCShellTests(object):
         self.timeoutAsPass = options.get("timeoutAsPass")
         self.crashAsPass = options.get("crashAsPass")
         self.conditionedProfile = options.get("conditionedProfile")
+        self.repeat = options.get("repeat", 0)
 
         self.testCount = 0
         self.passCount = 0
@@ -1807,7 +1803,6 @@ class XPCShellTests(object):
             "testingModulesDir": self.testingModulesDir,
             "debuggerInfo": self.debuggerInfo,
             "jsDebuggerInfo": self.jsDebuggerInfo,
-            "httpdJSPath": self.httpdJSPath,
             "headJSPath": self.headJSPath,
             "tempDir": self.tempDir,
             "testharnessdir": self.testharnessdir,
@@ -1839,6 +1834,7 @@ class XPCShellTests(object):
             "timeoutAsPass": self.timeoutAsPass,
             "crashAsPass": self.crashAsPass,
             "conditionedProfileDir": self.conditioned_profile_dir,
+            "repeat": self.repeat,
         }
 
         if self.sequential:
@@ -1880,6 +1876,10 @@ class XPCShellTests(object):
         # also a list for the tests that need to be run sequentially
         sequential_tests = []
         status = None
+
+        if options.get("repeat", 0) > 0:
+            self.sequential = True
+
         if not options.get("verify"):
             for test_object in self.alltests:
                 # Test identifiers are provided for the convenience of logging. These
@@ -1891,19 +1891,21 @@ class XPCShellTests(object):
                 if self.singleFile and not path.endswith(self.singleFile):
                     continue
 
-                self.testCount += 1
+                # if we have --repeat, duplicate the tests as needed
+                for i in range(0, options.get("repeat", 0) + 1):
+                    self.testCount += 1
 
-                test = testClass(
-                    test_object,
-                    verbose=self.verbose or test_object.get("verbose") == "true",
-                    usingTSan=usingTSan,
-                    mobileArgs=mobileArgs,
-                    **kwargs,
-                )
-                if "run-sequentially" in test_object or self.sequential:
-                    sequential_tests.append(test)
-                else:
-                    tests_queue.append(test)
+                    test = testClass(
+                        test_object,
+                        verbose=self.verbose or test_object.get("verbose") == "true",
+                        usingTSan=usingTSan,
+                        mobileArgs=mobileArgs,
+                        **kwargs,
+                    )
+                    if "run-sequentially" in test_object or self.sequential:
+                        sequential_tests.append(test)
+                    else:
+                        tests_queue.append(test)
 
             status = self.runTestList(
                 tests_queue, sequential_tests, testClass, mobileArgs, **kwargs

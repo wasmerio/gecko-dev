@@ -319,15 +319,7 @@ manage-browser-languages-button =
 confirm-browser-language-change-description = Restart { -brand-short-name } to apply these changes
 confirm-browser-language-change-button = Apply and Restart
 
-translate-web-pages =
-    .label = Translate web content
-    .accesskey = T
-
 fx-translate-web-pages = { -translations-brand-name }
-
-# The <img> element is replaced by the logo of the provider
-# used to provide machine translations for web pages.
-translate-attribution = Translations by <img data-l10n-name="logo"/>
 
 translate-exceptions =
     .label = Exceptions…
@@ -892,10 +884,12 @@ prefs-sync-turn-on-syncing =
 
 prefs-sync-offer-setup-label2 = Synchronize your bookmarks, history, tabs, passwords, add-ons, and settings across all your devices.
 
-prefs-sync-now =
-    .labelnotsyncing = Sync Now
-    .accesskeynotsyncing = N
-    .labelsyncing = Syncing…
+prefs-sync-now-button =
+    .label = Sync Now
+    .accesskey = N
+
+prefs-syncing-button =
+    .label = Syncing…
 
 ## The list of things currently syncing.
 
@@ -1016,8 +1010,8 @@ forms-breach-alerts =
     .label = Show alerts about passwords for breached websites
     .accesskey = b
 forms-breach-alerts-learn-more-link = Learn more
-relay-integration =
-    .label = Enable { -relay-brand-name } in your { -brand-short-name } password manager
+preferences-relay-integration-checkbox =
+    .label = Suggest { -relay-brand-name } email masks to protect your email address
 relay-integration-learn-more-link = Learn more
 
 # Checkbox which controls filling saved logins into fields automatically when they appear, in some cases without user interaction.

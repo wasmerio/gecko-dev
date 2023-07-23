@@ -137,8 +137,7 @@ bool nsNativeTheme::CheckBooleanAttr(nsIFrame* aFrame, nsAtom* aAtom) {
   nsIContent* content = aFrame->GetContent();
   if (!content || !content->IsElement()) return false;
 
-  if (content->IsHTMLElement())
-    return content->AsElement()->HasAttr(kNameSpaceID_None, aAtom);
+  if (content->IsHTMLElement()) return content->AsElement()->HasAttr(aAtom);
 
   // For XML/XUL elements, an attribute must be equal to the literal
   // string "true" to be counted as true.  An empty string should _not_
@@ -156,7 +155,7 @@ int32_t nsNativeTheme::CheckIntAttr(nsIFrame* aFrame, nsAtom* aAtom,
   if (!content || !content->IsElement()) return defaultValue;
 
   nsAutoString attr;
-  content->AsElement()->GetAttr(kNameSpaceID_None, aAtom, attr);
+  content->AsElement()->GetAttr(aAtom, attr);
   nsresult err;
   int32_t value = attr.ToInteger(&err);
   if (attr.IsEmpty() || NS_FAILED(err)) return defaultValue;
@@ -207,31 +206,6 @@ bool nsNativeTheme::IsWidgetStyled(nsPresContext* aPresContext,
   // Check for specific widgets to see if HTML has overridden the style.
   if (!aFrame) {
     return false;
-  }
-
-  // Resizers have some special handling, dependent on whether in a scrollable
-  // container or not. If so, use the scrollable container's to determine
-  // whether the style is overriden instead of the resizer. This allows a
-  // non-native transparent resizer to be used instead. Otherwise, we just
-  // fall through and return false.
-  if (aAppearance == StyleAppearance::Resizer) {
-    nsIFrame* parentFrame = aFrame->GetParent();
-    if (parentFrame && parentFrame->IsScrollFrame()) {
-      // if the parent is a scrollframe, the resizer should be native themed
-      // only if the scrollable area doesn't override the widget style.
-      //
-      // note that the condition below looks a bit suspect but it's the right
-      // one. If there's no valid appearance, then we should return true, it's
-      // effectively the same as if it had overridden the appearance.
-      parentFrame = parentFrame->GetParent();
-      if (!parentFrame) {
-        return false;
-      }
-      auto parentAppearance =
-          parentFrame->StyleDisplay()->EffectiveAppearance();
-      return parentAppearance == StyleAppearance::None ||
-             IsWidgetStyled(aPresContext, parentFrame, parentAppearance);
-    }
   }
 
   /**
@@ -356,8 +330,7 @@ bool nsNativeTheme::IsBottomTab(nsIFrame* aFrame) {
 
   nsAutoString classStr;
   if (aFrame->GetContent()->IsElement()) {
-    aFrame->GetContent()->AsElement()->GetAttr(kNameSpaceID_None,
-                                               nsGkAtoms::_class, classStr);
+    aFrame->GetContent()->AsElement()->GetAttr(nsGkAtoms::_class, classStr);
   }
   // FIXME: This looks bogus, shouldn't this be looking at GetClasses()?
   return !classStr.IsEmpty() && classStr.Find(u"tab-bottom") != kNotFound;

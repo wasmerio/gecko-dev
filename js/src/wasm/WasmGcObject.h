@@ -12,9 +12,9 @@
 
 #include "gc/Allocator.h"
 #include "gc/Pretenuring.h"
-#include "vm/ArrayBufferObject.h"
 #include "vm/JSObject.h"
 #include "wasm/WasmInstanceData.h"
+#include "wasm/WasmMemory.h"
 #include "wasm/WasmTypeDef.h"
 #include "wasm/WasmValType.h"
 
@@ -86,20 +86,14 @@ class WasmGcObject : public JSObject {
     void set(uint32_t u32) { u32_ = u32; }
   };
 
-  [[nodiscard]] bool lookupProperty(JSContext* cx,
-                                    js::Handle<WasmGcObject*> object, jsid id,
-                                    PropOffset* offset, wasm::FieldType* type);
-  [[nodiscard]] bool hasProperty(JSContext* cx,
-                                 js::Handle<WasmGcObject*> object, jsid id) {
-    WasmGcObject::PropOffset offset;
-    wasm::FieldType type;
-    return lookupProperty(cx, object, id, &offset, &type);
-  }
-
-  bool loadValue(JSContext* cx, const WasmGcObject::PropOffset& offset,
-                 wasm::FieldType type, MutableHandleValue vp);
+  [[nodiscard]] static bool lookUpProperty(JSContext* cx,
+                                           Handle<WasmGcObject*> obj, jsid id,
+                                           PropOffset* offset, FieldType* type);
 
  public:
+  [[nodiscard]] static bool loadValue(JSContext* cx, Handle<WasmGcObject*> obj,
+                                      jsid id, MutableHandleValue vp);
+
   const wasm::SuperTypeVector& superTypeVector() const {
     return *superTypeVector_;
   }
@@ -126,7 +120,7 @@ class WasmGcObject : public JSObject {
   // from `typeDefData`; the initial heap must be specified separately.
   static WasmGcObject* create(JSContext* cx,
                               wasm::TypeDefInstanceData* typeDefData,
-                              js::gc::InitialHeap initialHeap);
+                              js::gc::Heap initialHeap);
 };
 
 //=========================================================================
@@ -157,7 +151,7 @@ class WasmArrayObject : public WasmGcObject {
   template <bool ZeroFields = true>
   static WasmArrayObject* createArray(JSContext* cx,
                                       wasm::TypeDefInstanceData* typeDefData,
-                                      js::gc::InitialHeap initialHeap,
+                                      js::gc::Heap initialHeap,
                                       uint32_t numElements);
 
   // JIT accessors
@@ -231,8 +225,7 @@ class WasmStructObject : public WasmGcObject {
   template <bool ZeroFields>
   static MOZ_NEVER_INLINE WasmStructObject* createStructOOL(
       JSContext* cx, wasm::TypeDefInstanceData* typeDefData,
-      js::gc::InitialHeap initialHeap, uint32_t inlineBytes,
-      uint32_t outlineBytes);
+      js::gc::Heap initialHeap, uint32_t inlineBytes, uint32_t outlineBytes);
 
   // Creates a new struct typed object, optionally initialized to zero.
   // Reports if there is an out of memory error.  The structure's type, shape,
@@ -243,7 +236,7 @@ class WasmStructObject : public WasmGcObject {
   template <bool ZeroFields = true>
   static inline WasmStructObject* createStruct(
       JSContext* cx, wasm::TypeDefInstanceData* typeDefData,
-      js::gc::InitialHeap initialHeap) {
+      js::gc::Heap initialHeap) {
     const wasm::TypeDef* typeDef = typeDefData->typeDef;
     MOZ_ASSERT(typeDef->kind() == wasm::TypeDefKind::Struct);
 
@@ -290,7 +283,7 @@ class WasmStructObject : public WasmGcObject {
   // Given the offset of a field, return its actual address.  `fieldType` is
   // for assertional purposes only.
   inline uint8_t* fieldOffsetToAddress(FieldType fieldType,
-                                       uint32_t fieldOffset);
+                                       uint32_t fieldOffset) const;
 
   // JIT accessors
   static constexpr size_t offsetOfOutlineData() {
@@ -352,8 +345,8 @@ inline void WasmStructObject::fieldOffsetToAreaAndOffset(FieldType fieldType,
       ((fieldOffset + fieldType.size() - 1) < WasmStructObject_MaxInlineBytes));
 }
 
-inline uint8_t* WasmStructObject::fieldOffsetToAddress(FieldType fieldType,
-                                                       uint32_t fieldOffset) {
+inline uint8_t* WasmStructObject::fieldOffsetToAddress(
+    FieldType fieldType, uint32_t fieldOffset) const {
   bool areaIsOutline;
   uint32_t areaOffset;
   fieldOffsetToAreaAndOffset(fieldType, fieldOffset, &areaIsOutline,

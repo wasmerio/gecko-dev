@@ -133,6 +133,18 @@ class WebExtensionPolicyCore final {
                     bool aCheckRestricted = true,
                     bool aAllowFilePermission = false) const;
 
+  bool IgnoreQuarantine() const MOZ_EXCLUDES(mLock) {
+    AutoReadLock lock(mLock);
+    return mIgnoreQuarantine;
+  }
+  void SetIgnoreQuarantine(bool aIgnore) MOZ_EXCLUDES(mLock) {
+    AutoWriteLock lock(mLock);
+    mIgnoreQuarantine = aIgnore;
+  }
+
+  bool QuarantinedFromDoc(const DocInfo& aDoc) const;
+  bool QuarantinedFromURI(const URLInfo& aURI) const MOZ_EXCLUDES(mLock);
+
   // Try to get a reference to the cycle-collected main-thread-only
   // WebExtensionPolicy instance.
   //
@@ -179,6 +191,8 @@ class WebExtensionPolicyCore final {
   /* const */ nsTArray<RefPtr<WebAccessibleResource>> mWebAccessibleResources;
 
   mutable RWLock mLock{"WebExtensionPolicyCore"};
+
+  bool mIgnoreQuarantine MOZ_GUARDED_BY(mLock);
   RefPtr<AtomSet> mPermissions MOZ_GUARDED_BY(mLock);
   RefPtr<MatchPatternSetCore> mHostPermissions MOZ_GUARDED_BY(mLock);
 };
@@ -253,6 +267,17 @@ class WebExtensionPolicy final : public nsISupports, public nsWrapperCache {
   static bool IsRestrictedDoc(const DocInfo& aDoc);
   static bool IsRestrictedURI(const URLInfo& aURI);
 
+  static bool IsQuarantinedDoc(const DocInfo& aDoc);
+  static bool IsQuarantinedURI(const URLInfo& aURI);
+
+  bool QuarantinedFromDoc(const DocInfo& aDoc) const {
+    return mCore->QuarantinedFromDoc(aDoc);
+  }
+
+  bool QuarantinedFromURI(const URLInfo& aURI) const {
+    return mCore->QuarantinedFromURI(aURI);
+  }
+
   nsCString BackgroundPageHTML() const;
 
   MOZ_CAN_RUN_SCRIPT
@@ -285,6 +310,9 @@ class WebExtensionPolicy final : public nsISupports, public nsWrapperCache {
   void SetPermissions(const nsTArray<nsString>& aPermissions) {
     mCore->SetPermissions(aPermissions);
   }
+
+  bool IgnoreQuarantine() const { return mCore->IgnoreQuarantine(); }
+  void SetIgnoreQuarantine(bool aIgnore);
 
   void GetContentScripts(ScriptArray& aScripts) const;
   const ScriptArray& ContentScripts() const { return mContentScripts; }
@@ -333,9 +361,20 @@ class WebExtensionPolicy final : public nsISupports, public nsWrapperCache {
     return IsRestrictedURI(aURI);
   }
 
+  static bool IsQuarantinedURI(dom::GlobalObject& aGlobal,
+                               const URLInfo& aURI) {
+    return IsQuarantinedURI(aURI);
+  }
+
+  bool QuarantinedFromURI(dom::GlobalObject& aGlobal,
+                          const URLInfo& aURI) const {
+    return QuarantinedFromURI(aURI);
+  }
+
   static bool UseRemoteWebExtensions(dom::GlobalObject& aGlobal);
   static bool IsExtensionProcess(dom::GlobalObject& aGlobal);
   static bool BackgroundServiceWorkerEnabled(dom::GlobalObject& aGlobal);
+  static bool QuarantinedDomainsEnabled(dom::GlobalObject& aGlobal);
 
   nsISupports* GetParentObject() const { return mParent; }
 

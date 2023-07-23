@@ -35,7 +35,10 @@ NS_IMPL_ISUPPORTS(nsJARInputStream, nsIInputStream)
 nsresult nsJARInputStream::InitFile(nsZipHandle* aFd, const uint8_t* aData,
                                     nsZipItem* aItem) {
   nsresult rv = NS_OK;
-  MOZ_ASSERT(aFd, "Argument may not be null");
+  MOZ_DIAGNOSTIC_ASSERT(aFd, "Argument may not be null");
+  if (!aFd) {
+    return NS_ERROR_INVALID_ARG;
+  }
   MOZ_ASSERT(aItem, "Argument may not be null");
 
   // Mark it as closed, in case something fails in initialisation
@@ -285,7 +288,9 @@ nsresult nsJARInputStream::ContinueInflate(char* aBuffer, uint32_t aCount,
     if ((zerr != Z_OK) && (zerr != Z_STREAM_END)) {
       return NS_ERROR_FILE_CORRUPTED;
     }
-    finished = (zerr == Z_STREAM_END);
+    // If inflating did not read anything more, then the stream is finished.
+    finished = (zerr == Z_STREAM_END) ||
+               (mZs.avail_out && mZs.total_out == oldTotalOut);
   }
 
   *aBytesRead = (mZs.total_out - oldTotalOut);
@@ -295,9 +300,19 @@ nsresult nsJARInputStream::ContinueInflate(char* aBuffer, uint32_t aCount,
 
   // be aggressive about ending the inflation
   // for some reason we don't always get Z_STREAM_END
-  if (finished || mZs.total_out == mOutSize) {
+  if (finished || mZs.total_out >= mOutSize) {
     if (mMode == MODE_INFLATE) {
-      inflateEnd(&mZs);
+      int zerr = inflateEnd(&mZs);
+      if (zerr != Z_OK) {
+        return NS_ERROR_FILE_CORRUPTED;
+      }
+
+      // Stream is finished but has a different size from what
+      // we expected.
+      if (mozilla::StaticPrefs::network_jar_require_size_match() &&
+          mZs.total_out != mOutSize) {
+        return NS_ERROR_FILE_CORRUPTED;
+      }
     }
 
     // stop returning valid data as soon as we know we have a bad CRC

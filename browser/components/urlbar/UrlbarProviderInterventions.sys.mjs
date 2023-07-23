@@ -13,17 +13,14 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   AppUpdater: "resource://gre/modules/AppUpdater.sys.mjs",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   NLP: "resource://gre/modules/NLP.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   ResetProfile: "resource://gre/modules/ResetProfile.sys.mjs",
+  Sanitizer: "resource:///modules/Sanitizer.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarResult: "resource:///modules/UrlbarResult.sys.mjs",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-  Sanitizer: "resource:///modules/Sanitizer.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(lazy, "appUpdater", () => new lazy.AppUpdater());
@@ -688,17 +685,17 @@ class ProviderInterventions extends UrlbarProvider {
     }
   }
 
-  #pickResult(result) {
+  #pickResult(result, window) {
     let tip = result.payload.type;
 
     // Do the tip action.
     switch (tip) {
       case TIPS.CLEAR:
-        openClearHistoryDialog();
+        openClearHistoryDialog(window);
         break;
       case TIPS.REFRESH:
       case TIPS.UPDATE_REFRESH:
-        resetBrowser();
+        resetBrowser(window);
         break;
       case TIPS.UPDATE_ASK:
         installBrowserUpdateAndRestart();
@@ -707,7 +704,6 @@ class ProviderInterventions extends UrlbarProvider {
         restartBrowser();
         break;
       case TIPS.UPDATE_WEB:
-        let window = lazy.BrowserWindowTracker.getTopWindow();
         window.gBrowser.selectedTab = window.gBrowser.addWebTab(
           "https://www.mozilla.org/firefox/new/"
         );
@@ -715,10 +711,10 @@ class ProviderInterventions extends UrlbarProvider {
     }
   }
 
-  onEngagement(isPrivate, state, queryContext, details) {
+  onEngagement(isPrivate, state, queryContext, details, window) {
     let { result } = details;
     if (result?.providerName == this.name) {
-      this.#pickResult(result);
+      this.#pickResult(result, window);
     }
 
     if (["engagement", "abandonment"].includes(state)) {
@@ -790,8 +786,7 @@ function installBrowserUpdateAndRestart() {
   });
 }
 
-function openClearHistoryDialog() {
-  let window = lazy.BrowserWindowTracker.getTopWindow();
+function openClearHistoryDialog(window) {
   // The behaviour of the Clear Recent History dialog in PBM does
   // not have the expected effect (bug 463607).
   if (lazy.PrivateBrowsingUtils.isWindowPrivate(window)) {
@@ -824,10 +819,9 @@ function restartBrowser() {
   }
 }
 
-function resetBrowser() {
+function resetBrowser(window) {
   if (!lazy.ResetProfile.resetSupported()) {
     return;
   }
-  let window = lazy.BrowserWindowTracker.getTopWindow();
   lazy.ResetProfile.openConfirmationDialog(window);
 }

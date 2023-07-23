@@ -51,13 +51,17 @@ def lint(paths, config, binary=None, fix=None, rules=[], setup=None, **lintargs)
     module_path = setup_helper.get_project_root()
 
     modified_paths = []
-    exts = "*.(" + "|".join(config["extensions"]) + ")"
+    exts = "*.{" + ",".join(config["extensions"]) + "}"
+
     for path in paths:
         filepath, fileext = os.path.splitext(path)
         if fileext:
             modified_paths += [path]
         else:
-            modified_paths += [path + "**" + os.path.sep + exts]
+            joined_path = os.path.join(path, "**", exts)
+            if is_windows():
+                joined_path = joined_path.replace("\\", "/")
+            modified_paths.append(joined_path)
 
     # Valid binaries are:
     #  - Any provided by the binary argument.
@@ -78,6 +82,9 @@ def lint(paths, config, binary=None, fix=None, rules=[], setup=None, **lintargs)
             ["--ignore-pattern", os.path.relpath(path, lintargs["root"])]
         )
 
+    # Default to $topsrcdir/.stylelintrc.js, but allow override in stylelint.yml
+    stylelint_rc = config.get("stylelint-rc", ".stylelintrc.js")
+
     # First run Stylelint
     cmd_args = (
         [
@@ -89,7 +96,7 @@ def lint(paths, config, binary=None, fix=None, rules=[], setup=None, **lintargs)
             "json",
             "--allow-empty-input",
             "--config",
-            os.path.join(lintargs["root"], ".stylelintrc.js"),
+            os.path.join(lintargs["root"], stylelint_rc),
         ]
         + extra_args
         + exclude_args
@@ -110,10 +117,7 @@ def lint(paths, config, binary=None, fix=None, rules=[], setup=None, **lintargs)
 
 def run(cmd_args, config, fix):
     shell = False
-    if (
-        os.environ.get("MSYSTEM") in ("MINGW32", "MINGW64")
-        or "MOZILLABUILD" in os.environ
-    ):
+    if is_windows():
         # The stylelint binary needs to be run from a shell with msys
         shell = True
     encoding = "utf-8"
@@ -182,3 +186,10 @@ def run(cmd_args, config, fix):
             results.append(result.from_config(config, **err))
 
     return {"results": results, "fixed": fixed}
+
+
+def is_windows():
+    return (
+        os.environ.get("MSYSTEM") in ("MINGW32", "MINGW64")
+        or "MOZILLABUILD" in os.environ
+    )

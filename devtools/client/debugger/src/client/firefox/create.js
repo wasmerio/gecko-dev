@@ -31,11 +31,7 @@ export function setupCreate(dependencies) {
 }
 
 export async function createFrame(thread, frame, index = 0) {
-  if (!frame) {
-    return null;
-  }
-
-  // Because of throttling, the source may be available a bit late.
+  // Because of throttling, the source related to the top frame may be available a bit late.
   const sourceActor = await waitForSourceActorToBeRegisteredInStore(
     frame.where.actor
   );
@@ -320,12 +316,16 @@ export function createSourceActor(sourceResource, sourceObject) {
   };
 }
 
-export async function createPause(thread, packet) {
-  const frame = await createFrame(thread, packet.frame);
+/**
+ * Create a pause info object passed to paused action from
+ * the THREAD_STATE "paused" resource.
+ */
+export async function createPause(threadActorID, pausedThreadState) {
+  const frame = await createFrame(threadActorID, pausedThreadState.frame);
   return {
-    ...packet,
-    thread,
+    thread: threadActorID,
     frame,
+    why: pausedThreadState.why,
   };
 }
 
@@ -377,10 +377,10 @@ export function createBreakpoint({
     // }
     options,
 
-    // The location (object) information for the original source, for details on its format and structure See `makeBreakpointLocation`
+    // The location (object) information for the original source, for details on its format and structure See `createLocation`
     location,
 
-    // The location (object) information for the generated source, for details on its format and structure See `makeBreakpointLocation`
+    // The location (object) information for the generated source, for details on its format and structure See `createLocation`
     generatedLocation,
 
     // The text (string) on the line which the brekpoint is set in the generated source

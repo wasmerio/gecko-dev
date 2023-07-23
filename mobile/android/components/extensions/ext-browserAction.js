@@ -11,8 +11,8 @@ ChromeUtils.defineESModuleGetters(this, {
   ExtensionActionHelper: "resource://gre/modules/GeckoViewWebExtension.sys.mjs",
 });
 
-const { BrowserActionBase } = ChromeUtils.import(
-  "resource://gre/modules/ExtensionActions.jsm"
+const { BrowserActionBase } = ChromeUtils.importESModule(
+  "resource://gre/modules/ExtensionActions.sys.mjs"
 );
 
 const BROWSER_ACTION_PROPERTIES = [
@@ -145,14 +145,21 @@ this.browserAction = class extends ExtensionAPIPersistent {
         onClicked: new EventManager({
           context,
           // module name is "browserAction" because it the name used in the
-          // ext-browser.json, independently from the manifest version.
+          // ext-android.json, independently from the manifest version.
           module: "browserAction",
           event: "onClicked",
-          // NOTE: Firefox Desktop event has inputHandling set to true here.
-          // inputHandling: true,
+          inputHandling: true,
           extensionApi: this,
         }).api(),
 
+        getUserSettings: () => {
+          return {
+            // isOnToolbar is not supported on Android.
+            // We intentionally omit the property, in case
+            // extensions would like to feature-detect support
+            // for this feature.
+          };
+        },
         openPopup: options => {
           const isHandlingUserInput =
             context.callContextData?.isHandlingUserInput;

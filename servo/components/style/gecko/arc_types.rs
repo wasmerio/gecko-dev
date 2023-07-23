@@ -16,19 +16,19 @@ use crate::stylesheets::keyframes_rule::Keyframe;
 use crate::stylesheets::{
     ContainerRule, CounterStyleRule, CssRules, DocumentRule, FontFaceRule, FontFeatureValuesRule,
     FontPaletteValuesRule, ImportRule, KeyframesRule, LayerBlockRule, LayerStatementRule,
-    MediaRule, NamespaceRule, PageRule, StyleRule, StylesheetContents, SupportsRule,
+    MediaRule, NamespaceRule, PageRule, PropertyRule, StyleRule, StylesheetContents, SupportsRule,
 };
 use servo_arc::Arc;
 
 macro_rules! impl_simple_arc_ffi {
     ($ty:ty, $addref:ident, $release:ident) => {
         #[no_mangle]
-        pub unsafe extern "C" fn $addref(obj: &$ty) {
+        pub unsafe extern "C" fn $addref(obj: *const $ty) {
             std::mem::forget(Arc::from_raw_addrefed(obj));
         }
 
         #[no_mangle]
-        pub unsafe extern "C" fn $release(obj: &$ty) {
+        pub unsafe extern "C" fn $release(obj: *const $ty) {
             let _ = Arc::from_raw(obj);
         }
     };
@@ -78,15 +78,13 @@ impl_locked_arc_ffi!(
     Servo_KeyframesRule_AddRef,
     Servo_KeyframesRule_Release
 );
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(
     LayerBlockRule,
-    LockedLayerBlockRule,
     Servo_LayerBlockRule_AddRef,
     Servo_LayerBlockRule_Release
 );
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(
     LayerStatementRule,
-    LockedLayerStatementRule,
     Servo_LayerStatementRule_AddRef,
     Servo_LayerStatementRule_Release
 );
@@ -96,15 +94,9 @@ impl_locked_arc_ffi!(
     Servo_MediaList_AddRef,
     Servo_MediaList_Release
 );
-impl_locked_arc_ffi!(
-    MediaRule,
-    LockedMediaRule,
-    Servo_MediaRule_AddRef,
-    Servo_MediaRule_Release
-);
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(MediaRule, Servo_MediaRule_AddRef, Servo_MediaRule_Release);
+impl_simple_arc_ffi!(
     NamespaceRule,
-    LockedNamespaceRule,
     Servo_NamespaceRule_AddRef,
     Servo_NamespaceRule_Release
 );
@@ -114,33 +106,33 @@ impl_locked_arc_ffi!(
     Servo_PageRule_AddRef,
     Servo_PageRule_Release
 );
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(
+    PropertyRule,
+    Servo_PropertyRule_AddRef,
+    Servo_PropertyRule_Release
+);
+impl_simple_arc_ffi!(
     SupportsRule,
-    LockedSupportsRule,
     Servo_SupportsRule_AddRef,
     Servo_SupportsRule_Release
 );
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(
     ContainerRule,
-    LockedContainerRule,
     Servo_ContainerRule_AddRef,
     Servo_ContainerRule_Release
 );
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(
     DocumentRule,
-    LockedDocumentRule,
     Servo_DocumentRule_AddRef,
     Servo_DocumentRule_Release
 );
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(
     FontFeatureValuesRule,
-    LockedFontFeatureValuesRule,
     Servo_FontFeatureValuesRule_AddRef,
     Servo_FontFeatureValuesRule_Release
 );
-impl_locked_arc_ffi!(
+impl_simple_arc_ffi!(
     FontPaletteValuesRule,
-    LockedFontPaletteValuesRule,
     Servo_FontPaletteValuesRule_AddRef,
     Servo_FontPaletteValuesRule_Release
 );

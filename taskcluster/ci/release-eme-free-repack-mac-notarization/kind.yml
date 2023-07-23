@@ -16,8 +16,6 @@ transforms:
 kind-dependencies:
     - release-eme-free-repack-mac-signing
 
-primary-dependency: release-eme-free-repack-mac-signing
-
 only-for-build-platforms:
     - macosx64-shippable/opt
 

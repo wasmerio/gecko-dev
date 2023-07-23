@@ -69,6 +69,7 @@ class RequestedFrameRefreshObserver : public nsARefreshObserver {
                                 nsRefreshDriver* aRefreshDriver,
                                 bool aReturnPlaceholderData)
       : mRegistered(false),
+        mWatching(false),
         mReturnPlaceholderData(aReturnPlaceholderData),
         mOwningElement(aOwningElement),
         mRefreshDriver(aRefreshDriver),
@@ -285,16 +286,20 @@ class RequestedFrameRefreshObserver : public nsARefreshObserver {
     mWatchManager.Shutdown();
   }
 
+  bool IsRegisteredAndWatching() { return mRegistered && mWatching; }
+
   void Register() {
-    if (mRegistered) {
-      return;
+    if (!mRegistered) {
+      MOZ_ASSERT(mRefreshDriver);
+      if (mRefreshDriver) {
+        mRefreshDriver->AddRefreshObserver(this, FlushType::Display,
+                                           "Canvas frame capture listeners");
+        mRegistered = true;
+      }
     }
 
-    MOZ_ASSERT(mRefreshDriver);
-    if (mRefreshDriver) {
-      mRefreshDriver->AddRefreshObserver(this, FlushType::Display,
-                                         "Canvas frame capture listeners");
-      mRegistered = true;
+    if (mWatching) {
+      return;
     }
 
     if (!mOwningElement) {
@@ -306,18 +311,21 @@ class RequestedFrameRefreshObserver : public nsARefreshObserver {
       mWatchManager.Watch(
           *captureState,
           &RequestedFrameRefreshObserver::NotifyCaptureStateChange);
+      mWatching = true;
     }
   }
 
   void Unregister() {
-    if (!mRegistered) {
-      return;
+    if (mRegistered) {
+      MOZ_ASSERT(mRefreshDriver);
+      if (mRefreshDriver) {
+        mRefreshDriver->RemoveRefreshObserver(this, FlushType::Display);
+        mRegistered = false;
+      }
     }
 
-    MOZ_ASSERT(mRefreshDriver);
-    if (mRefreshDriver) {
-      mRefreshDriver->RemoveRefreshObserver(this, FlushType::Display);
-      mRegistered = false;
+    if (!mWatching) {
+      return;
     }
 
     if (!mOwningElement) {
@@ -329,6 +337,7 @@ class RequestedFrameRefreshObserver : public nsARefreshObserver {
       mWatchManager.Unwatch(
           *captureState,
           &RequestedFrameRefreshObserver::NotifyCaptureStateChange);
+      mWatching = false;
     }
   }
 
@@ -336,9 +345,11 @@ class RequestedFrameRefreshObserver : public nsARefreshObserver {
   virtual ~RequestedFrameRefreshObserver() {
     MOZ_ASSERT(!mRefreshDriver);
     MOZ_ASSERT(!mRegistered);
+    MOZ_ASSERT(!mWatching);
   }
 
   bool mRegistered;
+  bool mWatching;
   bool mReturnPlaceholderData;
   const WeakPtr<HTMLCanvasElement> mOwningElement;
   RefPtr<nsRefreshDriver> mRefreshDriver;
@@ -537,6 +548,26 @@ HTMLCanvasElement::CreateContext(CanvasContextType aContextType) {
   return ret.forget();
 }
 
+nsresult HTMLCanvasElement::UpdateContext(
+    JSContext* aCx, JS::Handle<JS::Value> aNewContextOptions,
+    ErrorResult& aRvForDictionaryInit) {
+  nsresult rv = CanvasRenderingContextHelper::UpdateContext(
+      aCx, aNewContextOptions, aRvForDictionaryInit);
+
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  // If we have a mRequestedFrameRefreshObserver that wasn't fully registered,
+  // retry that now.
+  if (mRequestedFrameRefreshObserver.get() &&
+      !mRequestedFrameRefreshObserver->IsRegisteredAndWatching()) {
+    mRequestedFrameRefreshObserver->Register();
+  }
+
+  return NS_OK;
+}
+
 nsIntSize HTMLCanvasElement::GetWidthHeight() {
   nsIntSize size(DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT);
   const nsAttrValue* value;
@@ -694,9 +725,9 @@ nsChangeHint HTMLCanvasElement::GetAttributeChangeHint(const nsAtom* aAttribute,
 }
 
 void HTMLCanvasElement::MapAttributesIntoRule(
-    const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
-  MapAspectRatioInto(aAttributes, aDecls);
-  MapCommonAttributesInto(aAttributes, aDecls);
+    MappedDeclarationsBuilder& aBuilder) {
+  MapAspectRatioInto(aBuilder);
+  MapCommonAttributesInto(aBuilder);
 }
 
 nsMapRuleToAttributesFunc HTMLCanvasElement::GetAttributeMappingFunction()
@@ -821,11 +852,6 @@ already_AddRefed<CanvasCaptureMediaStream> HTMLCanvasElement::CaptureStream(
     return nullptr;
   }
 
-  if (!mCurrentContext) {
-    aRv.Throw(NS_ERROR_NOT_INITIALIZED);
-    return nullptr;
-  }
-
   auto stream = MakeRefPtr<CanvasCaptureMediaStream>(window, this);
 
   nsCOMPtr<nsIPrincipal> principal = NodePrincipal();
@@ -844,8 +870,7 @@ already_AddRefed<CanvasCaptureMediaStream> HTMLCanvasElement::CaptureStream(
   // If no permission, arrange for the frame capture listener to return
   // all-white, opaque image data.
   bool usePlaceholder = !CanvasUtils::IsImageExtractionAllowed(
-      OwnerDoc(), nsContentUtils::GetCurrentJSContext(),
-      Some(&aSubjectPrincipal));
+      OwnerDoc(), nsContentUtils::GetCurrentJSContext(), aSubjectPrincipal);
 
   rv = RegisterFrameCaptureListener(stream->FrameCaptureListener(),
                                     usePlaceholder);
@@ -865,7 +890,7 @@ nsresult HTMLCanvasElement::ExtractData(JSContext* aCx,
   // Check site-specific permission and display prompt if appropriate.
   // If no permission, return all-white, opaque image data.
   bool usePlaceholder = !CanvasUtils::IsImageExtractionAllowed(
-      OwnerDoc(), aCx, Some(&aSubjectPrincipal));
+      OwnerDoc(), aCx, aSubjectPrincipal);
   return ImageEncoder::ExtractData(aType, aOptions, GetSize(), usePlaceholder,
                                    mCurrentContext, mCanvasRenderer, aStream);
 }
@@ -949,7 +974,7 @@ void HTMLCanvasElement::ToBlob(JSContext* aCx, BlobCallback& aCallback,
   // Check site-specific permission and display prompt if appropriate.
   // If no permission, return all-white, opaque image data.
   bool usePlaceholder = !CanvasUtils::IsImageExtractionAllowed(
-      OwnerDoc(), aCx, Some(&aSubjectPrincipal));
+      OwnerDoc(), aCx, aSubjectPrincipal);
   CanvasRenderingContextHelper::ToBlob(aCx, global, aCallback, aType, aParams,
                                        usePlaceholder, aRv);
 }
@@ -1156,7 +1181,7 @@ bool HTMLCanvasElement::GetIsOpaque() {
 }
 
 bool HTMLCanvasElement::GetOpaqueAttr() {
-  return HasAttr(kNameSpaceID_None, nsGkAtoms::moz_opaque);
+  return HasAttr(nsGkAtoms::moz_opaque);
 }
 
 CanvasContextType HTMLCanvasElement::GetCurrentContextType() {

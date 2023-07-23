@@ -69,8 +69,10 @@ async function waitForKeyedScalars(process) {
 async function waitForValue(process, codecNames, extra = "") {
   await ContentTaskUtils.waitForCondition(
     () => {
-      const telemetry = Telemetry.getSnapshotForKeyedScalars("main", false)
-        .content;
+      const telemetry = Telemetry.getSnapshotForKeyedScalars(
+        "main",
+        false
+      ).content;
       if (telemetry && MEDIA_AUDIO_PROCESS in telemetry) {
         const keyProcMimeTypes = Object.keys(telemetry[MEDIA_AUDIO_PROCESS]);
         const found = codecNames.every(item =>
@@ -80,15 +82,19 @@ async function waitForValue(process, codecNames, extra = "") {
       }
       return false;
     },
-    `Waiting for ${MEDIA_AUDIO_PROCESS}`,
+    `Waiting for ${MEDIA_AUDIO_PROCESS} [${process}, ${codecNames}, ${extra}]`,
     kInterval,
     kRetries
   );
 }
 
-async function runTest({ expectUtility = false, expectRDD = false }) {
+async function runTest({
+  expectUtility = false,
+  expectRDD = false,
+  expectError = false,
+}) {
   info(
-    `Running tests with decoding from Utility or RDD: expectUtility=${expectUtility} expectRDD=${expectRDD}`
+    `Running tests with decoding from Utility or RDD: expectUtility=${expectUtility} expectRDD=${expectRDD} expectError=${expectError}`
   );
 
   await SpecialPowers.pushPrefEnv({
@@ -117,7 +123,9 @@ async function runTest({ expectUtility = false, expectRDD = false }) {
       tab,
       expectUtility ? expectation.process : "RDD",
       expectation.decoder,
-      !expectUtility && !expectRDD
+      !expectUtility && !expectRDD,
+      false,
+      expectError
     );
 
     info("Stop tab");
@@ -200,4 +208,20 @@ async function verifyNoTelemetryForProcess(process, codecNames, extraKey = "") {
       );
     }
   });
+}
+
+function getExtraKey({ utilityPref, rddPref, allowNonUtility }) {
+  let extraKey = "";
+  if (!rddPref) {
+    extraKey += ",rdd-disabled";
+  }
+  if (!utilityPref) {
+    extraKey += ",utility-disabled";
+  }
+  // TODO: This needs to be removed when getting rid of ability to decode on
+  // non utility at all
+  if (allowNonUtility || !isNightly()) {
+    extraKey += ",allow-non-utility";
+  }
+  return extraKey;
 }

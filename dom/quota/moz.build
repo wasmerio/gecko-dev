@@ -44,6 +44,7 @@ EXPORTS.mozilla.dom.quota += [
     "EncryptingOutputStream.h",
     "EncryptingOutputStream_impl.h",
     "FileStreams.h",
+    "FileUtils.h",
     "FirstInitializationAttempts.h",
     "FirstInitializationAttemptsImpl.h",
     "ForwardDecls.h",
@@ -65,6 +66,7 @@ EXPORTS.mozilla.dom.quota += [
     "ScopedLogExtraInfo.h",
     "SerializationHelpers.h",
     "StorageHelpers.h",
+    "StreamUtils.h",
     "UsageInfo.h",
 ]
 
@@ -75,6 +77,7 @@ XPCOM_MANIFESTS += [
 UNIFIED_SOURCES += [
     "ActorsChild.cpp",
     "ActorsParent.cpp",
+    "Assertions.cpp",
     "CachingDatabaseConnection.cpp",
     "CanonicalQuotaObject.cpp",
     "Client.cpp",
@@ -83,12 +86,15 @@ UNIFIED_SOURCES += [
     "DirectoryLockImpl.cpp",
     "EncryptingOutputStream.cpp",
     "FileStreams.cpp",
+    "FileUtils.cpp",
     "GroupInfo.cpp",
     "GroupInfoPair.cpp",
     "InitializationTypes.cpp",
+    "NormalOriginOperationBase.cpp",
     "nsIndexedDBProtocolHandler.cpp",
     "NSSCipherStrategy.cpp",
     "OriginInfo.cpp",
+    "OriginOperationBase.cpp",
     "PersistenceType.cpp",
     "QMResult.cpp",
     "QuotaCommon.cpp",
@@ -99,9 +105,11 @@ UNIFIED_SOURCES += [
     "RemoteQuotaObject.cpp",
     "RemoteQuotaObjectChild.cpp",
     "RemoteQuotaObjectParent.cpp",
+    "SanitizationUtils.cpp",
     "ScopedLogExtraInfo.cpp",
     "StorageHelpers.cpp",
     "StorageManager.cpp",
+    "StreamUtils.cpp",
 ]
 
 IPDL_SOURCES += [

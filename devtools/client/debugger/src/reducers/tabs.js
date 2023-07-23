@@ -9,7 +9,7 @@
 
 import { isOriginalId } from "devtools/client/shared/source-map-loader/index";
 
-import { isSimilarTab, persistTabs } from "../utils/tabs";
+import { isSimilarTab } from "../utils/tabs";
 
 export function initialTabState() {
   return { tabs: [] };
@@ -41,10 +41,6 @@ function update(state = initialTabState(), action) {
 
     case "INSERT_SOURCE_ACTORS":
       return addVisibleTabsForSourceActors(state, action.sourceActors);
-
-    case "NAVIGATE": {
-      return resetTabState(state);
-    }
 
     case "REMOVE_THREAD": {
       return resetTabsForThread(state, action.threadActorID);
@@ -133,11 +129,6 @@ function removeSourcesFromTabList(state, { sources }) {
   return { tabs: newTabs };
 }
 
-function resetTabState(state) {
-  const tabs = persistTabs(state.tabs);
-  return { tabs };
-}
-
 function resetTabsForThread(state, threadActorID) {
   let changed = false;
   // Nullify source and sourceActor attributes of all tabs
@@ -191,19 +182,22 @@ function updateTabList(state, source, sourceActor) {
 }
 
 function moveTabInList(state, { url, tabIndex: newIndex }) {
-  const { tabs } = state;
-  const currentIndex = tabs.findIndex(tab => tab.url == url);
-  return moveTab(tabs, currentIndex, newIndex);
+  const currentIndex = state.tabs.findIndex(tab => tab.url == url);
+  return moveTab(state, currentIndex, newIndex);
 }
 
 function moveTabInListBySourceId(state, { sourceId, tabIndex: newIndex }) {
-  const { tabs } = state;
-  const currentIndex = tabs.findIndex(tab => tab.source?.id == sourceId);
-  return moveTab(tabs, currentIndex, newIndex);
+  const currentIndex = state.tabs.findIndex(tab => tab.source?.id == sourceId);
+  return moveTab(state, currentIndex, newIndex);
 }
 
-function moveTab(tabs, currentIndex, newIndex) {
+function moveTab(state, currentIndex, newIndex) {
+  const { tabs } = state;
   const item = tabs[currentIndex];
+  // Avoid any state change if we are on the same position or the new is invalid
+  if (currentIndex == newIndex || isNaN(newIndex)) {
+    return state;
+  }
 
   const newTabs = Array.from(tabs);
   // Remove the item from its current location

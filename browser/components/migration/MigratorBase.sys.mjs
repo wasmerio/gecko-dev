@@ -111,11 +111,15 @@ export class MigratorBase {
    * - a |type| getter, returning any of the migration resource types (see
    *   MigrationUtils.resourceTypes).
    *
-   * - a |migrate| method, taking a single argument, aCallback(bool success),
-   *   for migrating the data for this resource.  It may do its job
-   *   synchronously or asynchronously.  Either way, it must call
-   *   aCallback(bool aSuccess) when it's done.  In the case of an exception
-   *   thrown from |migrate|, it's taken as if aCallback(false) is called.
+   * - a |migrate| method, taking two arguments,
+   *   aCallback(bool success, object details), for migrating the data for
+   *   this resource.  It may do its job synchronously or asynchronously.
+   *   Either way, it must call aCallback(bool aSuccess, object details)
+   *   when it's done.  In the case of an exception thrown from |migrate|,
+   *   it's taken as if aCallback(false, {}) is called. The details
+   *   argument is sometimes optional, but conditional on how the
+   *   migration wizard wants to display the migration state for the
+   *   resource.
    *
    *   Note: In the case of a simple asynchronous implementation, you may find
    *   MigrationUtils.wrapMigrateFunction handy for handling aCallback easily.
@@ -128,7 +132,7 @@ export class MigratorBase {
    *
    * Note that the importation of a particular migration type is reported as
    * successful if _any_ of its resources succeeded to import (that is, called,
-   * |aCallback(true)|).  However, completion-status for a particular migration
+   * |aCallback(true, {})|).  However, completion-status for a particular migration
    * type is reported to the UI only once all of its migrators have called
    * aCallback.
    *
@@ -266,7 +270,9 @@ export class MigratorBase {
    * @param {Function|null} aProgressCallback
    *   An optional callback that will be fired once a resourceType has finished
    *   migrating. The callback will be passed the numeric representation of the
-   *   resource type.
+   *   resource type followed by a boolean indicating whether or not the resource
+   *   was migrated successfully and optionally an object containing additional
+   *   details.
    */
   async migrate(aItems, aStartup, aProfile, aProgressCallback = () => {}) {
     let resources = await this.#getMaybeCachedResources(aProfile);
@@ -279,7 +285,7 @@ export class MigratorBase {
     }
 
     // Used to periodically give back control to the main-thread loop.
-    let unblockMainThread = function() {
+    let unblockMainThread = function () {
       return new Promise(resolve => {
         Services.tm.dispatchToMainThread(resolve);
       });
@@ -392,9 +398,9 @@ export class MigratorBase {
     };
 
     // Called either directly or through the bookmarks import callback.
-    let doMigrate = async function() {
+    let doMigrate = async function () {
       let resourcesGroupedByItems = new Map();
-      resources.forEach(function(resource) {
+      resources.forEach(function (resource) {
         if (!resourcesGroupedByItems.has(resource.type)) {
           resourcesGroupedByItems.set(resource.type, new Set());
         }
@@ -405,7 +411,7 @@ export class MigratorBase {
         throw new Error("No items to import");
       }
 
-      let notify = function(aMsg, aItemType) {
+      let notify = function (aMsg, aItemType) {
         Services.obs.notifyObservers(null, aMsg, aItemType);
       };
 
@@ -420,15 +426,13 @@ export class MigratorBase {
 
         let stopwatchHistogramId = maybeStartTelemetryStopwatch(migrationType);
 
-        let {
-          responsivenessMonitor,
-          responsivenessHistogramId,
-        } = maybeStartResponsivenessMonitor(migrationType);
+        let { responsivenessMonitor, responsivenessHistogramId } =
+          maybeStartResponsivenessMonitor(migrationType);
 
         let itemSuccess = false;
         for (let res of itemResources) {
           let completeDeferred = lazy.PromiseUtils.defer();
-          let resourceDone = function(aSuccess) {
+          let resourceDone = function (aSuccess, details) {
             itemResources.delete(res);
             itemSuccess |= aSuccess;
             if (itemResources.size == 0) {
@@ -440,7 +444,7 @@ export class MigratorBase {
               );
               collectMigrationTelemetry(migrationType);
 
-              aProgressCallback(migrationType);
+              aProgressCallback(migrationType, itemSuccess, details);
 
               resourcesGroupedByItems.delete(migrationType);
 
@@ -490,7 +494,7 @@ export class MigratorBase {
       // Note: We do not need to do so for the Firefox migrator
       // (=startupOnlyMigrator), as it just copies over the places database
       // from another profile.
-      await (async function() {
+      await (async function () {
         // Tell nsBrowserGlue we're importing default bookmarks.
         let browserGlue = Cc["@mozilla.org/browser/browserglue;1"].getService(
           Ci.nsIObserver
@@ -510,7 +514,7 @@ export class MigratorBase {
         // we need to make sure we're going to know when it's finished
         // initializing places:
         let placesInitedPromise = new Promise(resolve => {
-          let onPlacesInited = function() {
+          let onPlacesInited = function () {
             Services.obs.removeObserver(
               onPlacesInited,
               TOPIC_PLACES_DEFAULTS_FINISHED

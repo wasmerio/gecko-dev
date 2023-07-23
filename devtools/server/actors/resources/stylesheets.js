@@ -16,9 +16,8 @@ loader.lazyRequireGetter(
 
 class StyleSheetWatcher {
   constructor() {
-    this._onApplicableStylesheetAdded = this._onApplicableStylesheetAdded.bind(
-      this
-    );
+    this._onApplicableStylesheetAdded =
+      this._onApplicableStylesheetAdded.bind(this);
     this._onStylesheetUpdated = this._onStylesheetUpdated.bind(this);
   }
 
@@ -65,6 +64,9 @@ class StyleSheetWatcher {
     styleSheet,
     { isCreatedByDevTools = false, fileName = null, resourceId } = {}
   ) {
+    const { atRules, ruleCount } =
+      this._styleSheetsManager.getStyleSheetRuleCountAndAtRules(styleSheet);
+
     const resource = {
       resourceId,
       resourceType: STYLESHEET,
@@ -73,12 +75,11 @@ class StyleSheetWatcher {
       fileName,
       href: styleSheet.href,
       isNew: isCreatedByDevTools,
-      atRules: await this._styleSheetsManager.getAtRules(styleSheet),
+      atRules,
       nodeHref: this._styleSheetsManager._getNodeHref(styleSheet),
-      ruleCount: styleSheet.cssRules.length,
-      sourceMapBaseURL: this._styleSheetsManager._getSourcemapBaseURL(
-        styleSheet
-      ),
+      ruleCount,
+      sourceMapBaseURL:
+        this._styleSheetsManager._getSourcemapBaseURL(styleSheet),
       sourceMapURL: styleSheet.sourceMapURL,
       styleSheetIndex: this._styleSheetsManager._getStyleSheetIndex(styleSheet),
       system: CssLogic.isAgentStylesheet(styleSheet),

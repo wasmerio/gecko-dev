@@ -25,8 +25,6 @@ const kDebuggerPrefs = [
   "devtools.chrome.enabled",
 ];
 
-const DEVTOOLS_F12_DISABLED_PREF = "devtools.experiment.f12.shortcut_disabled";
-
 const DEVTOOLS_POLICY_DISABLED_PREF = "devtools.policy.disabled";
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
@@ -34,13 +32,10 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
 const lazy = {};
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "CustomizableUI",
-  "resource:///modules/CustomizableUI.jsm"
-);
 ChromeUtils.defineESModuleGetters(lazy, {
+  CustomizableUI: "resource:///modules/CustomizableUI.sys.mjs",
   CustomizableWidgets: "resource:///modules/CustomizableWidgets.sys.mjs",
+  PanelMultiView: "resource:///modules/PanelMultiView.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   WebChannel: "resource://gre/modules/WebChannel.sys.mjs",
 });
@@ -49,15 +44,10 @@ ChromeUtils.defineModuleGetter(
   "ProfilerMenuButton",
   "resource://devtools/client/performance-new/popup/menu-button.jsm.js"
 );
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "PanelMultiView",
-  "resource:///modules/PanelMultiView.jsm"
-);
 
 // We don't want to spend time initializing the full loader here so we create
 // our own lazy require.
-XPCOMUtils.defineLazyGetter(lazy, "Telemetry", function() {
+XPCOMUtils.defineLazyGetter(lazy, "Telemetry", function () {
   const { require } = ChromeUtils.importESModule(
     "resource://devtools/shared/loader/Loader.sys.mjs"
   );
@@ -67,7 +57,7 @@ XPCOMUtils.defineLazyGetter(lazy, "Telemetry", function() {
   return Telemetry;
 });
 
-XPCOMUtils.defineLazyGetter(lazy, "KeyShortcutsBundle", function() {
+XPCOMUtils.defineLazyGetter(lazy, "KeyShortcutsBundle", function () {
   return new Localization(["devtools/startup/key-shortcuts.ftl"], true);
 });
 
@@ -93,7 +83,7 @@ function getLocalizedKeyShortcut(id) {
   }
 }
 
-XPCOMUtils.defineLazyGetter(lazy, "KeyShortcuts", function() {
+XPCOMUtils.defineLazyGetter(lazy, "KeyShortcuts", function () {
   const isMac = AppConstants.platform == "macosx";
 
   // Common modifier shared by most key shortcuts
@@ -301,7 +291,7 @@ export function validateProfilerWebChannelUrl(targetUrl) {
   return frontEndUrl;
 }
 
-XPCOMUtils.defineLazyGetter(lazy, "ProfilerPopupBackground", function() {
+XPCOMUtils.defineLazyGetter(lazy, "ProfilerPopupBackground", function () {
   return ChromeUtils.import(
     "resource://devtools/client/performance-new/shared/background.jsm.js"
   );
@@ -358,13 +348,6 @@ DevToolsStartup.prototype = {
     const isInitialLaunch =
       cmdLine.state == Ci.nsICommandLine.STATE_INITIAL_LAUNCH;
     if (isInitialLaunch) {
-      // The F12 shortcut might be disabled to avoid accidental usage.
-      // Users who are already considered as devtools users should not be
-      // impacted.
-      if (this.isDevToolsUser()) {
-        Services.prefs.setBoolPref(DEVTOOLS_F12_DISABLED_PREF, false);
-      }
-
       // Store devtoolsFlag to check it later in onWindowReady.
       this.devtoolsFlag = flags.devtools;
 
@@ -696,9 +679,8 @@ DevToolsStartup.prototype = {
       return;
     }
     const featureFlagPref = "devtools.performance.popup.feature-flag";
-    const isPopupFeatureFlagEnabled = Services.prefs.getBoolPref(
-      featureFlagPref
-    );
+    const isPopupFeatureFlagEnabled =
+      Services.prefs.getBoolPref(featureFlagPref);
     this.profilerRecordingButtonCreated = true;
 
     // Listen for messages from the front-end. This needs to happen even if the
@@ -1013,7 +995,7 @@ DevToolsStartup.prototype = {
     let devtoolsThreadResumed = false;
     const pauseOnStartup = cmdLine.handleFlag("wait-for-jsdebugger", false);
     if (pauseOnStartup) {
-      const observe = function(subject, topic, data) {
+      const observe = function (subject, topic, data) {
         devtoolsThreadResumed = true;
         Services.obs.removeObserver(observe, "devtools-thread-ready");
       };

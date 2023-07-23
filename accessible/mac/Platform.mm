@@ -85,7 +85,6 @@ void ProxyDestroyed(RemoteAccessible* aProxy) {
 void ProxyEvent(RemoteAccessible* aProxy, uint32_t aEventType) {
   // Ignore event that we don't escape below, they aren't yet supported.
   if (aEventType != nsIAccessibleEvent::EVENT_ALERT &&
-      aEventType != nsIAccessibleEvent::EVENT_FOCUS &&
       aEventType != nsIAccessibleEvent::EVENT_VALUE_CHANGE &&
       aEventType != nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE &&
       aEventType != nsIAccessibleEvent::EVENT_TEXT_CARET_MOVED &&
@@ -94,9 +93,9 @@ void ProxyEvent(RemoteAccessible* aProxy, uint32_t aEventType) {
       aEventType != nsIAccessibleEvent::EVENT_LIVE_REGION_ADDED &&
       aEventType != nsIAccessibleEvent::EVENT_LIVE_REGION_REMOVED &&
       aEventType != nsIAccessibleEvent::EVENT_NAME_CHANGE &&
-      aEventType != nsIAccessibleEvent::EVENT_OBJECT_ATTRIBUTE_CHANGED &&
-      aEventType != nsIAccessibleEvent::EVENT_TABLE_STYLING_CHANGED)
+      aEventType != nsIAccessibleEvent::EVENT_OBJECT_ATTRIBUTE_CHANGED) {
     return;
+  }
 
   mozAccessible* wrapper = GetNativeFromGeckoAccessible(aProxy);
   if (wrapper) {
@@ -112,8 +111,16 @@ void ProxyStateChangeEvent(RemoteAccessible* aProxy, uint64_t aState,
   }
 }
 
+void ProxyFocusEvent(RemoteAccessible* aTarget,
+                     const LayoutDeviceIntRect& aCaretRect) {
+  if (mozAccessible* wrapper = GetNativeFromGeckoAccessible(aTarget)) {
+    [wrapper handleAccessibleEvent:nsIAccessibleEvent::EVENT_FOCUS];
+  }
+}
+
 void ProxyCaretMoveEvent(RemoteAccessible* aTarget, int32_t aOffset,
-                         bool aIsSelectionCollapsed, int32_t aGranularity) {
+                         bool aIsSelectionCollapsed, int32_t aGranularity,
+                         const LayoutDeviceIntRect& aCaretRect) {
   mozAccessible* wrapper = GetNativeFromGeckoAccessible(aTarget);
   MOXTextMarkerDelegate* delegate =
       [MOXTextMarkerDelegate getOrCreateForDoc:aTarget->Document()];

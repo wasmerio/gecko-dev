@@ -8,12 +8,15 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  AMBrowserExtensionsImport: "resource://gre/modules/AddonManager.sys.mjs",
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   Sqlite: "resource://gre/modules/Sqlite.sys.mjs",
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
+  MigrationWizardConstants:
+    "chrome://browser/content/migration/migration-wizard-constants.mjs",
 });
 
 var gMigrators = null;
@@ -21,6 +24,7 @@ var gFileMigrators = null;
 var gProfileStartup = null;
 var gL10n = null;
 var gPreviousDefaultBrowserKey = "";
+var gHasOpenedLegacyWizard = false;
 
 let gForceExitSpinResolve = false;
 let gKeepUndoData = false;
@@ -112,6 +116,9 @@ const FILE_MIGRATOR_MODULES = Object.freeze({
   PasswordFileMigrator: {
     moduleURI: "resource:///modules/FileMigrators.sys.mjs",
   },
+  BookmarksFileMigrator: {
+    moduleURI: "resource:///modules/FileMigrators.sys.mjs",
+  },
 });
 
 /**
@@ -127,6 +134,32 @@ class MigrationUtils {
       "browser.migrate.history.maxAgeInDays",
       180
     );
+
+    ChromeUtils.registerWindowActor("MigrationWizard", {
+      parent: {
+        esModuleURI: "resource:///actors/MigrationWizardParent.sys.mjs",
+      },
+
+      child: {
+        esModuleURI: "resource:///actors/MigrationWizardChild.sys.mjs",
+        events: {
+          "MigrationWizard:RequestState": { wantUntrusted: true },
+          "MigrationWizard:BeginMigration": { wantUntrusted: true },
+          "MigrationWizard:RequestSafariPermissions": { wantUntrusted: true },
+          "MigrationWizard:SelectSafariPasswordFile": { wantUntrusted: true },
+        },
+      },
+
+      includeChrome: true,
+      allFrames: true,
+      matches: [
+        "about:welcome",
+        "about:welcome?*",
+        "about:preferences",
+        "chrome://browser/content/migration/migration-dialog-window.html",
+        "chrome://browser/content/spotlight.html",
+      ],
+    });
   }
 
   resourceTypes = Object.freeze({
@@ -140,6 +173,7 @@ class MigrationUtils {
     OTHERDATA: 0x0040,
     SESSION: 0x0080,
     PAYMENT_METHODS: 0x0100,
+    EXTENSIONS: 0x0200,
   });
 
   /**
@@ -180,7 +214,7 @@ class MigrationUtils {
    *   the wrapped function.
    */
   wrapMigrateFunction(aFunction, aCallback) {
-    return function() {
+    return function () {
       let success = false;
       try {
         aFunction.apply(null, arguments);
@@ -264,6 +298,9 @@ class MigrationUtils {
             console.error(ex);
           }
           previousExceptionMessage = ex.message;
+          if (ex.name == "NS_ERROR_FILE_CORRUPTED") {
+            break;
+          }
         } finally {
           try {
             if (didOpen) {
@@ -292,9 +329,8 @@ class MigrationUtils {
         MIGRATOR_MODULES
       )) {
         if (platforms.includes(AppConstants.platform)) {
-          let { [symbol]: migratorClass } = ChromeUtils.importESModule(
-            moduleURI
-          );
+          let { [symbol]: migratorClass } =
+            ChromeUtils.importESModule(moduleURI);
           if (gMigrators.has(migratorClass.key)) {
             console.error(
               "A pre-existing migrator exists with key " +
@@ -562,12 +598,43 @@ class MigrationUtils {
    *   just after opening the dialog window.
    */
   showMigrationWizard(aOpener, aOptions) {
+    // When migration is kicked off from about:welcome, there are
+    // a few different behaviors that we want to test, controlled
+    // by a preference that is instrumented for Nimbus. The pref
+    // has the following possible states:
+    //
+    // "autoclose":
+    //   The user will be directed to the migration wizard in
+    //   about:preferences, but once the wizard is dismissed,
+    //   the tab will close.
+    //
+    // "standalone":
+    //   The migration wizard will open in a new top-level content
+    //   window.
+    //
+    // "legacy":
+    //   The legacy migration wizard will open, even if the new migration
+    //   wizard is enabled by default.
+    //
+    // "default" / other
+    //   The user will be directed to the migration wizard in
+    //   about:preferences. The tab will not close once the
+    //   user closes the wizard.
+    let aboutWelcomeBehavior = Services.prefs.getCharPref(
+      "browser.migrate.content-modal.about-welcome-behavior",
+      "default"
+    );
+
+    let aboutWelcomeLegacyBehavior =
+      aboutWelcomeBehavior == "legacy" &&
+      aOptions.entrypoint == this.MIGRATION_ENTRYPOINTS.NEWTAB;
+
     if (
       Services.prefs.getBoolPref(
         "browser.migrate.content-modal.enabled",
         false
       ) &&
-      !aOptions?.isStartupMigration
+      !aboutWelcomeLegacyBehavior
     ) {
       let entrypoint =
         aOptions.entrypoint || this.MIGRATION_ENTRYPOINTS.UNKNOWN;
@@ -575,17 +642,19 @@ class MigrationUtils {
         .getHistogramById("FX_MIGRATION_ENTRY_POINT_CATEGORICAL")
         .add(entrypoint);
 
-      let openStandaloneWindow = () => {
-        const FEATURES = "dialog,centerscreen,resizable=no";
-        const win = Services.ww.openWindow(
+      let openStandaloneWindow = blocking => {
+        let features = "dialog,centerscreen,resizable=no";
+
+        if (blocking) {
+          features += ",modal";
+        }
+
+        Services.ww.openWindow(
           aOpener,
           "chrome://browser/content/migration/migration-dialog-window.html",
           "_blank",
-          FEATURES,
+          features,
           {
-            onResize: () => {
-              win.sizeToContent();
-            },
             options: aOptions,
           }
         );
@@ -593,39 +662,25 @@ class MigrationUtils {
       };
 
       if (aOptions.isStartupMigration) {
-        openStandaloneWindow();
+        // Record that the uninstaller requested a profile refresh
+        if (Services.env.get("MOZ_UNINSTALLER_PROFILE_REFRESH")) {
+          Services.env.set("MOZ_UNINSTALLER_PROFILE_REFRESH", "");
+          Services.telemetry.scalarSet(
+            "migration.uninstaller_profile_refresh",
+            true
+          );
+        }
+
+        openStandaloneWindow(true /* blocking */);
         return Promise.resolve();
       }
 
       if (aOpener?.openPreferences) {
         if (aOptions.entrypoint == this.MIGRATION_ENTRYPOINTS.NEWTAB) {
-          // When migration is kicked off from about:welcome, there are
-          // a few different behaviors that we want to test, controlled
-          // by a preference that is instrumented for Nimbus. The pref
-          // has the following possible states:
-          //
-          // "autoclose":
-          //   The user will be directed to the migration wizard in
-          //   about:preferences, but once the wizard is dismissed,
-          //   the tab will close.
-          //
-          // "standalone":
-          //   The migration wizard will open in a new top-level content
-          //   window.
-          //
-          // "default" / other
-          //   The user will be directed to the migration wizard in
-          //   about:preferences. The tab will not close once the
-          //   user closes the wizard.
-          let aboutWelcomeBehavior = Services.prefs.getCharPref(
-            "browser.migrate.content-modal.about-welcome-behavior",
-            "default"
-          );
-
           if (aboutWelcomeBehavior == "autoclose") {
             return aOpener.openPreferences("general-migrate-autoclose");
           } else if (aboutWelcomeBehavior == "standalone") {
-            openStandaloneWindow();
+            openStandaloneWindow(false /* blocking */);
             return Promise.resolve();
           }
         }
@@ -634,10 +689,15 @@ class MigrationUtils {
 
       // If somehow we failed to open about:preferences, fall back to opening
       // the top-level window.
-      openStandaloneWindow();
+      openStandaloneWindow(false /* blocking */);
       return Promise.resolve();
     }
     // Legacy migration dialog
+    if (!gHasOpenedLegacyWizard) {
+      gHasOpenedLegacyWizard = true;
+      aOptions.openedTime = Cu.now();
+    }
+
     const DIALOG_URL = "chrome://browser/content/migration/migration.xhtml";
     let features = "chrome,dialog,modal,centerscreen,titlebar,resizable=no";
     if (AppConstants.platform == "macosx" && !this.isStartupMigration) {
@@ -769,6 +829,7 @@ class MigrationUtils {
     logins: 0,
     history: 0,
     cards: 0,
+    extensions: 0,
   };
 
   getImportedCount(type) {
@@ -819,7 +880,7 @@ class MigrationUtils {
         if (parent == lazy.PlacesUtils.bookmarks.toolbarGuid) {
           lazy.PlacesUIUtils.maybeToggleBookmarkToolbarVisibility(
             true /* aForceVisible */
-          );
+          ).catch(console.error);
         }
       },
       ex => console.error(ex)
@@ -899,14 +960,61 @@ class MigrationUtils {
 
   async insertCreditCardsWrapper(cards) {
     this._importQuantities.cards += cards.length;
-    let { formAutofillStorage } = ChromeUtils.import(
-      "resource://autofill/FormAutofillStorage.jsm"
+    let { formAutofillStorage } = ChromeUtils.importESModule(
+      "resource://autofill/FormAutofillStorage.sys.mjs"
     );
 
     await formAutofillStorage.initialize();
     for (let card of cards) {
-      await formAutofillStorage.creditCards.add(card);
+      try {
+        await formAutofillStorage.creditCards.add(card);
+      } catch (e) {
+        console.error("Failed to insert credit card due to error: ", e, card);
+      }
     }
+  }
+
+  /**
+   * Responsible for calling the AddonManager API that ultimately installs the
+   * matched add-ons.
+   *
+   * @param {string} migratorKey a migrator key that we pass to
+   *                             `AMBrowserExtensionsImport` as the "browser
+   *                             identifier" used to match add-ons
+   * @param {string[]} extensionIDs a list of extension IDs from another browser
+   */
+  async installExtensionsWrapper(migratorKey, extensionIDs) {
+    const totalExtensions = extensionIDs.length;
+
+    let importedAddonIDs = [];
+    try {
+      const result = await lazy.AMBrowserExtensionsImport.stageInstalls(
+        migratorKey,
+        extensionIDs
+      );
+      importedAddonIDs = result.importedAddonIDs;
+    } catch (e) {
+      console.error(`Failed to import extensions: ${e}`);
+    }
+
+    this._importQuantities.extensions += importedAddonIDs.length;
+
+    if (!importedAddonIDs.length) {
+      return [
+        lazy.MigrationWizardConstants.PROGRESS_VALUE.WARNING,
+        importedAddonIDs,
+      ];
+    }
+    if (totalExtensions == importedAddonIDs.length) {
+      return [
+        lazy.MigrationWizardConstants.PROGRESS_VALUE.SUCCESS,
+        importedAddonIDs,
+      ];
+    }
+    return [
+      lazy.MigrationWizardConstants.PROGRESS_VALUE.INFO,
+      importedAddonIDs,
+    ];
   }
 
   initializeUndoData() {

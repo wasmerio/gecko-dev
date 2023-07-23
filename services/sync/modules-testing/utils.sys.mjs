@@ -20,7 +20,7 @@ import {
 } from "resource://gre/modules/FxAccounts.sys.mjs";
 import { FxAccountsClient } from "resource://gre/modules/FxAccountsClient.sys.mjs";
 
-const { SCOPE_OLD_SYNC, LEGACY_SCOPE_WEBEXT_SYNC } = ChromeUtils.import(
+const { SCOPE_OLD_SYNC } = ChromeUtils.import(
   "resource://gre/modules/FxAccountsCommon.js"
 );
 
@@ -95,13 +95,13 @@ export function waitForZeroTimer(callback) {
   CommonUtils.namedTimer(wait, 150, {}, "timer");
 }
 
-export var promiseZeroTimer = function() {
+export var promiseZeroTimer = function () {
   return new Promise(resolve => {
     waitForZeroTimer(resolve);
   });
 };
 
-export var promiseNamedTimer = function(wait, thisObj, name) {
+export var promiseNamedTimer = function (wait, thisObj, name) {
   return new Promise(resolve => {
     CommonUtils.namedTimer(resolve, wait, thisObj, name);
   });
@@ -111,7 +111,7 @@ export var promiseNamedTimer = function(wait, thisObj, name) {
 // providers.  |overrides| can specify overrides for any default values.
 // |server| is optional, but if specified, will be used to form the cluster
 // URL for the FxA identity.
-export var makeIdentityConfig = function(overrides) {
+export var makeIdentityConfig = function (overrides) {
   // first setup the defaults.
   let result = {
     // Username used in both fxaccount and sync identity configs.
@@ -120,21 +120,10 @@ export var makeIdentityConfig = function(overrides) {
     fxaccount: {
       user: {
         email: "foo",
-        kSync: "a".repeat(128),
-        kXCS: "b".repeat(32),
-        kExtSync: "c".repeat(128),
-        kExtKbHash: "d".repeat(64),
         scopedKeys: {
           [SCOPE_OLD_SYNC]: {
             kid: "1234567890123-u7u7u7u7u7u7u7u7u7u7uw",
-            k:
-              "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg",
-            kty: "oct",
-          },
-          [LEGACY_SCOPE_WEBEXT_SYNC]: {
-            kid: "1234567890123-3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0",
-            k:
-              "zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzA",
+            k: "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg",
             kty: "oct",
           },
         },
@@ -169,7 +158,7 @@ export var makeIdentityConfig = function(overrides) {
   return result;
 };
 
-export var makeFxAccountsInternalMock = function(config) {
+export var makeFxAccountsInternalMock = function (config) {
   return {
     newAccountState(credentials) {
       // We only expect this to be called with null indicating the (mock)
@@ -205,7 +194,7 @@ export var makeFxAccountsInternalMock = function(config) {
 
 // Configure an instance of an FxAccount identity provider with the specified
 // config (or the default config if not specified).
-export var configureFxAccountIdentity = function(
+export var configureFxAccountIdentity = function (
   authService,
   config = makeIdentityConfig(),
   fxaInternal = makeFxAccountsInternalMock(config)
@@ -216,7 +205,7 @@ export var configureFxAccountIdentity = function(
 
   let fxa = new FxAccounts(fxaInternal);
 
-  let MockFxAccountsClient = function() {
+  let MockFxAccountsClient = function () {
     FxAccountsClient.apply(this);
   };
   MockFxAccountsClient.prototype = {
@@ -251,7 +240,7 @@ export var configureFxAccountIdentity = function(
   authService._account = config.fxaccount.user.email;
 };
 
-export var configureIdentity = async function(identityOverrides, server) {
+export var configureIdentity = async function (identityOverrides, server) {
   let config = makeIdentityConfig(identityOverrides, server);
   // Must be imported after the identity configuration is set up.
   let { Service } = ChromeUtils.importESModule(
@@ -288,7 +277,7 @@ export function syncTestLogging(level = "Trace") {
   return logStats;
 }
 
-export var SyncTestingInfrastructure = async function(server, username) {
+export var SyncTestingInfrastructure = async function (server, username) {
   let config = makeIdentityConfig({ username });
   await configureIdentity(config, server);
   return {
@@ -314,7 +303,7 @@ export function encryptPayload(cleartext) {
   };
 }
 
-export var sumHistogram = function(name, options = {}) {
+export var sumHistogram = function (name, options = {}) {
   let histogram = options.key
     ? Services.telemetry.getKeyedHistogramById(name)
     : Services.telemetry.getHistogramById(name);

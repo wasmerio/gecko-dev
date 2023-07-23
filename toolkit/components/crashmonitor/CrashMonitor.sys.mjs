@@ -95,16 +95,14 @@ var CrashMonitorInternal = {
    * @return {Promise} A promise that resolves/rejects once loading is complete
    */
   loadPreviousCheckpoints() {
-    this.previousCheckpoints = (async function() {
+    this.previousCheckpoints = (async function () {
       let notifications;
       try {
         notifications = await IOUtils.readJSON(CrashMonitorInternal.path);
       } catch (ex) {
         // Ignore file not found errors, but report all others.
         if (ex.name !== "NotFoundError") {
-          console.error(
-            `Error while loading crash monitor data: ${ex.message}`
-          );
+          console.error("Error while loading crash monitor data:", ex.message);
         }
         return null;
       }
@@ -160,7 +158,7 @@ export var CrashMonitor = {
     // called after receiving it
     CrashMonitorInternal.checkpoints["profile-after-change"] = true;
 
-    NOTIFICATIONS.forEach(function(aTopic) {
+    NOTIFICATIONS.forEach(function (aTopic) {
       Services.obs.addObserver(this, aTopic);
     }, this);
 
@@ -200,7 +198,7 @@ export var CrashMonitor = {
       SHUTDOWN_PHASES.every(elem => elem in CrashMonitorInternal.checkpoints)
     ) {
       // All notifications received, unregister observers
-      NOTIFICATIONS.forEach(function(aTopic) {
+      NOTIFICATIONS.forEach(function (aTopic) {
         Services.obs.removeObserver(this, aTopic);
       }, this);
     }

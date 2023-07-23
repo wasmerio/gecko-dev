@@ -15,9 +15,7 @@
 
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/base/data_parallel.h"
-#include "lib/jxl/base/file_io.h"
 #include "lib/jxl/base/random.h"
-#include "lib/jxl/base/thread_pool_internal.h"
 #include "lib/jxl/enc_color_management.h"
 #include "lib/jxl/enc_xyb.h"
 #include "lib/jxl/image_test_utils.h"
@@ -43,6 +41,48 @@ using ::testing::FloatNear;
 // Small enough to be fast. If changed, must update Generate*.
 static constexpr size_t kWidth = 16;
 
+static constexpr size_t kNumThreads = 1;  // only have a single row.
+
+MATCHER_P(HasSameFieldsAs, expected, "") {
+  if (arg.rendering_intent != expected.rendering_intent) {
+    *result_listener << "which has a different rendering intent: "
+                     << ToString(arg.rendering_intent) << " instead of "
+                     << ToString(expected.rendering_intent);
+    return false;
+  }
+  if (arg.GetColorSpace() != expected.GetColorSpace()) {
+    *result_listener << "which has a different color space: "
+                     << ToString(arg.GetColorSpace()) << " instead of "
+                     << ToString(expected.GetColorSpace());
+    return false;
+  }
+  if (arg.white_point != expected.white_point) {
+    *result_listener << "which has a different white point: "
+                     << ToString(arg.white_point) << " instead of "
+                     << ToString(expected.white_point);
+    return false;
+  }
+  if (arg.HasPrimaries() && arg.primaries != expected.primaries) {
+    *result_listener << "which has different primaries: "
+                     << ToString(arg.primaries) << " instead of "
+                     << ToString(expected.primaries);
+    return false;
+  }
+  if (!arg.tf.IsSame(expected.tf)) {
+    static const auto tf_to_string = [](const CustomTransferFunction& tf) {
+      if (tf.IsGamma()) {
+        return "g" + ToString(tf.GetGamma());
+      }
+      return ToString(tf.GetTransferFunction());
+    };
+    *result_listener << "which has a different transfer function: "
+                     << tf_to_string(arg.tf) << " instead of "
+                     << tf_to_string(expected.tf);
+    return false;
+  }
+  return true;
+}
+
 struct Globals {
   // TODO(deymo): Make this a const.
   static Globals* GetInstance() {
@@ -51,9 +91,7 @@ struct Globals {
   }
 
  private:
-  static constexpr size_t kNumThreads = 0;  // only have a single row.
-
-  Globals() : pool(kNumThreads) {
+  Globals() {
     in_gray = GenerateGray();
     in_color = GenerateColor();
     out_gray = ImageF(kWidth, 1);
@@ -103,8 +141,6 @@ struct Globals {
   }
 
  public:
-  ThreadPoolInternal pool;
-
   // ImageF so we can use VerifyRelativeError; all are interleaved RGB.
   ImageF in_gray;
   ImageF in_color;
@@ -117,17 +153,6 @@ struct Globals {
 class ColorManagementTest
     : public ::testing::TestWithParam<test::ColorEncodingDescriptor> {
  public:
-  static void VerifySameFields(const ColorEncoding& c,
-                               const ColorEncoding& c2) {
-    ASSERT_EQ(c.rendering_intent, c2.rendering_intent);
-    ASSERT_EQ(c.GetColorSpace(), c2.GetColorSpace());
-    ASSERT_EQ(c.white_point, c2.white_point);
-    if (c.HasPrimaries()) {
-      ASSERT_EQ(c.primaries, c2.primaries);
-    }
-    ASSERT_TRUE(c.tf.IsSame(c2.tf));
-  }
-
   // "Same" pixels after converting g->c_native -> c -> g->c_native.
   static void VerifyPixelRoundTrip(const ColorEncoding& c) {
     Globals* g = Globals::GetInstance();
@@ -137,10 +162,10 @@ class ColorManagementTest
     ColorSpaceTransform xform_rev(cms);
     const float intensity_target =
         c.tf.IsHLG() ? 1000 : kDefaultIntensityTarget;
-    ASSERT_TRUE(xform_fwd.Init(c_native, c, intensity_target, kWidth,
-                               g->pool.NumThreads()));
-    ASSERT_TRUE(xform_rev.Init(c, c_native, intensity_target, kWidth,
-                               g->pool.NumThreads()));
+    ASSERT_TRUE(
+        xform_fwd.Init(c_native, c, intensity_target, kWidth, kNumThreads));
+    ASSERT_TRUE(
+        xform_rev.Init(c, c_native, intensity_target, kWidth, kNumThreads));
 
     const size_t thread = 0;
     const ImageF& in = c.IsGray() ? g->in_gray : g->in_color;
@@ -176,7 +201,7 @@ TEST_P(ColorManagementTest, VerifyAllProfiles) {
   // Can set an equivalent ColorEncoding from the generated ICC profile.
   ColorEncoding c3;
   ASSERT_TRUE(c3.SetICC(PaddedBytes(c.ICC())));
-  VerifySameFields(c, c3);
+  EXPECT_THAT(c3, HasSameFieldsAs(c));
 
   VerifyPixelRoundTrip(c);
 }
@@ -352,7 +377,8 @@ TEST_F(ColorManagementTest, XYBProfile) {
   Image3F opsin(kNumColors, 1);
   ToXYB(ib, nullptr, &opsin, cms, nullptr);
 
-  Image3F opsin2 = CopyImage(opsin);
+  Image3F opsin2(kNumColors, 1);
+  CopyImageTo(opsin, &opsin2);
   ScaleXYB(&opsin2);
 
   float* src = xform.BufSrc(0);

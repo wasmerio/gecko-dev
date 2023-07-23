@@ -312,8 +312,16 @@ const startupPhases = {
     {
       // We only hit this for new profiles.
       path: "XREAppDist:distribution.ini",
-      condition: WIN,
+      // check we're not msix to disambiguate from the next entry...
+      condition: WIN && !Services.sysinfo.getProperty("hasWinPackageId"),
       stat: 1,
+    },
+    {
+      // On MSIX, we actually read this file - bug 1833341.
+      path: "XREAppDist:distribution.ini",
+      condition: WIN && Services.sysinfo.getProperty("hasWinPackageId"),
+      stat: 1,
+      read: 1,
     },
     {
       // bug 1545139
@@ -482,20 +490,6 @@ const startupPhases = {
       close: 1,
     },
     {
-      // bug 1833110, utility process instantiation due to JS ORB validator.
-      path: "*ld.so.conf*",
-      condition:
-        LINUX &&
-        !AppConstants.MOZ_CODE_COVERAGE &&
-        Services.prefs.getBoolPref(
-          "browser.opaqueResponseBlocking.javascriptValidator"
-        ),
-      read: 14,
-      /* Whether this happens before or after idle is racy: */
-      ignoreIfUnused: true,
-      close: 7,
-    },
-    {
       // bug 1391590
       path: "ProfD:places.sqlite-journal",
       ignoreIfUnused: true,
@@ -643,7 +637,7 @@ function pathMatches(path, filename) {
   );
 }
 
-add_task(async function() {
+add_task(async function () {
   if (
     !AppConstants.NIGHTLY_BUILD &&
     !AppConstants.MOZ_DEV_EDITION &&
@@ -659,8 +653,8 @@ add_task(async function() {
 
   TestUtils.assertPackagedBuild();
 
-  let startupRecorder = Cc["@mozilla.org/test/startuprecorder;1"].getService()
-    .wrappedJSObject;
+  let startupRecorder =
+    Cc["@mozilla.org/test/startuprecorder;1"].getService().wrappedJSObject;
   await startupRecorder.done;
 
   // Add system add-ons to the list of known IO dynamically.
@@ -697,9 +691,8 @@ add_task(async function() {
     for (let m of profile.markers.data) {
       let markerName = profile.stringTable[m[nameCol]];
       if (markerName.startsWith("startupRecorder:")) {
-        phases[
-          markerName.split("startupRecorder:")[1]
-        ] = markersForCurrentPhase;
+        phases[markerName.split("startupRecorder:")[1]] =
+          markersForCurrentPhase;
         markersForCurrentPhase = [];
         continue;
       }

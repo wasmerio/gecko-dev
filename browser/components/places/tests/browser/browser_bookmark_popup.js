@@ -18,7 +18,7 @@ let editBookmarkPanelRemoveButtonRect;
 
 const TEST_URL = "data:text/html,<html><body></body></html>";
 
-add_setup(async function() {
+add_setup(async function () {
   win = await BrowserTestUtils.openNewBrowserWindow();
 
   win.StarUI._createPanelIfNeeded();
@@ -64,7 +64,7 @@ async function test_bookmarks_popup({
 }) {
   await BrowserTestUtils.withNewTab(
     { gBrowser: win.gBrowser, url: TEST_URL },
-    async function(browser) {
+    async function (browser) {
       try {
         if (!isNewBookmark) {
           await PlacesUtils.bookmarks.insert({
@@ -99,7 +99,8 @@ async function test_bookmarks_popup({
           "Panel should be 'open' after shownPromise is resolved"
         );
 
-        editBookmarkPanelRemoveButtonRect = bookmarkRemoveButton.getBoundingClientRect();
+        editBookmarkPanelRemoveButtonRect =
+          bookmarkRemoveButton.getBoundingClientRect();
 
         if (popupEditFn) {
           await popupEditFn();
@@ -301,7 +302,7 @@ add_task(async function panel_shown_for_new_bookmark_close_with_ESC() {
     },
     shouldAutoClose: true,
     popupHideFn() {
-      EventUtils.synthesizeKey("VK_ESCAPE", { accelKey: true }, win);
+      EventUtils.synthesizeKey("VK_ESCAPE", {}, win);
     },
     isBookmarkRemoved: true,
   });
@@ -315,7 +316,7 @@ add_task(async function panel_shown_for_editing_no_autoclose_close_with_ESC() {
     },
     shouldAutoClose: false,
     popupHideFn() {
-      EventUtils.synthesizeKey("VK_ESCAPE", { accelKey: true }, win);
+      EventUtils.synthesizeKey("VK_ESCAPE", {}, win);
     },
     isBookmarkRemoved: false,
   });

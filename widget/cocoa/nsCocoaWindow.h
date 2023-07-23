@@ -10,6 +10,7 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "mozilla/StaticMutex.h"
 #include "mozilla/RefPtr.h"
 #include "nsBaseWidget.h"
 #include "nsPIWidgetCocoa.h"
@@ -253,7 +254,7 @@ class nsCocoaWindow final : public nsBaseWidget, public nsPIWidgetCocoa {
 
   virtual void* GetNativeData(uint32_t aDataType) override;
 
-  virtual void ConstrainPosition(bool aAllowSlop, int32_t* aX, int32_t* aY) override;
+  virtual void ConstrainPosition(DesktopIntPoint&) override;
   virtual void SetSizeConstraints(const SizeConstraints& aConstraints) override;
   virtual void Move(double aX, double aY) override;
   virtual nsSizeMode SizeMode() override { return mSizeMode; }
@@ -485,6 +486,17 @@ class nsCocoaWindow final : public nsBaseWidget, public nsPIWidgetCocoa {
   NSWindowAnimationBehavior mWindowAnimationBehavior;
 
  private:
+  // This is class state for tracking which nsCocoaWindow, if any, is in the
+  // middle of a native fullscreen transition.
+  static mozilla::StaticDataMutex<nsCocoaWindow*> sWindowInNativeTransition;
+
+  // This function returns true if the caller has been able to claim the sole
+  // permission to start a native transition. It must be followed by a call
+  // to EndOurNativeTransition() when the native transition is complete.
+  bool CanStartNativeTransition();
+  bool WeAreInNativeTransition();
+  void EndOurNativeTransition();
+
   // true if Show() has been called.
   bool mWasShown;
 };

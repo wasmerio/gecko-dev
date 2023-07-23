@@ -76,7 +76,7 @@ export var PermissionPrompts = {
           const { E10SUtils } = ChromeUtils.importESModule(
             "resource://gre/modules/E10SUtils.sys.mjs"
           );
-          E10SUtils.wrapHandlingUserInput(content, true, function() {
+          E10SUtils.wrapHandlingUserInput(content, true, function () {
             let element = content.document.querySelector(
               "input[type=password]"
             );
@@ -109,9 +109,8 @@ export var PermissionPrompts = {
       async applyConfig() {
         Services.prefs.setBoolPref("xpinstall.whitelist.required", false);
 
-        let browserWindow = Services.wm.getMostRecentWindow(
-          "navigator:browser"
-        );
+        let browserWindow =
+          Services.wm.getMostRecentWindow("navigator:browser");
         let notification = browserWindow.document.getElementById(
           "addon-webext-permissions-notification"
         );
@@ -156,10 +155,7 @@ async function clickOn(selector, beforeContentFn) {
   }
 
   await SpecialPowers.spawn(lastTab.linkedBrowser, [selector], arg => {
-    const { EventUtils } = ChromeUtils.importESModule(
-      "resource://specialpowers/SpecialPowersEventUtils.sys.mjs"
-    );
-
+    /* eslint-env mozilla/chrome-script */
     let element = content.document.querySelector(arg);
     return EventUtils.synthesizeClick(element);
   });

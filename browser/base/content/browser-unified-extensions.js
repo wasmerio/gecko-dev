@@ -6,11 +6,9 @@
 // This file is loaded into the browser window scope.
 /* eslint-env mozilla/browser-window */
 
-ChromeUtils.defineModuleGetter(
-  this,
-  "OriginControls",
-  "resource://gre/modules/ExtensionPermissions.jsm"
-);
+ChromeUtils.defineESModuleGetters(this, {
+  OriginControls: "resource://gre/modules/ExtensionPermissions.sys.mjs",
+});
 
 /**
  * The `unified-extensions-item` custom element is used to manage an extension
@@ -80,8 +78,10 @@ customElements.define(
             const popup = target.ownerDocument.getElementById(
               "unified-extensions-context-menu"
             );
+            // Anchor to the visible part of the button.
+            const anchor = target.firstElementChild;
             popup.openPopup(
-              target,
+              anchor,
               "after_end",
               0,
               0,
@@ -170,14 +170,14 @@ customElements.define(
       // to identify the extension being manipulated by the context menu.
       this._actionButton.dataset.extensionid = this.extension.id;
 
-      this.toggleAttribute(
-        "attention",
-        OriginControls.getAttention(this.extension.policy, this.ownerGlobal)
+      const { attention } = OriginControls.getAttentionState(
+        this.extension.policy,
+        this.ownerGlobal
       );
+      this.toggleAttribute("attention", attention);
 
-      this.querySelector(
-        ".unified-extensions-item-name"
-      ).textContent = this.extension.name;
+      this.querySelector(".unified-extensions-item-name").textContent =
+        this.extension.name;
 
       AddonManager.getAddonByID(this.extension.id).then(addon => {
         const iconURL = AddonManager.getPreferredIconURL(addon, 32, window);
@@ -194,9 +194,10 @@ customElements.define(
       // The data-extensionid attribute is used by context menu handlers
       // to identify the extension being manipulated by the context menu.
       this._menuButton.dataset.extensionid = this.extension.id;
-      this._menuButton.setAttribute(
-        "data-l10n-args",
-        JSON.stringify({ extensionName: this.extension.name })
+      this.ownerDocument.l10n.setAttributes(
+        this._menuButton,
+        "unified-extensions-item-open-menu",
+        { extensionName: this.extension.name }
       );
 
       this.#setStateMessage();

@@ -81,7 +81,9 @@ class SteamValidationProblemData {
 
 async function cleanAndGo(engine, server) {
   await engine._tracker.clearChangedIDs();
-  Svc.Prefs.resetBranch("");
+  for (const pref of Svc.PrefBranch.getChildList("")) {
+    Svc.PrefBranch.clearUserPref(pref);
+  }
   syncTestLogging();
   Service.recordManager.clearCache();
   await promiseStopServer(server);
@@ -140,7 +142,9 @@ add_task(async function test_basic() {
   ok("version" in ping.os, "there is an OS version");
   ok("locale" in ping.os, "there is an OS locale");
 
-  Svc.Prefs.resetBranch("");
+  for (const pref of Svc.PrefBranch.getChildList("")) {
+    Svc.PrefBranch.clearUserPref(pref);
+  }
   await promiseStopServer(server);
 });
 
@@ -380,7 +384,7 @@ add_task(async function test_sync_partialUpload() {
         ],
       },
     ]);
-    collection.post = function() {
+    collection.post = function () {
       throw new Error("Failure");
     };
 
@@ -567,8 +571,9 @@ add_task(async function test_engine_fail_ioerror() {
     );
     await sync_and_validate_telem(ping => {
       equal(ping.status.service, SYNC_FAILED_PARTIAL);
-      let failureReason = ping.engines.find(e => e.name === "steam")
-        .failureReason;
+      let failureReason = ping.engines.find(
+        e => e.name === "steam"
+      ).failureReason;
       equal(failureReason.name, "unexpectederror");
       // ensure the profile dir in the exception message has been stripped.
       ok(
@@ -621,8 +626,9 @@ add_task(async function test_clean_urls() {
     _(`test_clean_urls: Steam tracker contents: ${JSON.stringify(changes)}`);
     await sync_and_validate_telem(ping => {
       equal(ping.status.service, SYNC_FAILED_PARTIAL);
-      let failureReason = ping.engines.find(e => e.name === "steam")
-        .failureReason;
+      let failureReason = ping.engines.find(
+        e => e.name === "steam"
+      ).failureReason;
       equal(failureReason.name, "unexpectederror");
       equal(failureReason.error, "<URL> is not a valid URL.");
     });
@@ -631,8 +637,9 @@ add_task(async function test_clean_urls() {
       "Other error message that includes some:url/foo/bar/ in it.";
     await sync_and_validate_telem(ping => {
       equal(ping.status.service, SYNC_FAILED_PARTIAL);
-      let failureReason = ping.engines.find(e => e.name === "steam")
-        .failureReason;
+      let failureReason = ping.engines.find(
+        e => e.name === "steam"
+      ).failureReason;
       equal(failureReason.name, "unexpectederror");
       equal(
         failureReason.error,
@@ -672,17 +679,28 @@ add_task(async function test_clean_errors() {
     "resource://services-sync/telemetry.sys.mjs"
   );
 
-  for (let [original, expected] of [
+  for (let [message, name, expected] of [
     [
-      "Win error 112 during operation write on file [profileDir]\\weave\\addonsreconciler.json (Espacio en disco insuficiente. )",
-      "OS error [No space left on device] during operation write on file [profileDir]/weave/addonsreconciler.json",
+      `Could not open the file at ${PathUtils.join(
+        PathUtils.profileDir,
+        "weave",
+        "addonsreconciler.json"
+      )} for writing`,
+      "NotFoundError",
+      "OS error [File/Path not found] Could not open the file at [profileDir]/weave/addonsreconciler.json for writing",
     ],
     [
-      "Unix error 28 during operation write on file [profileDir]/weave/addonsreconciler.json (No space left on device)",
-      "OS error [No space left on device] during operation write on file [profileDir]/weave/addonsreconciler.json",
+      `Could not get info for the file at ${PathUtils.join(
+        PathUtils.profileDir,
+        "weave",
+        "addonsreconciler.json"
+      )}`,
+      "NotAllowedError",
+      "OS error [Permission denied] Could not get info for the file at [profileDir]/weave/addonsreconciler.json",
     ],
   ]) {
-    const sanitized = ErrorSanitizer.cleanErrorMessage(original);
+    const error = new DOMException(message, name);
+    const sanitized = ErrorSanitizer.cleanErrorMessage(message, error);
     Assert.equal(sanitized, expected);
   }
 });
@@ -710,8 +728,9 @@ add_task(async function test_clean_real_os_error() {
     _(`test_clean_urls: Steam tracker contents: ${JSON.stringify(changes)}`);
     await sync_and_validate_telem(ping => {
       equal(ping.status.service, SYNC_FAILED_PARTIAL);
-      let failureReason = ping.engines.find(e => e.name === "steam")
-        .failureReason;
+      let failureReason = ping.engines.find(
+        e => e.name === "steam"
+      ).failureReason;
       equal(failureReason.name, "unexpectederror");
       equal(
         failureReason.error,
@@ -901,7 +920,7 @@ add_task(async function test_submit_interval() {
   let telem = get_sync_test_telemetry();
   let oldSubmit = telem.submit;
   let numSubmissions = 0;
-  telem.submit = function() {
+  telem.submit = function () {
     numSubmissions += 1;
   };
 
@@ -1129,7 +1148,7 @@ add_task(async function test_no_ping_for_self_hosters() {
   await SyncTestingInfrastructure(server);
   try {
     let submitPromise = new Promise(resolve => {
-      telem.submit = function() {
+      telem.submit = function () {
         let result = oldSubmit.apply(this, arguments);
         resolve(result);
       };

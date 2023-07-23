@@ -182,11 +182,11 @@ const HELPER_SHEET =
 exports.DEFAULT_VALUE_SUMMARY_LENGTH = 50;
 var gValueSummaryLength = exports.DEFAULT_VALUE_SUMMARY_LENGTH;
 
-exports.getValueSummaryLength = function() {
+exports.getValueSummaryLength = function () {
   return gValueSummaryLength;
 };
 
-exports.setValueSummaryLength = function(val) {
+exports.setValueSummaryLength = function (val) {
   gValueSummaryLength = val;
 };
 
@@ -536,7 +536,8 @@ class WalkerActor extends Actor {
 
   _onReflows(reflows) {
     // Going through the nodes the walker knows about, see which ones have had their
-    // display, scrollable or overflow state changed and send events if any.
+    // containerType, display, scrollable or overflow state changed and send events if any.
+    const containerTypeChanges = [];
     const displayTypeChanges = [];
     const scrollableStateChanges = [];
 
@@ -573,6 +574,12 @@ class WalkerActor extends Actor {
           currentOverflowCausingElementsMap
         );
       }
+
+      const containerType = actor.containerType;
+      if (containerType !== actor.currentContainerType) {
+        containerTypeChanges.push(actor);
+        actor.currentContainerType = containerType;
+      }
     }
 
     // Get the NodeActor for each node in the symmetric difference of
@@ -599,6 +606,10 @@ class WalkerActor extends Actor {
 
     if (scrollableStateChanges.length) {
       this.emit("scrollable-change", scrollableStateChanges);
+    }
+
+    if (containerTypeChanges.length) {
+      this.emit("container-type-change", containerTypeChanges);
     }
   }
 

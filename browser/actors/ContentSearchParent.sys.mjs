@@ -102,7 +102,6 @@ export let ContentSearch = {
       Services.obs.addObserver(this, "browser-search-engine-modified");
       Services.obs.addObserver(this, "browser-search-service");
       Services.obs.addObserver(this, "shutdown-leaks-before-check");
-      Services.prefs.addObserver("browser.search.hiddenOneOffs", this);
       lazy.UrlbarPrefs.addObserver(this);
 
       this.initialized = true;
@@ -125,9 +124,8 @@ export let ContentSearch = {
     ];
 
     for (let name of stringNames) {
-      this._searchSuggestionUIStrings[name] = searchBundle.GetStringFromName(
-        name
-      );
+      this._searchSuggestionUIStrings[name] =
+        searchBundle.GetStringFromName(name);
     }
     return this._searchSuggestionUIStrings;
   },
@@ -141,7 +139,6 @@ export let ContentSearch = {
       return this._destroyedPromise;
     }
 
-    Services.prefs.removeObserver("browser.search.hiddenOneOffs", this);
     Services.obs.removeObserver(this, "browser-search-engine-modified");
     Services.obs.removeObserver(this, "browser-search-service");
     Services.obs.removeObserver(this, "shutdown-leaks-before-check");
@@ -158,7 +155,6 @@ export let ContentSearch = {
           break;
         }
       // fall through
-      case "nsPref:changed":
       case "browser-search-engine-modified":
         this._eventQueue.push({
           type: "Observe",
@@ -242,9 +238,8 @@ export let ContentSearch = {
         postData: submission.postData,
         triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal(
           {
-            userContextId: win.gBrowser.selectedBrowser.getAttribute(
-              "userContextId"
-            ),
+            userContextId:
+              win.gBrowser.selectedBrowser.getAttribute("userContextId"),
           }
         ),
       });
@@ -351,21 +346,18 @@ export let ContentSearch = {
       currentPrivateEngine: await this._currentEngineObj(true),
     };
 
-    let pref = Services.prefs.getStringPref("browser.search.hiddenOneOffs");
-    let hiddenList = pref ? pref.split(",") : [];
     for (let engine of await Services.search.getVisibleEngines()) {
       state.engines.push({
         name: engine.name,
         iconData: await this._getEngineIconURL(engine),
-        hidden: hiddenList.includes(engine.name),
+        hidden: engine.hideOneOffButton,
         isAppProvided: engine.isAppProvided,
       });
     }
 
     if (window) {
-      state.isInPrivateBrowsingMode = lazy.PrivateBrowsingUtils.isContentWindowPrivate(
-        window
-      );
+      state.isInPrivateBrowsingMode =
+        lazy.PrivateBrowsingUtils.isContentWindowPrivate(window);
       state.isAboutPrivateBrowsing =
         window.gBrowser.currentURI.spec == "about:privatebrowsing";
     }
@@ -595,9 +587,12 @@ export let ContentSearch = {
       xhr.onload = () => {
         resolve(xhr.response);
       };
-      xhr.onerror = xhr.onabort = xhr.ontimeout = () => {
-        resolve(SEARCH_ENGINE_PLACEHOLDER_ICON);
-      };
+      xhr.onerror =
+        xhr.onabort =
+        xhr.ontimeout =
+          () => {
+            resolve(SEARCH_ENGINE_PLACEHOLDER_ICON);
+          };
       try {
         // This throws if the URI is erroneously encoded.
         xhr.send();

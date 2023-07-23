@@ -60,7 +60,7 @@ function getUpdateBaseDirNoCreate() {
     }
   }
 
-  return FileUtils.getDir(KEY_UPDROOT, [], false);
+  return FileUtils.getDir(KEY_UPDROOT, []);
 }
 
 export function UpdateServiceStub() {
@@ -146,8 +146,8 @@ function deactivateUpdateLogFile() {
 function migrateUpdateDirectory() {
   LOG("UpdateServiceStub:migrateUpdateDirectory Performing migration");
 
-  let sourceRootDir = FileUtils.getDir(KEY_OLD_UPDROOT, [], false);
-  let destRootDir = FileUtils.getDir(KEY_UPDROOT, [], false);
+  let sourceRootDir = FileUtils.getDir(KEY_OLD_UPDROOT, []);
+  let destRootDir = FileUtils.getDir(KEY_UPDROOT, []);
   let hash = destRootDir.leafName;
 
   if (!sourceRootDir.exists()) {
@@ -247,7 +247,8 @@ function migrateUpdateDirectory() {
   let pendingPingDestDir = destRootDir.clone();
   pendingPingDestDir.appendRelativePath(pendingPingRelDir);
   // Pending ping filenames are UUIDs.
-  const pendingPingFilenameRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const pendingPingFilenameRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   if (pendingPingSourceDir.exists()) {
     try {
       for (let file of pendingPingSourceDir.directoryEntries) {

@@ -4,34 +4,21 @@
 
 "use strict";
 
-var { ExtensionPreferencesManager } = ChromeUtils.import(
-  "resource://gre/modules/ExtensionPreferencesManager.jsm"
+var { ExtensionPreferencesManager } = ChromeUtils.importESModule(
+  "resource://gre/modules/ExtensionPreferencesManager.sys.mjs"
 );
-var { ExtensionParent } = ChromeUtils.import(
-  "resource://gre/modules/ExtensionParent.jsm"
-);
-
-ChromeUtils.defineModuleGetter(
-  this,
-  "ExtensionPermissions",
-  "resource://gre/modules/ExtensionPermissions.jsm"
+var { ExtensionParent } = ChromeUtils.importESModule(
+  "resource://gre/modules/ExtensionParent.sys.mjs"
 );
 
-ChromeUtils.defineModuleGetter(
-  this,
-  "ExtensionSettingsStore",
-  "resource://gre/modules/ExtensionSettingsStore.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "ExtensionControlledPopup",
-  "resource:///modules/ExtensionControlledPopup.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "HomePage",
-  "resource:///modules/HomePage.jsm"
-);
+ChromeUtils.defineESModuleGetters(this, {
+  ExtensionControlledPopup:
+    "resource:///modules/ExtensionControlledPopup.sys.mjs",
+  ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.sys.mjs",
+  ExtensionSettingsStore:
+    "resource://gre/modules/ExtensionSettingsStore.sys.mjs",
+  HomePage: "resource:///modules/HomePage.sys.mjs",
+});
 
 const DEFAULT_SEARCH_STORE_TYPE = "default_search";
 const DEFAULT_SEARCH_SETTING_NAME = "defaultSearch";
@@ -54,7 +41,6 @@ XPCOMUtils.defineLazyGetter(this, "homepagePopup", () => {
     settingKey: HOMEPAGE_SETTING_NAME,
     descriptionId: "extension-homepage-notification-description",
     descriptionMessageId: "homepageControlled.message",
-    learnMoreMessageId: "homepageControlled.learnMore",
     learnMoreLink: "extension-home",
     preferencesLocation: "home-homeOverride",
     preferencesEntrypoint: "addon-manage-home-override",
@@ -300,8 +286,8 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
       // Registering a search engine can potentially take a long while,
       // or not complete at all (when searchInitialized is never resolved),
       // so we are deliberately not awaiting the returned promise here.
-      let searchStartupPromise = this.processSearchProviderManifestEntry().finally(
-        () => {
+      let searchStartupPromise =
+        this.processSearchProviderManifestEntry().finally(() => {
           if (
             pendingSearchSetupTasks.get(extension.id) === searchStartupPromise
           ) {
@@ -310,8 +296,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
             // has finished initialising.
             ExtensionParent.apiManager.emit("searchEngineProcessed", extension);
           }
-        }
-      );
+        });
 
       // Save the promise so we can await at onUninstall.
       pendingSearchSetupTasks.set(extension.id, searchStartupPromise);

@@ -26,7 +26,7 @@ function translateElements(items) {
 }
 
 function renderInfo({
-  infoEnabled = false,
+  infoEnabled,
   infoTitle,
   infoTitleEnabled,
   infoBody,
@@ -35,10 +35,11 @@ function renderInfo({
   infoIcon,
 } = {}) {
   const container = document.querySelector(".info");
-  if (!infoEnabled) {
-    container.remove();
+  if (infoEnabled === false) {
+    container.hidden = true;
     return;
   }
+  container.hidden = false;
 
   const titleEl = document.getElementById("info-title");
   const bodyEl = document.getElementById("info-body");
@@ -48,9 +49,7 @@ function renderInfo({
     container.style.backgroundImage = `url(${infoIcon})`;
   }
 
-  if (!infoTitleEnabled) {
-    titleEl.remove();
-  }
+  titleEl.hidden = !infoTitleEnabled;
 
   translateElements([
     [titleEl, infoTitle],
@@ -58,16 +57,9 @@ function renderInfo({
     [linkEl, infoLinkText],
   ]);
 
-  linkEl.setAttribute(
-    "href",
-    infoLinkUrl ||
-      RPMGetFormatURLPref("app.support.baseURL") + "private-browsing-myths"
-  );
-  linkEl.setAttribute("target", "_blank");
-
-  linkEl.addEventListener("click", () => {
-    window.PrivateBrowsingRecordClick("info_link");
-  });
+  if (infoLinkUrl) {
+    linkEl.setAttribute("href", infoLinkUrl);
+  }
 }
 
 async function renderPromo({
@@ -269,7 +261,7 @@ function showDevToolsMessage(msg) {
   RPMRemoveMessageListener(SHOW_DEVTOOLS_MESSAGE, showDevToolsMessage);
 }
 
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", function () {
   // check the url to see if we're rendering a devtools message
   if (document.location.toString().includes("debug")) {
     RPMAddMessageListener(SHOW_DEVTOOLS_MESSAGE, showDevToolsMessage);
@@ -280,7 +272,7 @@ document.addEventListener("DOMContentLoaded", function() {
     document.documentElement.classList.add("normal");
     document
       .getElementById("startPrivateBrowsing")
-      .addEventListener("click", function() {
+      .addEventListener("click", function () {
         RPMSendAsyncMessage("OpenPrivateWindow");
       });
     return;
@@ -290,6 +282,17 @@ document.addEventListener("DOMContentLoaded", function() {
   document
     .getElementById("about-private-browsing-logo")
     .toggleAttribute("legacy", !newLogoEnabled);
+
+  // The default info content is already in the markup, but we need to use JS to
+  // set up the learn more link, since it's dynamically generated.
+  const linkEl = document.getElementById("private-browsing-myths");
+  linkEl.setAttribute(
+    "href",
+    RPMGetFormatURLPref("app.support.baseURL") + "private-browsing-myths"
+  );
+  linkEl.addEventListener("click", () => {
+    window.PrivateBrowsingRecordClick("info_link");
+  });
 
   // We don't do this setup until now, because we don't want to record any impressions until we're
   // sure we're actually running a private window, not just about:privatebrowsing in a normal window.
@@ -400,22 +403,22 @@ document.addEventListener("DOMContentLoaded", function() {
       RPMAddMessageListener(DISABLE_SEARCH_TOPIC, disableSearch);
     }
   }
-  btn.addEventListener("focus", function() {
+  btn.addEventListener("focus", function () {
     handoffSearch();
   });
-  btn.addEventListener("click", function() {
+  btn.addEventListener("click", function () {
     handoffSearch();
   });
 
   // Hand-off any text that gets dropped or pasted
-  editable.addEventListener("drop", function(ev) {
+  editable.addEventListener("drop", function (ev) {
     ev.preventDefault();
     let text = ev.dataTransfer.getData("text");
     if (text) {
       handoffSearch(text);
     }
   });
-  editable.addEventListener("paste", function(ev) {
+  editable.addEventListener("paste", function (ev) {
     ev.preventDefault();
     handoffSearch(ev.clipboardData.getData("Text"));
   });

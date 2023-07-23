@@ -148,7 +148,8 @@ bool DCLayerTree::Initialize(HWND aHwnd, nsACString& aError) {
     return false;
   }
 
-  if (gfx::gfxVars::UseWebRenderDCompVideoOverlayWin()) {
+  if (gfx::gfxVars::UseWebRenderDCompVideoHwOverlayWin() ||
+      gfx::gfxVars::UseWebRenderDCompVideoSwOverlayWin()) {
     if (!InitializeVideoOverlaySupport()) {
       RenderThread::Get()->HandleWebRenderError(WebRenderError::VIDEO_OVERLAY);
     }
@@ -616,8 +617,6 @@ DCSurface* DCExternalSurfaceWrapper::EnsureSurfaceForExternalImage(
                     << gfx::hexa(texture);
     return nullptr;
   }
-  const auto textureSwgl = texture->AsRenderTextureHostSWGL();
-  MOZ_ASSERT(textureSwgl);  // Covered above.
 
   // Add surface's visual which will contain video data to our root visual.
   const auto surfaceVisual = mSurface->GetVisual();
@@ -641,7 +640,7 @@ DCSurface* DCExternalSurfaceWrapper::EnsureSurfaceForExternalImage(
     // -
 
     const auto cspace = [&]() {
-      const auto rangedCspace = textureSwgl->GetYUVColorSpace();
+      const auto rangedCspace = texture->GetYUVColorSpace();
       const auto info = FromYUVRangedColorSpace(rangedCspace);
       auto ret = ToColorSpace2(info.space);
       if (ret == gfx::ColorSpace2::Display && cmsMode == CMSMode::All) {
@@ -702,7 +701,7 @@ DCSurface* DCExternalSurfaceWrapper::EnsureSurfaceForExternalImage(
 
     const auto cprofileIn = color::ColorProfileDesc::From(cspaceDesc);
     auto cprofileOut = mDCLayerTree->OutputColorProfile();
-    bool pretendSrgb = StaticPrefs::gfx_color_management_native_srgb();
+    bool pretendSrgb = true;
     if (pretendSrgb) {
       cprofileOut = color::ColorProfileDesc::From({
           color::Chromaticities::Srgb(),
@@ -1115,8 +1114,7 @@ void DCSurfaceVideo::AttachExternalImage(wr::ExternalImageId aExternalImage) {
   // XXX if software decoded video frame format is nv12, it could be used as
   // video overlay.
   if (!texture || !texture->AsRenderDXGITextureHost() ||
-      texture->AsRenderDXGITextureHost()->GetFormat() !=
-          gfx::SurfaceFormat::NV12) {
+      texture->GetFormat() != gfx::SurfaceFormat::NV12) {
     gfxCriticalNote << "Unsupported RenderTexture for overlay: "
                     << gfx::hexa(texture);
     return;
@@ -1250,8 +1248,15 @@ void DCSurfaceVideo::PresentVideo() {
   }
 
   if (mSlowPresentCount > maxSlowPresentCount) {
-    gfxCriticalNoteOnce << "Video swapchain present is slow";
-    RenderThread::Get()->HandleWebRenderError(WebRenderError::VIDEO_OVERLAY);
+    if (mRenderTextureHost->IsSoftwareDecodedVideo()) {
+      gfxCriticalNoteOnce << "Sw video swapchain present is slow";
+      RenderThread::Get()->NotifyWebRenderError(
+          wr::WebRenderError::VIDEO_SW_OVERLAY);
+    } else {
+      gfxCriticalNoteOnce << "Hw video swapchain present is slow";
+      RenderThread::Get()->NotifyWebRenderError(
+          wr::WebRenderError::VIDEO_HW_OVERLAY);
+    }
   }
 }
 
@@ -1370,7 +1375,7 @@ static void SetNvidiaVideoSuperRes(ID3D11VideoContext* videoContext,
     UINT method;
     UINT enable;
   } streamExtensionInfo = {nvExtensionVersion, nvExtensionMethodSuperResolution,
-                           enabled ? 0 : 1u};
+                           enabled ? 1u : 0};
 
   HRESULT hr;
   hr = videoContext->VideoProcessorSetStreamExtension(

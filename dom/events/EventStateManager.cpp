@@ -50,7 +50,6 @@
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StaticPrefs_mousewheel.h"
-#include "mozilla/StaticPrefs_plugin.h"
 #include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/StaticPrefs_zoom.h"
 
@@ -1116,8 +1115,7 @@ static bool IsAccessKeyTarget(Element* aElement, nsAString& aKey) {
   // Use GetAttr because we want Unicode case=insensitive matching
   // XXXbz shouldn't this be case-sensitive, per spec?
   nsString contentKey;
-  if (!aElement ||
-      !aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::accesskey, contentKey) ||
+  if (!aElement || !aElement->GetAttr(nsGkAtoms::accesskey, contentKey) ||
       !contentKey.Equals(aKey, nsCaseInsensitiveStringComparator)) {
     return false;
   }
@@ -3603,7 +3601,9 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           do_QueryFrame(ComputeScrollTargetAndMayAdjustWheelEvent(
               mCurrentTarget, wheelEvent,
               COMPUTE_DEFAULT_ACTION_TARGET_WITH_AUTO_DIR));
-      if (scrollTarget) {
+      // If the wheel event was handled by APZ, APZ will perform the scroll
+      // snap.
+      if (scrollTarget && !WheelTransaction::HandledByApz()) {
         scrollTarget->ScrollSnap();
       }
     } break;
@@ -5960,7 +5960,7 @@ uint32_t EventStateManager::GetRegisteredAccessKey(Element* aElement) {
   }
 
   nsAutoString accessKey;
-  aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::accesskey, accessKey);
+  aElement->GetAttr(nsGkAtoms::accesskey, accessKey);
   return accessKey.First();
 }
 
@@ -6065,15 +6065,15 @@ nsresult EventStateManager::DoContentCommandEvent(
           BrowserParent* remote = BrowserParent::GetFocused();
           if (remote) {
             nsCOMPtr<nsITransferable> transferable = aEvent->mTransferable;
-            IPCDataTransfer ipcDataTransfer;
-            nsContentUtils::TransferableToIPCTransferable(
-                transferable, &ipcDataTransfer, false, remote->Manager());
+            IPCTransferableData ipcTransferableData;
+            nsContentUtils::TransferableToIPCTransferableData(
+                transferable, &ipcTransferableData, false, remote->Manager());
             bool isPrivateData = transferable->GetIsPrivateData();
             nsCOMPtr<nsIPrincipal> requestingPrincipal =
                 transferable->GetRequestingPrincipal();
             nsContentPolicyType contentPolicyType =
                 transferable->GetContentPolicyType();
-            remote->SendPasteTransferable(std::move(ipcDataTransfer),
+            remote->SendPasteTransferable(std::move(ipcTransferableData),
                                           isPrivateData, requestingPrincipal,
                                           contentPolicyType);
             rv = NS_OK;

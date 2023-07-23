@@ -7,7 +7,6 @@
 
 #include "AccAttributes.h"
 #include "mozilla/a11y/Accessible.h"
-#include "mozilla/StaticPrefs_accessibility.h"
 #include "nsAccUtils.h"
 #include "mozilla/a11y/RemoteAccessible.h"
 #include "TextLeafRange.h"
@@ -45,6 +44,10 @@ int32_t HyperTextAccessibleBase::GetChildIndexAtOffset(uint32_t aOffset) const {
   // We haven't yet cached up to aOffset. Find it, caching as we go.
   const Accessible* thisAcc = Acc();
   uint32_t childCount = thisAcc->ChildCount();
+  // Even though we're only caching up to aOffset, it's likely that we'll
+  // eventually cache offsets for all children. Pre-allocate thus to minimize
+  // re-allocations.
+  offsets.SetCapacity(childCount);
   while (offsets.Length() < childCount) {
     Accessible* child = thisAcc->ChildAt(offsets.Length());
     lastOffset += static_cast<int32_t>(nsAccUtils::TextLength(child));
@@ -102,6 +105,10 @@ int32_t HyperTextAccessibleBase::GetChildOffset(uint32_t aChildIndex,
 
   // We haven't yet cached up to aChildIndex. Find it, caching as we go.
   const Accessible* thisAcc = Acc();
+  // Even though we're only caching up to aChildIndex, it's likely that we'll
+  // eventually cache offsets for all children. Pre-allocate thus to minimize
+  // re-allocations.
+  offsets.SetCapacity(thisAcc->ChildCount());
   uint32_t lastOffset = offsets.IsEmpty() ? 0 : offsets[offsets.Length() - 1];
   while (offsets.Length() < aChildIndex) {
     Accessible* child = thisAcc->ChildAt(offsets.Length());
@@ -285,6 +292,19 @@ int32_t HyperTextAccessibleBase::OffsetAtPoint(int32_t aX, int32_t aY,
       nsAccUtils::ConvertToScreenCoords(aX, aY, aCoordType, thisAcc);
   if (!thisAcc->Bounds().Contains(coords.x, coords.y)) {
     // The requested point does not exist in this accessible.
+    // Check if we used fuzzy hittesting to get here and, if
+    // so, return 0 to indicate this text leaf is a valid match.
+    LayoutDeviceIntPoint p(aX, aY);
+    if (aCoordType != nsIAccessibleCoordinateType::COORDTYPE_SCREEN_RELATIVE) {
+      p = nsAccUtils::ConvertToScreenCoords(aX, aY, aCoordType, thisAcc);
+    }
+    if (Accessible* doc = nsAccUtils::DocumentFor(thisAcc)) {
+      Accessible* hittestMatch = doc->ChildAtPoint(
+          p.x, p.y, Accessible::EWhichChildAtPoint::DeepestChild);
+      if (hittestMatch && thisAcc == hittestMatch->Parent()) {
+        return 0;
+      }
+    }
     return -1;
   }
 
@@ -421,7 +441,6 @@ void HyperTextAccessibleBase::AdjustOriginIfEndBoundary(
 void HyperTextAccessibleBase::TextBeforeOffset(
     int32_t aOffset, AccessibleTextBoundary aBoundaryType,
     int32_t* aStartOffset, int32_t* aEndOffset, nsAString& aText) {
-  MOZ_ASSERT(StaticPrefs::accessibility_cache_enabled_AtStartup());
   *aStartOffset = *aEndOffset = 0;
   aText.Truncate();
 
@@ -479,7 +498,6 @@ void HyperTextAccessibleBase::TextAtOffset(int32_t aOffset,
                                            int32_t* aStartOffset,
                                            int32_t* aEndOffset,
                                            nsAString& aText) {
-  MOZ_ASSERT(StaticPrefs::accessibility_cache_enabled_AtStartup());
   *aStartOffset = *aEndOffset = 0;
   aText.Truncate();
 
@@ -549,7 +567,6 @@ void HyperTextAccessibleBase::TextAtOffset(int32_t aOffset,
 void HyperTextAccessibleBase::TextAfterOffset(
     int32_t aOffset, AccessibleTextBoundary aBoundaryType,
     int32_t* aStartOffset, int32_t* aEndOffset, nsAString& aText) {
-  MOZ_ASSERT(StaticPrefs::accessibility_cache_enabled_AtStartup());
   *aStartOffset = *aEndOffset = 0;
   aText.Truncate();
 
@@ -680,7 +697,6 @@ int32_t HyperTextAccessibleBase::LinkIndexOf(Accessible* aLink) {
 already_AddRefed<AccAttributes> HyperTextAccessibleBase::TextAttributes(
     bool aIncludeDefAttrs, int32_t aOffset, int32_t* aStartOffset,
     int32_t* aEndOffset) {
-  MOZ_ASSERT(StaticPrefs::accessibility_cache_enabled_AtStartup());
   *aStartOffset = *aEndOffset = 0;
   index_t offset = ConvertMagicOffset(aOffset);
   if (!offset.IsValid() || offset > CharacterCount()) {

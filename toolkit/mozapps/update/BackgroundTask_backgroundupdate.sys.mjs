@@ -15,12 +15,8 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AppUpdater: "resource://gre/modules/AppUpdater.sys.mjs",
   BackgroundTasksUtils: "resource://gre/modules/BackgroundTasksUtils.sys.mjs",
-  FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+  ExtensionUtils: "resource://gre/modules/ExtensionUtils.sys.mjs",
   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  ExtensionUtils: "resource://gre/modules/ExtensionUtils.jsm",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -267,15 +263,15 @@ export async function runBackgroundTask(commandLine) {
         predicate,
         lock
       );
-      let telemetryClientID = await lazy.BackgroundTasksUtils.readTelemetryClientID(
-        lock
-      );
+      let telemetryClientID =
+        await lazy.BackgroundTasksUtils.readTelemetryClientID(lock);
       Glean.backgroundUpdate.clientId.set(telemetryClientID);
 
       // Read targeting snapshot, collect background update specific telemetry.  Never throws.
-      defaultProfileTargetingSnapshot = await BackgroundUpdate.readFirefoxMessagingSystemTargetingSnapshot(
-        lock
-      );
+      defaultProfileTargetingSnapshot =
+        await BackgroundUpdate.readFirefoxMessagingSystemTargetingSnapshot(
+          lock
+        );
     });
 
     for (let [name, value] of Object.entries(defaultProfilePrefs)) {
@@ -323,16 +319,19 @@ export async function runBackgroundTask(commandLine) {
   // time we might send (built-in) pings.
   await BackgroundUpdate.recordUpdateEnvironment();
 
-  // The final leaf is for the benefit of `FileUtils`.  To help debugging, use
-  // the `GLEAN_LOG_PINGS` and `GLEAN_DEBUG_VIEW_TAG` environment variables: see
+  // To help debugging, use the `GLEAN_LOG_PINGS` and `GLEAN_DEBUG_VIEW_TAG`
+  // environment variables: see
   // https://mozilla.github.io/glean/book/user/debugging/index.html.
-  let gleanRoot = lazy.FileUtils.getFile("UpdRootD", [
+  let gleanRoot = await IOUtils.getDirectory(
+    Services.dirsvc.get("UpdRootD", Ci.nsIFile).path,
     "backgroundupdate",
     "datareporting",
-    "glean",
-    "__dummy__",
-  ]).parent.path;
-  Services.fog.initializeFOG(gleanRoot, "firefox.desktop.background.update");
+    "glean"
+  );
+  Services.fog.initializeFOG(
+    gleanRoot.path,
+    "firefox.desktop.background.update"
+  );
 
   // For convenience, mirror our loglevel.
   let logLevel = Services.prefs.getCharPref(

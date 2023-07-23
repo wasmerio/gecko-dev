@@ -64,6 +64,13 @@ void CUIDraw(CUIRendererRef r, CGRect rect, CGContextRef ctx, CFDictionaryRef op
              CFDictionaryRef* result);
 }
 
+static bool IsDarkAppearance(NSAppearance* appearance) {
+  if (@available(macOS 10.14, *)) {
+    return [appearance.name isEqualToString:NSAppearanceNameDarkAqua];
+  }
+  return false;
+}
+
 // Workaround for NSCell control tint drawing
 // Without this workaround, NSCells are always drawn with the clear control tint
 // as long as they're not attached to an NSControl which is a subview of an active window.
@@ -1096,8 +1103,19 @@ void nsNativeThemeCocoa::DrawMenuIcon(CGContextRef cgContext, const CGRect& aRec
                                                                             : paddingStartX),
                                aRect.origin.y + ceil(paddingY / 2), size.width, size.height);
 
-  NSString* state =
-      aParams.disabled ? @"disabled" : (aParams.insideActiveMenuItem ? @"pressed" : @"normal");
+  NSString* state;
+  if (aParams.disabled) {
+    state = @"disabled";
+  } else if (aParams.insideActiveMenuItem) {
+    state = @"pressed";
+  } else if (IsDarkAppearance(NSAppearance.currentAppearance)) {
+    // CUIDraw draws the image with a color that's too faint for the dark
+    // appearance. The "pressed" state happens to use white, which looks better
+    // and matches the white text color, so use it instead of "normal".
+    state = @"pressed";
+  } else {
+    state = @"normal";
+  }
 
   NSString* imageName = GetMenuIconName(aParams);
 
@@ -1149,10 +1167,17 @@ void nsNativeThemeCocoa::DrawMenuSeparator(CGContextRef cgContext, const CGRect&
     separatorRect.size.height = 1;
     separatorRect.size.width -= 42;
     separatorRect.origin.x += 21;
-    // Use transparent black with an alpha similar to the native separator.
-    // The values 231 (menu background) and 205 (separator color) have been
-    // sampled from a window screenshot of a native context menu.
-    CGContextSetRGBFillColor(cgContext, 0.0, 0.0, 0.0, (231 - 205) / 231.0);
+    if (!IsDarkAppearance(NSAppearance.currentAppearance)) {
+      // Use transparent black with an alpha similar to the native separator.
+      // The values 231 (menu background) and 205 (separator color) have been
+      // sampled from a window screenshot of a native context menu.
+      CGContextSetRGBFillColor(cgContext, 0.0, 0.0, 0.0, (231 - 205) / 231.0);
+    } else {
+      // Similar to above, use white with an alpha. The values 45 (menu
+      // background) and 81 (separator color) were sampled on macOS 12 with the
+      // "Reduce transparency" system setting turned on.
+      CGContextSetRGBFillColor(cgContext, 1.0, 1.0, 1.0, 1.0 + ((45 - 81) / 45.0));
+    }
     CGContextFillRect(cgContext, separatorRect);
     return;
   }
@@ -2144,26 +2169,6 @@ void nsNativeThemeCocoa::DrawStatusBar(CGContextRef cgContext, const HIRect& inB
   NS_OBJC_END_TRY_IGNORE_BLOCK;
 }
 
-static void RenderResizer(CGContextRef cgContext, const HIRect& aRenderRect, void* aData) {
-  HIThemeGrowBoxDrawInfo* drawInfo = (HIThemeGrowBoxDrawInfo*)aData;
-  HIThemeDrawGrowBox(&CGPointZero, drawInfo, cgContext, kHIThemeOrientationNormal);
-}
-
-void nsNativeThemeCocoa::DrawResizer(CGContextRef cgContext, const HIRect& aRect, bool aIsRTL) {
-  NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
-
-  HIThemeGrowBoxDrawInfo drawInfo;
-  drawInfo.version = 0;
-  drawInfo.state = kThemeStateActive;
-  drawInfo.kind = kHIThemeGrowBoxKindNormal;
-  drawInfo.direction = kThemeGrowRight | kThemeGrowDown;
-  drawInfo.size = kHIThemeGrowBoxSizeNormal;
-
-  RenderTransformedHIThemeControl(cgContext, aRect, RenderResizer, &drawInfo, aIsRTL);
-
-  NS_OBJC_END_TRY_IGNORE_BLOCK;
-}
-
 void nsNativeThemeCocoa::DrawMultilineTextField(CGContextRef cgContext, const CGRect& inBoxRect,
                                                 bool aIsFocused) {
   mTextFieldCell.enabled = YES;
@@ -2506,9 +2511,6 @@ Maybe<nsNativeThemeCocoa::WidgetInfo> nsNativeThemeCocoa::ComputeWidgetInfo(
     case StyleAppearance::Tabpanels:
       return Some(WidgetInfo::TabPanel(FrameIsInActiveWindow(aFrame)));
 
-    case StyleAppearance::Resizer:
-      return Some(WidgetInfo::Resizer(IsFrameRTL(aFrame)));
-
     default:
       break;
   }
@@ -2747,11 +2749,6 @@ void nsNativeThemeCocoa::RenderWidget(const WidgetInfo& aWidgetInfo,
           DrawTabPanel(cgContext, macRect, isInsideActiveWindow);
           break;
         }
-        case Widget::eResizer: {
-          bool isRTL = aWidgetInfo.Params<bool>();
-          DrawResizer(cgContext, macRect, isRTL);
-          break;
-        }
       }
 
       // Reset the base CTM.
@@ -2823,7 +2820,6 @@ bool nsNativeThemeCocoa::CreateWebRenderCommandsForWidget(
     case StyleAppearance::Listbox:
     case StyleAppearance::Tab:
     case StyleAppearance::Tabpanels:
-    case StyleAppearance::Resizer:
       return false;
 
     default:
@@ -3158,19 +3154,6 @@ LayoutDeviceIntSize nsNativeThemeCocoa::GetMinimumWidgetSize(nsPresContext* aPre
     case StyleAppearance::MozMenulistArrowButton:
       return ThemeCocoa::GetMinimumWidgetSize(aPresContext, aFrame, aAppearance);
 
-    case StyleAppearance::Resizer: {
-      HIThemeGrowBoxDrawInfo drawInfo;
-      drawInfo.version = 0;
-      drawInfo.state = kThemeStateActive;
-      drawInfo.kind = kHIThemeGrowBoxKindNormal;
-      drawInfo.direction = kThemeGrowRight | kThemeGrowDown;
-      drawInfo.size = kHIThemeGrowBoxSizeNormal;
-      HIPoint pnt = {0, 0};
-      HIRect bounds;
-      HIThemeGetGrowBoxBounds(&pnt, &drawInfo, &bounds);
-      result.SizeTo(bounds.size.width, bounds.size.height);
-      break;
-    }
     default:
       break;
   }
@@ -3194,8 +3177,6 @@ nsNativeThemeCocoa::WidgetStateChanged(nsIFrame* aFrame, StyleAppearance aAppear
     case StyleAppearance::Toolbox:
     case StyleAppearance::Toolbar:
     case StyleAppearance::Statusbar:
-    case StyleAppearance::Statusbarpanel:
-    case StyleAppearance::Resizerpanel:
     case StyleAppearance::Tooltip:
     case StyleAppearance::Tabpanels:
     case StyleAppearance::Tabpanel:
@@ -3321,20 +3302,6 @@ bool nsNativeThemeCocoa::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFra
     case StyleAppearance::Range:
       return !IsWidgetStyled(aPresContext, aFrame, aAppearance);
 
-    case StyleAppearance::Resizer: {
-      nsIFrame* parentFrame = aFrame->GetParent();
-      if (!parentFrame || !parentFrame->IsScrollFrame()) return true;
-
-      // Note that IsWidgetStyled is not called for resizers on Mac. This is
-      // because for scrollable containers, the native resizer looks better
-      // when (non-overlay) scrollbars are present even when the style is
-      // overriden, and the custom transparent resizer looks better when
-      // scrollbars are not present.
-      nsIScrollableFrame* scrollFrame = do_QueryFrame(parentFrame);
-      return (!LookAndFeel::UseOverlayScrollbars() && scrollFrame &&
-              (!scrollFrame->GetScrollbarVisibility().isEmpty()));
-    }
-
     default:
       break;
   }
@@ -3408,7 +3375,6 @@ bool nsNativeThemeCocoa::WidgetAppearanceDependsOnWindowFocus(StyleAppearance aA
     case StyleAppearance::Treeline:
     case StyleAppearance::Textarea:
     case StyleAppearance::Listbox:
-    case StyleAppearance::Resizer:
       return false;
     default:
       return true;

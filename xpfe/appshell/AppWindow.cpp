@@ -867,13 +867,15 @@ NS_IMETHODIMP AppWindow::Center(nsIAppWindow* aRelative, bool aScreen,
   const LayoutDeviceIntSize ourDevSize = GetSize();
   const DesktopIntSize ourSize =
       RoundedToInt(ourDevSize / DevicePixelsPerDesktopPixel());
-  rect.x += (rect.width - ourSize.width) / 2;
-  rect.y += (rect.height - ourSize.height) / (aAlert ? 3 : 2);
+  auto newPos =
+      rect.TopLeft() +
+      DesktopIntPoint((rect.width - ourSize.width) / 2,
+                      (rect.height - ourSize.height) / (aAlert ? 3 : 2));
   if (windowCoordinates) {
-    mWindow->ConstrainPosition(false, &rect.x, &rect.y);
+    mWindow->ConstrainPosition(newPos);
   }
 
-  SetPositionDesktopPix(rect.x, rect.y);
+  SetPositionDesktopPix(newPos.x, newPos.y);
 
   // If moving the window caused it to change size, re-do the centering.
   if (GetSize() != ourDevSize) {
@@ -1305,7 +1307,7 @@ bool AppWindow::LoadPositionFromXUL(int32_t aSpecWidth, int32_t aSpecHeight) {
                       cssSize.height);
     }
   }
-  mWindow->ConstrainPosition(false, &specPoint.x.value, &specPoint.y.value);
+  mWindow->ConstrainPosition(specPoint);
   if (specPoint != curPoint) {
     SetPositionDesktopPix(specPoint.x, specPoint.y);
   }
@@ -1977,8 +1979,8 @@ nsresult AppWindow::SetPersistentValue(const nsAtom* aAttr,
 void AppWindow::MaybeSavePersistentPositionAndSize(
     PersistentAttributes aAttributes, Element& aRootElement,
     const nsAString& aPersistString, bool aShouldPersist) {
-  if ((aAttributes& PersistentAttributes{PersistentAttribute::Position,
-                                         PersistentAttribute::Size})
+  if ((aAttributes & PersistentAttributes{PersistentAttribute::Position,
+                                          PersistentAttribute::Size})
           .isEmpty()) {
     return;
   }
@@ -2697,7 +2699,8 @@ void AppWindow::SizeShell() {
   // once we have primary content.
   if (nsContentUtils::ShouldResistFingerprinting(
           "if RFP is enabled we want to round the dimensions of the new"
-          "new pop up window regardless of their origin") &&
+          "new pop up window regardless of their origin",
+          RFPTarget::RoundWindowSize) &&
       windowType.EqualsLiteral("navigator:browser")) {
     // Once we've got primary content, force dimensions.
     if (mPrimaryContentShell || mPrimaryBrowserParent) {
@@ -2965,20 +2968,19 @@ void AppWindow::FullscreenWillChange(bool aInFullscreen) {
   }
   MOZ_ASSERT(mFullscreenChangeState == FullscreenChangeState::NotChanging);
 
-  int32_t winWidth = 0;
-  int32_t winHeight = 0;
-  GetSize(&winWidth, &winHeight);
+  CSSToLayoutDeviceScale scale = UnscaledDevicePixelsPerCSSPixel();
+  CSSIntSize windowSizeCSS = RoundedToInt(GetSize() / scale);
 
-  int32_t screenWidth = 0;
-  int32_t screenHeight = 0;
-  GetAvailScreenSize(&screenWidth, &screenHeight);
+  CSSIntSize screenSizeCSS;
+  GetAvailScreenSize(&screenSizeCSS.width, &screenSizeCSS.height);
 
   // Check if the window is already at the expected dimensions. If it is, set
   // the fullscreen change state to WidgetResized to avoid waiting for a resize
   // event. On macOS, a fullscreen window could be slightly higher than
   // available screen size because of the OS menu bar isn't yet hidden.
   mFullscreenChangeState =
-      (aInFullscreen == (winWidth == screenWidth && winHeight >= screenHeight))
+      (aInFullscreen == (windowSizeCSS.width == screenSizeCSS.width &&
+                         windowSizeCSS.height >= screenSizeCSS.height))
           ? FullscreenChangeState::WidgetResized
           : FullscreenChangeState::WillChange;
 }

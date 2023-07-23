@@ -12,6 +12,7 @@
 #include "mozilla/PreloadHashKey.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/glean/GleanMetrics.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "nsContentUtils.h"
 #include "nsIChannel.h"
 #include "nsICookieJarSettings.h"
@@ -33,7 +34,8 @@ EarlyHintsService::~EarlyHintsService() = default;
 void EarlyHintsService::EarlyHint(const nsACString& aLinkHeader,
                                   nsIURI* aBaseURI, nsIChannel* aChannel,
                                   const nsACString& aReferrerPolicy,
-                                  const nsACString& aCSPHeader) {
+                                  const nsACString& aCSPHeader,
+                                  nsIInterfaceRequestor* aCallbacks) {
   mEarlyHintsCount++;
   if (mFirstEarlyHint.isNothing()) {
     mFirstEarlyHint.emplace(TimeStamp::NowLoRes());
@@ -90,12 +92,23 @@ void EarlyHintsService::EarlyHint(const nsACString& aLinkHeader,
     CollectLinkTypeTelemetry(linkHeader.mRel);
     if (linkHeader.mRel.LowerCaseEqualsLiteral("preconnect")) {
       mLinkType |= dom::LinkStyle::ePRECONNECT;
-      EarlyHintPreconnect::MaybePreconnect(linkHeader, aBaseURI, principal);
+      OriginAttributes originAttributes;
+      StoragePrincipalHelper::GetOriginAttributesForNetworkState(
+          aChannel, originAttributes);
+      EarlyHintPreconnect::MaybePreconnect(linkHeader, aBaseURI,
+                                           std::move(originAttributes));
     } else if (linkHeader.mRel.LowerCaseEqualsLiteral("preload")) {
       mLinkType |= dom::LinkStyle::ePRELOAD;
       EarlyHintPreloader::MaybeCreateAndInsertPreload(
           mOngoingEarlyHints, linkHeader, aBaseURI, principal,
-          cookieJarSettings, aReferrerPolicy, aCSPHeader);
+          cookieJarSettings, aReferrerPolicy, aCSPHeader,
+          loadInfo->GetBrowsingContextID(), aCallbacks, false);
+    } else if (linkHeader.mRel.LowerCaseEqualsLiteral("modulepreload")) {
+      mLinkType |= dom::LinkStyle::eMODULE_PRELOAD;
+      EarlyHintPreloader::MaybeCreateAndInsertPreload(
+          mOngoingEarlyHints, linkHeader, aBaseURI, principal,
+          cookieJarSettings, aReferrerPolicy, aCSPHeader,
+          loadInfo->GetBrowsingContextID(), aCallbacks, true);
     }
   }
 }
@@ -112,8 +125,8 @@ void EarlyHintsService::Cancel(const nsACString& aReason) {
 }
 
 void EarlyHintsService::RegisterLinksAndGetConnectArgs(
-    nsTArray<EarlyHintConnectArgs>& aOutLinks) {
-  mOngoingEarlyHints->RegisterLinksAndGetConnectArgs(aOutLinks);
+    dom::ContentParentId aCpId, nsTArray<EarlyHintConnectArgs>& aOutLinks) {
+  mOngoingEarlyHints->RegisterLinksAndGetConnectArgs(aCpId, aOutLinks);
 }
 
 void EarlyHintsService::CollectTelemetry(Maybe<uint32_t> aResponseStatus) {

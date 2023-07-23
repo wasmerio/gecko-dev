@@ -118,7 +118,13 @@ class TbplFormatter(BaseFormatter):
 
         else:
             signature = data["signature"] if data["signature"] else "unknown top frame"
-            rv = ["PROCESS-CRASH | %s | application crashed [%s]" % (id, signature)]
+            reason = data.get("reason", "application crashed")
+            rv = ["PROCESS-CRASH | %s [%s] | %s " % (reason, signature, id)]
+
+            if data.get("process_type"):
+                rv.append("Process type: {}".format(data["process_type"]))
+
+            rv.append("Process pid: {}".format(data.get("pid", "unknown")))
 
             if data.get("reason"):
                 rv.append("Mozilla crash reason: %s" % data["reason"])
@@ -307,6 +313,9 @@ class TbplFormatter(BaseFormatter):
     def suite_end(self, data):
         start_time = self.suite_start_time
         # pylint --py3k W1619
+        # in wpt --repeat mode sometimes we miss suite_start()
+        if start_time is None:
+            start_time = data["time"]
         time = int((data["time"] - start_time) / 1000)
 
         return "SUITE-END | took %is\n" % time

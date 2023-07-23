@@ -14,18 +14,7 @@ ChromeUtils.defineESModuleGetters(this, {
 
 let expectedResults;
 
-let osVersion = Services.sysinfo.get("version");
-if (AppConstants.platform == "macosx") {
-  // Convert Darwin version to macOS version: 19.x.x -> 10.15 etc.
-  // https://en.wikipedia.org/wiki/Darwin_%28operating_system%29
-  let DarwinVersionParts = osVersion.split(".");
-  let DarwinMajorVersion = +DarwinVersionParts[0];
-  let macOsMinorVersion = DarwinMajorVersion - 4;
-  if (macOsMinorVersion > 15) {
-    macOsMinorVersion = 15;
-  }
-  osVersion = `10.${macOsMinorVersion}`;
-}
+const osVersion = Services.sysinfo.get("version");
 
 const DEFAULT_APPVERSION = {
   linux: "5.0 (X11)",
@@ -80,7 +69,7 @@ if (AppConstants.platform == "win") {
 const DEFAULT_OSCPU = {
   linux: `Linux ${cpuArch}`,
   win: WindowsOscpu,
-  macosx: `Intel Mac OS X ${osVersion}`,
+  macosx: "Intel Mac OS X 10.15",
   android: `Linux ${cpuArch}`,
   other: `Linux ${cpuArch}`,
 };
@@ -96,7 +85,7 @@ const SPOOFED_OSCPU = {
 const DEFAULT_UA_OS = {
   linux: `X11; Linux ${cpuArch}`,
   win: WindowsOscpu,
-  macosx: `Macintosh; Intel Mac OS X ${osVersion}`,
+  macosx: "Macintosh; Intel Mac OS X 10.15",
   android: `Android ${osVersion}; Mobile`,
   other: `X11; Linux ${cpuArch}`,
 };
@@ -130,7 +119,7 @@ const rvVersion =
     Services.prefs.getIntPref("network.http.useragent.forceRVOnly", 0),
     0
   ) || appVersion;
-const spoofedVersion = AppConstants.platform == "android" ? "102" : appVersion;
+const spoofedVersion = AppConstants.platform == "android" ? "115" : appVersion;
 
 const LEGACY_UA_GECKO_TRAIL = "20100101";
 
@@ -159,7 +148,7 @@ async function testUserAgentHeader() {
     TEST_TARGET_URL
   );
 
-  let result = await SpecialPowers.spawn(tab.linkedBrowser, [], function() {
+  let result = await SpecialPowers.spawn(tab.linkedBrowser, [], function () {
     return content.document.body.textContent;
   });
 
@@ -179,7 +168,7 @@ async function testNavigator() {
     TEST_PATH + "file_navigator.html"
   );
 
-  let result = await SpecialPowers.spawn(tab.linkedBrowser, [], function() {
+  let result = await SpecialPowers.spawn(tab.linkedBrowser, [], function () {
     return content.document.getElementById("result").innerHTML;
   });
 
@@ -267,14 +256,14 @@ async function testWorkerNavigator() {
   let result = await SpecialPowers.spawn(
     tab.linkedBrowser,
     [],
-    async function() {
+    async function () {
       let worker = new content.SharedWorker(
         "file_navigatorWorker.js",
         "WorkerNavigatorTest"
       );
 
       let res = await new Promise(resolve => {
-        worker.port.onmessage = function(e) {
+        worker.port.onmessage = function (e) {
           resolve(e.data);
         };
       });
@@ -414,11 +403,11 @@ add_task(async function setupResistFingerprinting() {
 
   let spoofedUserAgentNavigator = `Mozilla/5.0 (${
     SPOOFED_UA_NAVIGATOR_OS[AppConstants.platform]
-  }; rv:${spoofedVersion}.0) Gecko/${spoofedGeckoTrail} Firefox/${spoofedVersion}.0`;
+  }; rv:${rvVersion}.0) Gecko/${spoofedGeckoTrail} Firefox/${appVersion}.0`;
 
   let spoofedUserAgentHeader = `Mozilla/5.0 (${
     SPOOFED_UA_HTTPHEADER_OS[AppConstants.platform]
-  }; rv:${spoofedVersion}.0) Gecko/${spoofedGeckoTrail} Firefox/${spoofedVersion}.0`;
+  }; rv:${rvVersion}.0) Gecko/${spoofedGeckoTrail} Firefox/${appVersion}.0`;
 
   expectedResults = {
     testDesc: "spoofed",

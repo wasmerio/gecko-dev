@@ -517,9 +517,8 @@ const QuotaCleaner = {
       .map(
         principal =>
           new Promise((resolve, reject) => {
-            let clearRequest = Services.qms.clearStoragesForPrincipal(
-              principal
-            );
+            let clearRequest =
+              Services.qms.clearStoragesForPrincipal(principal);
             clearRequest.callback = () => {
               if (clearRequest.resultCode != Cr.NS_OK) {
                 reject({ message: "Deleting quota storages failed" });
@@ -1065,7 +1064,11 @@ const PermissionsCleaner = {
         }
       }
 
-      if (!toBeRemoved && perm.type.startsWith("3rdPartyStorage^")) {
+      if (
+        !toBeRemoved &&
+        (perm.type.startsWith("3rdPartyStorage^") ||
+          perm.type.startsWith("3rdPartyFrameStorage^"))
+      ) {
         let parts = perm.type.split("^");
         let uri;
         try {
@@ -1189,9 +1192,8 @@ const ClientAuthRememberCleaner = {
             // this case we won't match the partitionKey, but we can still match
             // the asciiHost.
             let originSuffix = decodeURIComponent(originSuffixEncoded);
-            originAttributes = ChromeUtils.CreateOriginAttributesFromOriginSuffix(
-              originSuffix
-            );
+            originAttributes =
+              ChromeUtils.CreateOriginAttributesFromOriginSuffix(originSuffix);
           } catch (e) {
             console.error(e);
           }
@@ -1221,16 +1223,12 @@ const HSTSCleaner = {
     let sss = Cc["@mozilla.org/ssservice;1"].getService(
       Ci.nsISiteSecurityService
     );
-    // Remove HSTS information for subdomains by enumerating
-    // the information in the site security service.
-    for (let entry of sss.enumerate()) {
-      let hostname = entry.hostname;
-      if (Services.eTLD.hasRootDomain(hostname, aHost)) {
-        // This uri is used as a key to reset the state.
-        let uri = Services.io.newURI("https://" + hostname);
-        sss.resetState(uri, entry.originAttributes);
-      }
-    }
+    let uri = Services.io.newURI("https://" + aHost);
+    sss.resetState(
+      uri,
+      aOriginAttributes,
+      Ci.nsISiteSecurityService.RootDomain
+    );
   },
 
   deleteByPrincipal(aPrincipal) {
@@ -1241,18 +1239,8 @@ const HSTSCleaner = {
     let sss = Cc["@mozilla.org/ssservice;1"].getService(
       Ci.nsISiteSecurityService
     );
-
-    // Remove HSTS information by enumerating entries of the site security
-    // service.
-    Array.from(sss.enumerate())
-      .filter(({ hostname, originAttributes }) =>
-        hasBaseDomain({ host: hostname, originAttributes }, aDomain)
-      )
-      .forEach(({ hostname, originAttributes }) => {
-        // This uri is used as a key to reset the state.
-        let uri = Services.io.newURI("https://" + hostname);
-        sss.resetState(uri, originAttributes);
-      });
+    let uri = Services.io.newURI("https://" + aDomain);
+    sss.resetState(uri, {}, Ci.nsISiteSecurityService.BaseDomain);
   },
 
   async deleteAll() {
@@ -1480,10 +1468,11 @@ const IdentityCredentialStorageCleaner = {
         httpURI,
         aOriginAttributes
       );
-      let httpsPrincipal = Services.scriptSecurityManager.createContentPrincipal(
-        httpsURI,
-        aOriginAttributes
-      );
+      let httpsPrincipal =
+        Services.scriptSecurityManager.createContentPrincipal(
+          httpsURI,
+          aOriginAttributes
+        );
       lazy.IdentityCredentialStorageService.deleteFromPrincipal(httpPrincipal);
       lazy.IdentityCredentialStorageService.deleteFromPrincipal(httpsPrincipal);
     }

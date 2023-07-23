@@ -8,7 +8,6 @@
 #include "LocalAccessible-inl.h"
 #include "AccAttributes.h"
 #include "ARIAMap.h"
-#include "nsAccessibilityService.h"
 #include "nsCoreUtils.h"
 #include "nsGenericHTMLElement.h"
 #include "DocAccessible.h"
@@ -28,7 +27,6 @@
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInternals.h"
-#include "mozilla/StaticPrefs_accessibility.h"
 #include "nsAccessibilityService.h"
 
 using namespace mozilla;
@@ -141,7 +139,7 @@ bool nsAccUtils::HasDefinedARIAToken(nsIContent* aContent, nsAtom* aAtom) {
 }
 
 bool nsAccUtils::HasDefinedARIAToken(const AttrArray* aAttrs, nsAtom* aAtom) {
-  return aAttrs->HasAttr(kNameSpaceID_None, aAtom) &&
+  return aAttrs->HasAttr(aAtom) &&
          !aAttrs->AttrValueIs(kNameSpaceID_None, aAtom, nsGkAtoms::_empty,
                               eCaseMatters) &&
          !aAttrs->AttrValueIs(kNameSpaceID_None, aAtom, nsGkAtoms::_undefined,
@@ -397,9 +395,6 @@ uint32_t nsAccUtils::TextLength(Accessible* aAccessible) {
       return textLeaf->Text().Length();
     }
   } else if (aAccessible->IsText()) {
-    MOZ_ASSERT(StaticPrefs::accessibility_cache_enabled_AtStartup(),
-               "Shouldn't be called on a RemoteAccessible unless the cache is "
-               "enabled");
     RemoteAccessible* remoteAcc = aAccessible->AsRemote();
     MOZ_ASSERT(remoteAcc);
     return remoteAcc->GetCachedTextLength();
@@ -527,6 +522,14 @@ void nsAccUtils::DocumentURL(Accessible* aDoc, nsAString& aURL) {
   return aDoc->AsRemote()->AsDoc()->URL(aURL);
 }
 
+void nsAccUtils::DocumentMimeType(Accessible* aDoc, nsAString& aMimeType) {
+  MOZ_ASSERT(aDoc && aDoc->IsDoc());
+  if (LocalAccessible* localAcc = aDoc->AsLocal()) {
+    return localAcc->AsDoc()->MimeType(aMimeType);
+  }
+  return aDoc->AsRemote()->AsDoc()->MimeType(aMimeType);
+}
+
 // ARIA Accessibility Default Accessors
 const AttrArray* nsAccUtils::GetARIADefaults(dom::Element* aElement) {
   auto* element = nsGenericHTMLElement::FromNode(aElement);
@@ -541,26 +544,26 @@ const AttrArray* nsAccUtils::GetARIADefaults(dom::Element* aElement) {
 }
 
 bool nsAccUtils::HasARIAAttr(dom::Element* aElement, const nsAtom* aName) {
-  if (aElement->HasAttr(kNameSpaceID_None, aName)) {
+  if (aElement->HasAttr(aName)) {
     return true;
   }
   const auto* defaults = GetARIADefaults(aElement);
   if (!defaults) {
     return false;
   }
-  return defaults->HasAttr(kNameSpaceID_None, aName);
+  return defaults->HasAttr(aName);
 }
 
 bool nsAccUtils::GetARIAAttr(dom::Element* aElement, const nsAtom* aName,
                              nsAString& aResult) {
-  if (aElement->GetAttr(kNameSpaceID_None, aName, aResult)) {
+  if (aElement->GetAttr(aName, aResult)) {
     return true;
   }
   const auto* defaults = GetARIADefaults(aElement);
   if (!defaults) {
     return false;
   }
-  return defaults->GetAttr(kNameSpaceID_None, aName, aResult);
+  return defaults->GetAttr(aName, aResult);
 }
 
 const nsAttrValue* nsAccUtils::GetARIAAttr(dom::Element* aElement,

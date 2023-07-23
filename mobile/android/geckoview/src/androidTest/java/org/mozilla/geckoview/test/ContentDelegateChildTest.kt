@@ -32,7 +32,7 @@ class ContentDelegateChildTest : BaseSessionTest() {
             MotionEvent.ACTION_DOWN,
             x,
             y,
-            0
+            0,
         )
         mainSession.panZoomController.onTouchEvent(event)
     }
@@ -51,17 +51,17 @@ class ContentDelegateChildTest : BaseSessionTest() {
                 session: GeckoSession,
                 screenX: Int,
                 screenY: Int,
-                element: ContextElement
+                element: ContextElement,
             ) {
                 assertThat(
                     "Type should be audio.",
                     element.type,
-                    equalTo(ContextElement.TYPE_AUDIO)
+                    equalTo(ContextElement.TYPE_AUDIO),
                 )
                 assertThat(
                     "The element source should be the mp3 file.",
                     element.srcUri,
-                    endsWith("owl.mp3")
+                    endsWith("owl.mp3"),
                 )
             }
         })
@@ -84,16 +84,16 @@ class ContentDelegateChildTest : BaseSessionTest() {
                 session: GeckoSession,
                 screenX: Int,
                 screenY: Int,
-                element: ContextElement
+                element: ContextElement,
             ) {
                 assertThat(
                     "Type should be video.",
                     element.type,
-                    equalTo(ContextElement.TYPE_VIDEO)
+                    equalTo(ContextElement.TYPE_VIDEO),
                 )
                 assertNull(
                     "Buffered blob should not have a srcUri.",
-                    element.srcUri
+                    element.srcUri,
                 )
             }
         })
@@ -114,22 +114,22 @@ class ContentDelegateChildTest : BaseSessionTest() {
                 session: GeckoSession,
                 screenX: Int,
                 screenY: Int,
-                element: ContextElement
+                element: ContextElement,
             ) {
                 assertThat(
                     "Type should be image.",
                     element.type,
-                    equalTo(ContextElement.TYPE_IMAGE)
+                    equalTo(ContextElement.TYPE_IMAGE),
                 )
                 assertThat(
                     "Alternate text should match.",
                     element.altText,
-                    equalTo("An orange circle.")
+                    equalTo("An orange circle."),
                 )
                 assertThat(
                     "The element source should begin with blob.",
                     element.srcUri,
-                    startsWith("blob:")
+                    startsWith("blob:"),
                 )
             }
         })
@@ -149,22 +149,22 @@ class ContentDelegateChildTest : BaseSessionTest() {
                 session: GeckoSession,
                 screenX: Int,
                 screenY: Int,
-                element: ContextElement
+                element: ContextElement,
             ) {
                 assertThat(
                     "Type should be image.",
                     element.type,
-                    equalTo(ContextElement.TYPE_IMAGE)
+                    equalTo(ContextElement.TYPE_IMAGE),
                 )
                 assertThat(
                     "Alternate text should match.",
                     element.altText,
-                    equalTo("Test Image")
+                    equalTo("Test Image"),
                 )
                 assertThat(
                     "The element source should be the image file.",
                     element.srcUri,
-                    endsWith("test.gif")
+                    endsWith("test.gif"),
                 )
             }
         })
@@ -184,22 +184,22 @@ class ContentDelegateChildTest : BaseSessionTest() {
                 session: GeckoSession,
                 screenX: Int,
                 screenY: Int,
-                element: ContextElement
+                element: ContextElement,
             ) {
                 assertThat(
                     "Type should be image.",
                     element.type,
-                    equalTo(ContextElement.TYPE_IMAGE)
+                    equalTo(ContextElement.TYPE_IMAGE),
                 )
                 assertThat(
                     "Alternate text should match.",
                     element.altText,
-                    equalTo("Test Image")
+                    equalTo("Test Image"),
                 )
                 assertThat(
                     "The element source should be the image file.",
                     element.srcUri,
-                    endsWith("test.gif")
+                    endsWith("test.gif"),
                 )
             }
         })
@@ -218,22 +218,27 @@ class ContentDelegateChildTest : BaseSessionTest() {
                 session: GeckoSession,
                 screenX: Int,
                 screenY: Int,
-                element: ContextElement
+                element: ContextElement,
             ) {
                 assertThat(
                     "Type should be none.",
                     element.type,
-                    equalTo(ContextElement.TYPE_NONE)
+                    equalTo(ContextElement.TYPE_NONE),
                 )
                 assertThat(
                     "The element link title should be the title of the anchor.",
                     element.title,
-                    equalTo("Hello Link Title")
+                    equalTo("Hello Link Title"),
                 )
                 assertThat(
                     "The element link URI should be the href of the anchor.",
                     element.linkUri,
-                    endsWith("hello.html")
+                    endsWith("hello.html"),
+                )
+                assertThat(
+                    "The element link text content should be the text content of the anchor.",
+                    element.textContent,
+                    equalTo("Hello World"),
                 )
             }
         })
@@ -255,19 +260,54 @@ class ContentDelegateChildTest : BaseSessionTest() {
                 session: GeckoSession,
                 screenX: Int,
                 screenY: Int,
-                element: ContextElement
+                element: ContextElement,
             ) {
                 assertThat(
                     "Type should be video.",
                     element.type,
-                    equalTo(ContextElement.TYPE_VIDEO)
+                    equalTo(ContextElement.TYPE_VIDEO),
                 )
                 assertThat(
                     "The element source should be the video file.",
                     element.srcUri,
-                    endsWith("short.mp4")
+                    endsWith("short.mp4"),
                 )
             }
         })
+    }
+
+    @WithDisplay(width = 100, height = 100)
+    @Test
+    fun notRequestContextMenuWithPreventDefault() {
+        mainSession.loadTestPath(CONTEXT_MENU_LINK_HTML_PATH)
+        mainSession.waitForPageStop()
+
+        val contextmenuEventPromise = mainSession.evaluatePromiseJS(
+            """
+            new Promise(resolve => {
+                document.documentElement.addEventListener('contextmenu', event => {
+                    event.preventDefault();
+                    resolve(true);
+                }, { once: true });
+            });
+            """.trimIndent(),
+        )
+
+        mainSession.delegateUntilTestEnd(object : ContentDelegate {
+            @AssertCalled(false)
+            override fun onContextMenu(
+                session: GeckoSession,
+                screenX: Int,
+                screenY: Int,
+                element: ContextElement,
+            ) {
+            }
+        })
+
+        sendLongPress(50f, 50f)
+
+        assertThat("contextmenu", contextmenuEventPromise.value as Boolean, equalTo(true))
+
+        mainSession.waitForRoundTrip()
     }
 }

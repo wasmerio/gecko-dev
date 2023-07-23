@@ -256,9 +256,8 @@ class NetworkEventWatcher {
       );
     if (isParentProcessOnlyBrowserToolbox) {
       // We should ignore all requests coming from BrowsingContext running in another process
-      const browsingContextID = lazy.NetworkUtils.getChannelBrowsingContextID(
-        channel
-      );
+      const browsingContextID =
+        lazy.NetworkUtils.getChannelBrowsingContextID(channel);
       const browsingContext = BrowsingContext.get(browsingContextID);
       // We accept any request that isn't bound to any BrowsingContext.
       // This is most likely a privileged request done from a JSM/C++.
@@ -349,6 +348,7 @@ class NetworkEventWatcher {
         // in _httpResponseExaminer.
         resourceUpdates.mimeType = updateResource.mimeType;
         resourceUpdates.waitingTime = updateResource.waitingTime;
+        resourceUpdates.isResolvedByTRR = updateResource.isResolvedByTRR;
 
         resourceUpdates.responseHeadersAvailable = true;
         resourceUpdates.responseCookiesAvailable = true;

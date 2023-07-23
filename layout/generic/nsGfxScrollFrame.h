@@ -130,8 +130,8 @@ class nsHTMLScrollFrame : public nsContainerFrame,
       mozilla::WritingMode aWM,
       BaselineSharingGroup aBaselineGroup) const override;
   Maybe<nscoord> GetNaturalBaselineBOffset(
-      mozilla::WritingMode aWM,
-      BaselineSharingGroup aBaselineGroup) const override;
+      mozilla::WritingMode aWM, BaselineSharingGroup aBaselineGroup,
+      BaselineExportContext aExportContext) const override;
 
   // Recomputes the scrollable overflow area we store in the helper to take
   // children that are affected by perpsective set on the outer frame and scroll
@@ -1068,7 +1068,7 @@ class nsHTMLScrollFrame : public nsContainerFrame,
   // either the layout or the visual scroll range (APZ will happily smooth
   // scroll to either).
   void ApzSmoothScrollTo(
-      const nsPoint& aDestination, ScrollOrigin,
+      const nsPoint& aDestination, ScrollMode, ScrollOrigin,
       mozilla::ScrollTriggeredByScript,
       mozilla::UniquePtr<ScrollSnapTargetIds> aSnapTargetIds);
 

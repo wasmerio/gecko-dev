@@ -189,6 +189,7 @@ WebExtensionPolicyCore::WebExtensionPolicyCore(GlobalObject& aGlobal,
       mIsPrivileged(aInit.mIsPrivileged),
       mTemporarilyInstalled(aInit.mTemporarilyInstalled),
       mBackgroundWorkerScript(aInit.mBackgroundWorkerScript),
+      mIgnoreQuarantine(aInit.mIsPrivileged || aInit.mIgnoreQuarantine),
       mPermissions(new AtomSet(aInit.mPermissions)) {
   // In practice this is not necessary, but in tests where the uuid
   // passed in is not lowercased various tests can fail.
@@ -262,12 +263,23 @@ bool WebExtensionPolicyCore::CanAccessURI(const URLInfo& aURI, bool aExplicit,
   if (aCheckRestricted && WebExtensionPolicy::IsRestrictedURI(aURI)) {
     return false;
   }
+  if (aCheckRestricted && QuarantinedFromURI(aURI)) {
+    return false;
+  }
   if (!aAllowFilePermission && aURI.Scheme() == nsGkAtoms::file) {
     return false;
   }
 
   AutoReadLock lock(mLock);
   return mHostPermissions && mHostPermissions->Matches(aURI, aExplicit);
+}
+
+bool WebExtensionPolicyCore::QuarantinedFromDoc(const DocInfo& aDoc) const {
+  return QuarantinedFromURI(aDoc.PrincipalURL());
+}
+
+bool WebExtensionPolicyCore::QuarantinedFromURI(const URLInfo& aURI) const {
+  return !IgnoreQuarantine() && WebExtensionPolicy::IsQuarantinedURI(aURI);
 }
 
 /*****************************************************************************
@@ -433,6 +445,11 @@ Result<nsString, nsresult> WebExtensionPolicy::GetURL(
   return NS_ConvertUTF8toUTF16(spec);
 }
 
+void WebExtensionPolicy::SetIgnoreQuarantine(bool aIgnore) {
+  WebExtensionPolicy_Binding::ClearCachedIgnoreQuarantineValue(this);
+  mCore->SetIgnoreQuarantine(aIgnore);
+}
+
 void WebExtensionPolicy::RegisterContentScript(
     WebExtensionContentScript& script, ErrorResult& aRv) {
   // Raise an "invalid argument" error if the script is not related to
@@ -494,6 +511,11 @@ bool WebExtensionPolicy::BackgroundServiceWorkerEnabled(GlobalObject& aGlobal) {
 }
 
 /* static */
+bool WebExtensionPolicy::QuarantinedDomainsEnabled(GlobalObject& aGlobal) {
+  return EPS().GetQuarantinedDomainsEnabled();
+}
+
+/* static */
 bool WebExtensionPolicy::IsRestrictedDoc(const DocInfo& aDoc) {
   // With the exception of top-level about:blank documents with null
   // principals, we never match documents that have non-content principals,
@@ -519,6 +541,22 @@ bool WebExtensionPolicy::IsRestrictedURI(const URLInfo& aURI) {
   }
 
   return false;
+}
+
+/* static */
+bool WebExtensionPolicy::IsQuarantinedDoc(const DocInfo& aDoc) {
+  return IsQuarantinedURI(aDoc.PrincipalURL());
+}
+
+/* static */
+bool WebExtensionPolicy::IsQuarantinedURI(const URLInfo& aURI) {
+  // Ensure EPS is initialized before asking it about quarantined domains.
+  Unused << EPS();
+
+  RefPtr<AtomSet> quarantinedDomains =
+      ExtensionPolicyService::QuarantinedDomains();
+
+  return quarantinedDomains && quarantinedDomains->Contains(aURI.HostAtom());
 }
 
 nsCString WebExtensionPolicy::BackgroundPageHTML() const {
@@ -780,7 +818,11 @@ bool MozDocumentMatcher::Matches(const DocInfo& aDoc,
     return true;
   }
 
-  if (mRestricted && mExtension && mExtension->IsRestrictedDoc(aDoc)) {
+  if (mRestricted && WebExtensionPolicy::IsRestrictedDoc(aDoc)) {
+    return false;
+  }
+
+  if (mRestricted && mExtension && mExtension->QuarantinedFromDoc(aDoc)) {
     return false;
   }
 
@@ -821,7 +863,11 @@ bool MozDocumentMatcher::MatchesURI(const URLInfo& aURL,
     return false;
   }
 
-  if (mRestricted && mExtension->IsRestrictedURI(aURL)) {
+  if (mRestricted && WebExtensionPolicy::IsRestrictedURI(aURL)) {
+    return false;
+  }
+
+  if (mRestricted && mExtension->QuarantinedFromURI(aURL)) {
     return false;
   }
 

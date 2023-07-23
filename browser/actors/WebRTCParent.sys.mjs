@@ -8,17 +8,9 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+  SitePermissions: "resource:///modules/SitePermissions.sys.mjs",
+  webrtcUI: "resource:///modules/webrtcUI.sys.mjs",
 });
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "SitePermissions",
-  "resource:///modules/SitePermissions.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "webrtcUI",
-  "resource:///modules/webrtcUI.jsm"
-);
 
 XPCOMUtils.defineLazyServiceGetter(
   lazy,
@@ -57,7 +49,7 @@ export class WebRTCParent extends JSWindowActorParent {
 
         let blockers = Array.from(lazy.webrtcUI.peerConnectionBlockers);
 
-        (async function() {
+        (async function () {
           for (let blocker of blockers) {
             try {
               let result = await blocker(params);
@@ -508,9 +500,10 @@ function prompt(aActor, aBrowser, aRequest) {
     requestTypes,
   } = aRequest;
 
-  let principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(
-    aRequest.origin
-  );
+  let principal =
+    Services.scriptSecurityManager.createContentPrincipalFromOrigin(
+      aRequest.origin
+    );
 
   // For add-on principals, we immediately check for permission instead
   // of waiting for the notification to focus. This allows for supporting
@@ -968,7 +961,8 @@ function prompt(aActor, aBrowser, aRequest) {
           }
 
           let perms = Services.perms;
-          let chromePrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+          let chromePrincipal =
+            Services.scriptSecurityManager.getSystemPrincipal();
           perms.addFromPrincipal(
             chromePrincipal,
             "MediaManagerVideo",
@@ -978,7 +972,13 @@ function prompt(aActor, aBrowser, aRequest) {
 
           // We don't have access to any screen content besides our browser tabs
           // on Wayland, therefore there are no previews we can show.
-          if (!isPipeWireDetected || mediaSource == "browser") {
+          if (
+            (!isPipeWireDetected || mediaSource == "browser") &&
+            Services.prefs.getBoolPref(
+              "media.getdisplaymedia.previews.enabled",
+              true
+            )
+          ) {
             video.deviceId = deviceId;
             let constraints = {
               video: { mediaSource, deviceId: { exact: deviceId } },
@@ -994,7 +994,7 @@ function prompt(aActor, aBrowser, aRequest) {
                 video.srcObject = stream;
                 video.stream = stream;
                 doc.getElementById("webRTC-preview").hidden = false;
-                video.onloadedmetadata = function(e) {
+                video.onloadedmetadata = function (e) {
                   video.play();
                 };
               },
@@ -1085,7 +1085,7 @@ function prompt(aActor, aBrowser, aRequest) {
         describedByIDs.join(" ")
       );
 
-      this.mainAction.callback = async function(aState) {
+      this.mainAction.callback = async function (aState) {
         let remember = false;
         let silenceNotifications = false;
 

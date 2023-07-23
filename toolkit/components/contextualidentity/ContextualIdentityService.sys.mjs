@@ -12,17 +12,17 @@ const CONTEXTUAL_IDENTITY_ENABLED_PREF = "privacy.userContext.enabled";
 
 const lazy = {};
 
-XPCOMUtils.defineLazyGetter(lazy, "gBrowserBundle", function() {
+XPCOMUtils.defineLazyGetter(lazy, "gBrowserBundle", function () {
   return Services.strings.createBundle(
     "chrome://browser/locale/browser.properties"
   );
 });
 
-XPCOMUtils.defineLazyGetter(lazy, "gTextDecoder", function() {
+XPCOMUtils.defineLazyGetter(lazy, "gTextDecoder", function () {
   return new TextDecoder();
 });
 
-XPCOMUtils.defineLazyGetter(lazy, "gTextEncoder", function() {
+XPCOMUtils.defineLazyGetter(lazy, "gTextEncoder", function () {
   return new TextEncoder();
 });
 
@@ -30,12 +30,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
   DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+  NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
 });
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "NetUtil",
-  "resource://gre/modules/NetUtil.jsm"
-);
 
 function _TabRemovalObserver(resolver, remoteTabIds) {
   this._resolver = resolver;
@@ -135,8 +131,8 @@ _ContextualIdentityService.prototype = {
     // Initialize default identities based on policy if available
     this._defaultIdentities = [];
     let userContextId = 1;
-    let policyIdentities = Services.policies?.getActivePolicies()?.Containers
-      ?.Default;
+    let policyIdentities =
+      Services.policies?.getActivePolicies()?.Containers?.Default;
     if (policyIdentities) {
       for (let identity of policyIdentities) {
         identity.public = true;
@@ -526,7 +522,7 @@ _ContextualIdentityService.prototype = {
 
   countContainerTabs(userContextId = 0) {
     let count = 0;
-    this._forEachContainerTab(function() {
+    this._forEachContainerTab(function () {
       ++count;
     }, userContextId);
     return count;

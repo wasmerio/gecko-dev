@@ -8,6 +8,7 @@
 #define mozilla_dom_BodyStream_h
 
 #include "jsapi.h"
+#include "js/Stream.h"
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/dom/ByteStreamHelpers.h"
 #include "mozilla/dom/BindingDeclarations.h"
@@ -44,6 +45,10 @@ class BodyStreamHolder : public nsISupports {
   NS_DECL_CYCLE_COLLECTION_CLASS(BodyStreamHolder)
 
   BodyStreamHolder();
+
+  virtual void NullifyStream() { mReadableStreamBody = nullptr; }
+
+  virtual void MarkAsRead() {}
 
   void SetReadableStreamBody(ReadableStream* aBody) {
     mReadableStreamBody = aBody;
@@ -145,9 +150,6 @@ class BodyStream final : public nsIInputStreamCallback,
   nsCOMPtr<nsIEventTarget> mOwningEventTarget;
   // Same as mGlobal but set to nullptr on OnInputStreamReady (on the owning
   // thread).
-  // This promise is created by PullCallback and resolved when
-  // OnInputStreamReady succeeds. No need to try hard to settle it though, see
-  // also ReleaseObjects() for the reason.
   RefPtr<Promise> mPullPromise;
 
   // This is the original inputStream received during the CTOR. It will be

@@ -8,8 +8,8 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  SharedUtils: "resource://services-settings/SharedUtils.jsm",
+ChromeUtils.defineESModuleGetters(lazy, {
+  SharedUtils: "resource://services-settings/SharedUtils.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -207,7 +207,7 @@ export var Utils = {
    * @returns a Response object
    */
   async fetch(input, init = {}) {
-    return new Promise(function(resolve, reject) {
+    return new Promise(function (resolve, reject) {
       const request = new ServiceRequest();
       function fallbackOrReject(err) {
         if (

@@ -91,7 +91,7 @@ function cacheReactionsForFrame(frame) {
 }
 
 function createStepForReactionTracking(onStep) {
-  return function() {
+  return function () {
     cacheReactionsForFrame(this);
     return onStep ? onStep.apply(this, arguments) : undefined;
   };
@@ -303,10 +303,14 @@ class ThreadActor extends Actor {
     return this.dbg.getNewestFrame();
   }
 
-  get skipBreakpointsOption() {
+  get shouldSkipAnyBreakpoint() {
     return (
+      // Disable all types of breakpoints if:
+      // - the user explicitly requested it via the option
       this._options.skipBreakpoints ||
-      (this.insideClientEvaluation && this.insideClientEvaluation.eager)
+      // - or when we are evaluating some javascript via the console actor and disableBreaks
+      //   has been set to true (which happens for most evaluating except the console input)
+      this.insideClientEvaluation?.disableBreaks
     );
   }
 
@@ -735,7 +739,7 @@ class ThreadActor extends Actor {
   }
 
   _onOpeningRequest(subject) {
-    if (this.skipBreakpointsOption) {
+    if (this.shouldSkipAnyBreakpoint) {
       return;
     }
 
@@ -814,7 +818,7 @@ class ThreadActor extends Actor {
       this.setActiveEventBreakpoints(options.eventBreakpoints);
     }
 
-    this.maybePauseOnExceptions();
+    this.setPauseOnExceptions(this._options.pauseOnExceptions);
   }
 
   _eventBreakpointListener(notification) {
@@ -834,9 +838,8 @@ class ThreadActor extends Actor {
     if (notification.phase === "pre" && !this._activeEventPause) {
       this._activeEventPause = this._captureDebuggerHooks();
 
-      this.dbg.onEnterFrame = this._makeEventBreakpointEnterFrame(
-        eventBreakpoint
-      );
+      this.dbg.onEnterFrame =
+        this._makeEventBreakpointEnterFrame(eventBreakpoint);
     } else if (notification.phase === "post" && this._activeEventPause) {
       this._restoreDebuggerHooks(this._activeEventPause);
       this._activeEventPause = null;
@@ -866,7 +869,7 @@ class ThreadActor extends Actor {
   }
 
   _pauseAndRespondEventBreakpoint(frame, eventBreakpoint) {
-    if (this.skipBreakpointsOption) {
+    if (this.shouldSkipAnyBreakpoint) {
       return undefined;
     }
 
@@ -920,11 +923,8 @@ class ThreadActor extends Actor {
         return undefined;
       }
 
-      const {
-        sourceActor,
-        line,
-        column,
-      } = this.sourcesManager.getFrameLocation(frame);
+      const { sourceActor, line, column } =
+        this.sourcesManager.getFrameLocation(frame);
 
       packet.why = reason;
 
@@ -992,7 +992,7 @@ class ThreadActor extends Actor {
 
   _makeOnPop({ pauseAndRespond, steppingType }) {
     const thread = this;
-    return function(completion) {
+    return function (completion) {
       if (thread._requestedFrameRestart === this) {
         return thread.restartFrame(this);
       }
@@ -1065,7 +1065,12 @@ class ThreadActor extends Actor {
     // or a step to a debugger statement.
     const { type } = this._priorPause.why;
 
-    if (type == newType) {
+    // Conditional breakpoint are doing something weird as they are using "breakpoint" type
+    // unless they throw in which case they will be "breakpointConditionThrown".
+    if (
+      type == newType ||
+      (type == "breakpointConditionThrown" && newType == "breakpoint")
+    ) {
       return true;
     }
 
@@ -1075,7 +1080,7 @@ class ThreadActor extends Actor {
 
   _makeOnStep({ pauseAndRespond, startFrame, steppingType, completion }) {
     const thread = this;
-    return function() {
+    return function () {
       if (thread._validFrameStepOffset(this, startFrame, this.offset)) {
         return pauseAndRespond(this, packet =>
           thread.createCompletionGrip(packet, completion)
@@ -1338,13 +1343,23 @@ class ThreadActor extends Actor {
 
   /**
    * Set the debugging hook to pause on exceptions if configured to do so.
+   *
+   * Note that this is also called when evaluating conditional breakpoints.
+   *
+   * @param {Boolean} doPause
+   *        Should watch for pause or not. `_onExceptionUnwind` function will
+   *        then be notified about new caught or uncaught exception being fired.
    */
-  maybePauseOnExceptions() {
-    if (this._options.pauseOnExceptions) {
+  setPauseOnExceptions(doPause) {
+    if (doPause) {
       this.dbg.onExceptionUnwind = this._onExceptionUnwind;
     } else {
       this.dbg.onExceptionUnwind = undefined;
     }
+  }
+
+  isPauseOnExceptionsEnabled() {
+    return this.dbg.onExceptionUnwind == this._onExceptionUnwind;
   }
 
   /**
@@ -1836,15 +1851,16 @@ class ThreadActor extends Actor {
       throw new Error("Unexpected mutation breakpoint type");
     }
 
+    if (this.shouldSkipAnyBreakpoint) {
+      return undefined;
+    }
+
     const frame = this.dbg.getNewestFrame();
     if (!frame) {
       return undefined;
     }
 
-    if (
-      this.skipBreakpointsOption ||
-      this.sourcesManager.isFrameBlackBoxed(frame)
-    ) {
+    if (this.sourcesManager.isFrameBlackBoxed(frame)) {
       return undefined;
     }
 
@@ -1889,14 +1905,14 @@ class ThreadActor extends Actor {
    *        The stack frame that contained the debugger statement.
    */
   onDebuggerStatement(frame) {
-    // Don't pause if
-    // 1. we have not moved since the last pause
-    // 2. breakpoints are disabled
+    // Don't pause if:
+    // 1. breakpoints are disabled
+    // 2. we have not moved since the last pause
     // 3. the source is blackboxed
     // 4. there is a breakpoint at the same location
     if (
+      this.shouldSkipAnyBreakpoint ||
       !this.hasMoved(frame, "debuggerStatement") ||
-      this.skipBreakpointsOption ||
       this.sourcesManager.isFrameBlackBoxed(frame) ||
       this.atBreakpointLocation(frame)
     ) {
@@ -1938,6 +1954,15 @@ class ThreadActor extends Actor {
       return undefined;
     }
 
+    // Ignore shouldSkipAnyBreakpoint if we are explicitly requested to do so.
+    // Typically, when we are evaluating conditional breakpoints, we want to report any exception.
+    if (
+      this.shouldSkipAnyBreakpoint &&
+      !this.insideClientEvaluation?.reportExceptionsWhenBreaksAreDisabled
+    ) {
+      return undefined;
+    }
+
     let willBeCaught = false;
     for (let frame = youngestFrame; frame != null; frame = frame.older) {
       if (frame.script.isInCatchScope(frame.offset)) {
@@ -1970,10 +1995,7 @@ class ThreadActor extends Actor {
       return undefined;
     }
 
-    if (
-      this.skipBreakpointsOption ||
-      this.sourcesManager.isFrameBlackBoxed(youngestFrame)
-    ) {
+    if (this.sourcesManager.isFrameBlackBoxed(youngestFrame)) {
       return undefined;
     }
 
@@ -2061,14 +2083,14 @@ class ThreadActor extends Actor {
    *        True, if we want to create a source actor.
    */
   _acceptSource(source) {
-    // We have some spurious source created by ExtensionContent.jsm when debugging tabs.
+    // We have some spurious source created by ExtensionContent.sys.mjs when debugging tabs.
     // These sources are internal stuff injected by WebExt codebase to implement content
     // scripts. We can't easily ignore them from Debugger API, so ignore them
     // when debugging a tab (i.e. browser-element). As we still want to debug them
     // from the browser toolbox.
     if (
       this._parent.sessionContext.type == "browser-element" &&
-      source.url.endsWith("ExtensionContent.jsm")
+      source.url.endsWith("ExtensionContent.sys.mjs")
     ) {
       return false;
     }
@@ -2141,15 +2163,12 @@ class ThreadActor extends Actor {
    *                              url content type is text/html).
    */
   async _resurrectSource(url, existingInlineSources) {
-    let {
-      content,
-      contentType,
-      sourceMapURL,
-    } = await this.sourcesManager.urlContents(
-      url,
-      /* partial */ false,
-      /* canUseCache */ true
-    );
+    let { content, contentType, sourceMapURL } =
+      await this.sourcesManager.urlContents(
+        url,
+        /* partial */ false,
+        /* canUseCache */ true
+      );
 
     // Newlines in all sources should be normalized. Do this with HTML content
     // to simplify the comparisons below.
@@ -2265,7 +2284,7 @@ class ThreadActor extends Actor {
       pauseOnExceptions: this._options.pauseOnExceptions,
       ignoreCaughtExceptions: this._options.ignoreCaughtExceptions,
       logEventBreakpoints: this._options.logEventBreakpoints,
-      skipBreakpoints: this.skipBreakpointsOption,
+      skipBreakpoints: this.shouldSkipAnyBreakpoint,
       breakpoints: this.breakpointActorMap.listKeys(),
     };
   }

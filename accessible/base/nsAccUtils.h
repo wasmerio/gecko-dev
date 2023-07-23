@@ -106,6 +106,10 @@ class nsAccUtils {
   static Accessible* TableFor(Accessible* aRow);
   static LocalAccessible* TableFor(LocalAccessible* aRow);
 
+  static const LocalAccessible* TableFor(const LocalAccessible* aAcc) {
+    return TableFor(const_cast<LocalAccessible*>(aAcc));
+  }
+
   /**
    * Return true if the DOM node of a given accessible has a given attribute
    * with a value of "true".
@@ -257,6 +261,13 @@ class nsAccUtils {
    * and remote documents.
    */
   static void DocumentURL(Accessible* aDoc, nsAString& aURL);
+
+  /**
+   * Get the mime type for a given document.
+   * This function is needed because there is no unified base class for local
+   * and remote documents.
+   */
+  static void DocumentMimeType(Accessible* aDoc, nsAString& aMimeType);
 
   /**
    * Accessors for element attributes that are aware of CustomElement ARIA

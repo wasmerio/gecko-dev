@@ -41,6 +41,7 @@ const EXPECTED_REMOTE_SETTINGS_URLBAR_RESULT = {
     sponsoredBlockId: 1,
     sponsoredAdvertiser: "TestAdvertiser",
     isSponsored: true,
+    descriptionL10n: { id: "urlbar-result-action-sponsored" },
     helpUrl: QuickSuggest.HELP_URL,
     helpL10n: {
       id: UrlbarPrefs.get("resultMenu")
@@ -55,6 +56,7 @@ const EXPECTED_REMOTE_SETTINGS_URLBAR_RESULT = {
     },
     displayUrl: "http://test.com/q=frabbits",
     source: "remote-settings",
+    provider: "AdmWikipedia",
   },
 };
 
@@ -74,6 +76,7 @@ const EXPECTED_MERINO_URLBAR_RESULT = {
     sponsoredBlockId: 1,
     sponsoredAdvertiser: "advertiser",
     isSponsored: true,
+    descriptionL10n: { id: "urlbar-result-action-sponsored" },
     helpUrl: QuickSuggest.HELP_URL,
     helpL10n: {
       id: UrlbarPrefs.get("resultMenu")
@@ -89,6 +92,7 @@ const EXPECTED_MERINO_URLBAR_RESULT = {
     displayUrl: "url",
     requestId: "request_id",
     source: "merino",
+    provider: "adm",
   },
 };
 
@@ -110,7 +114,12 @@ add_task(async function init() {
 
   // Set up the remote settings client with the test data.
   await QuickSuggestTestUtils.ensureQuickSuggestInit({
-    remoteSettingsResults: REMOTE_SETTINGS_RESULTS,
+    remoteSettingsResults: [
+      {
+        type: "data",
+        attachment: REMOTE_SETTINGS_RESULTS,
+      },
+    ],
   });
 
   Assert.equal(
@@ -484,6 +493,7 @@ add_task(async function multipleMerinoSuggestions() {
           sponsoredBlockId: 1,
           sponsoredAdvertiser: "multipleMerinoSuggestions 1 advertiser",
           isSponsored: true,
+          descriptionL10n: { id: "urlbar-result-action-sponsored" },
           helpUrl: QuickSuggest.HELP_URL,
           helpL10n: {
             id: UrlbarPrefs.get("resultMenu")
@@ -499,6 +509,7 @@ add_task(async function multipleMerinoSuggestions() {
           displayUrl: "multipleMerinoSuggestions 1 url",
           requestId: "request_id",
           source: "merino",
+          provider: "adm",
         },
       },
     ],
@@ -636,7 +647,7 @@ add_task(async function block() {
 // Tests a Merino suggestion that is a best match.
 add_task(async function bestMatch() {
   UrlbarPrefs.set(PREF_MERINO_ENABLED, true);
-  UrlbarPrefs.set(PREF_REMOTE_SETTINGS_ENABLED, false);
+  UrlbarPrefs.set(PREF_REMOTE_SETTINGS_ENABLED, true);
   UrlbarPrefs.set(PREF_DATA_COLLECTION_ENABLED, true);
 
   // Simply enabling the best match feature should make the mock suggestion a

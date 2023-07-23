@@ -425,7 +425,7 @@ where
             return Err(format!(
                 "ToShmem failed for HashSet: We only support empty sets \
                  (we don't expect custom properties in UA sheets, they're observable by content)",
-            ))
+            ));
         }
         Ok(ManuallyDrop::new(Self::default()))
     }
@@ -501,12 +501,12 @@ impl<H: ToShmem, T: ToShmem> ToShmem for ThinArc<H, T> {
 
 impl<T: ToShmem> ToShmem for ThinVec<T> {
     fn to_shmem(&self, builder: &mut SharedMemoryBuilder) -> Result<Self> {
-        let len = self.len();
-        if len == 0 {
-            return Ok(ManuallyDrop::new(Self::new()))
-        }
-
         assert_eq!(mem::size_of::<Self>(), mem::size_of::<*const ()>());
+
+        // NOTE: We need to do the work of allocating the header in shared memory even if the
+        // length is zero, because an empty ThinVec, even though it doesn't allocate, references
+        // static memory which will not be mapped to other processes, see bug 1841011.
+        let len = self.len();
 
         // nsTArrayHeader size.
         // FIXME: Would be nice not to hard-code this, but in practice thin-vec crate also relies
@@ -525,7 +525,11 @@ impl<T: ToShmem> ToShmem for ThinVec<T> {
         assert!(item_align <= header_size);
         let header_padding = 0;
 
-        let layout = Layout::from_size_align(header_size + header_padding + padded_size(item_size, item_align) * len, item_align).unwrap();
+        let layout = Layout::from_size_align(
+            header_size + header_padding + padded_size(item_size, item_align) * len,
+            item_align,
+        )
+        .unwrap();
 
         let shmem_header_ptr = builder.alloc::<u8>(layout);
         let shmem_data_ptr = unsafe { shmem_header_ptr.add(header_size + header_padding) };

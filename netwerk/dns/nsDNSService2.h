@@ -116,7 +116,6 @@ class nsDNSService final : public mozilla::net::DNSServiceBase,
   // a per-domain basis and work around broken DNS servers. See bug 68796.
   nsCString mIPv4OnlyDomains;
   nsCString mForceResolve;
-  bool mDisableIPv6 = false;
   bool mBlockDotOnion = false;
   bool mNotifyResolution = false;
   bool mOfflineLocalhost = false;
@@ -128,7 +127,6 @@ class nsDNSService final : public mozilla::net::DNSServiceBase,
   uint32_t mResCacheExpiration = 0;
   uint32_t mResCacheGrace = 0;
   bool mResolverPrefsUpdated = false;
-  bool mODoHActivated = false;
   nsClassHashtable<nsCStringHashKey, nsTArray<nsCString>> mFailedSVCDomainNames;
 };
 

@@ -277,6 +277,18 @@ Result<Ok, mozilla::ipc::LaunchError> SandboxBroker::LaunchApp(
   mPolicy->SetStdoutHandle(::GetStdHandle(STD_OUTPUT_HANDLE));
   mPolicy->SetStderrHandle(::GetStdHandle(STD_ERROR_HANDLE));
 
+  // If we're running from a network drive then we can't block loading from
+  // remote locations. Strangely using MITIGATION_IMAGE_LOAD_NO_LOW_LABEL in
+  // this situation also means the process fails to start (bug 1423296).
+  if (sRunningFromNetworkDrive) {
+    sandbox::MitigationFlags mitigations = mPolicy->GetProcessMitigations();
+    mitigations &= ~(sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+                     sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL);
+    MOZ_RELEASE_ASSERT(
+        mPolicy->SetProcessMitigations(mitigations) == sandbox::SBOX_ALL_OK,
+        "Setting the reduced set of flags should always succeed");
+  }
+
   // If logging enabled, set up the policy.
   if (aEnableLogging) {
     ApplyLoggingPolicy();
@@ -943,6 +955,8 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_DEP_NO_ATL_THUNK |
       sandbox::MITIGATION_DEP | sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
       sandbox::MITIGATION_IMAGE_LOAD_PREFER_SYS32;
 
 #if defined(_M_ARM64)
@@ -951,16 +965,6 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     mitigations |= sandbox::MITIGATION_CONTROL_FLOW_GUARD_DISABLE;
   }
 #endif
-
-  if (aSandboxLevel > 3) {
-    // If we're running from a network drive then we can't block loading from
-    // remote locations. Strangely using MITIGATION_IMAGE_LOAD_NO_LOW_LABEL in
-    // this situation also means the process fails to start (bug 1423296).
-    if (!sRunningFromNetworkDrive) {
-      mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
-                     sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL;
-    }
-  }
 
   if (StaticPrefs::security_sandbox_content_shadow_stack_enabled()) {
     mitigations |= sandbox::MITIGATION_CET_COMPAT_MODE;
@@ -1184,7 +1188,8 @@ void SandboxBroker::SetSecurityLevelForGPUProcess(int32_t aSandboxLevel) {
   sandbox::MitigationFlags mitigations =
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_DEP_NO_ATL_THUNK |
-      sandbox::MITIGATION_DEP;
+      sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL | sandbox::MITIGATION_DEP;
 
   if (StaticPrefs::security_sandbox_gpu_shadow_stack_enabled()) {
     mitigations |= sandbox::MITIGATION_CET_COMPAT_MODE;
@@ -1289,6 +1294,9 @@ bool SandboxBroker::SetSecurityLevelForRDDProcess() {
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
       sandbox::MITIGATION_DEP_NO_ATL_THUNK | sandbox::MITIGATION_DEP |
+      sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
       sandbox::MITIGATION_IMAGE_LOAD_PREFER_SYS32;
 
   if (StaticPrefs::security_sandbox_rdd_shadow_stack_enabled()) {
@@ -1393,6 +1401,9 @@ bool SandboxBroker::SetSecurityLevelForSocketProcess() {
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
       sandbox::MITIGATION_DEP_NO_ATL_THUNK | sandbox::MITIGATION_DEP |
+      sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
       sandbox::MITIGATION_IMAGE_LOAD_PREFER_SYS32;
 
   if (StaticPrefs::security_sandbox_socket_shadow_stack_enabled()) {
@@ -1463,6 +1474,8 @@ struct UtilitySandboxProps {
 
   bool mUseAlternateWindowStation = true;
   bool mUseAlternateDesktop = true;
+  bool mLockdownDefaultDacl = true;
+  bool mAddRestrictingRandomSid = true;
   bool mUseWin32kLockdown = true;
   bool mUseCig = true;
 
@@ -1470,6 +1483,9 @@ struct UtilitySandboxProps {
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
       sandbox::MITIGATION_DEP_NO_ATL_THUNK | sandbox::MITIGATION_DEP |
+      sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
       sandbox::MITIGATION_IMAGE_LOAD_PREFER_SYS32 |
       sandbox::MITIGATION_CET_COMPAT_MODE;
 
@@ -1505,15 +1521,20 @@ struct UtilityAudioDecodingWmfSandboxProps : public UtilitySandboxProps {
 struct UtilityMfMediaEngineCdmSandboxProps : public UtilitySandboxProps {
   UtilityMfMediaEngineCdmSandboxProps() {
     mJobLevel = sandbox::JOB_INTERACTIVE;
-    mDelayedTokenLevel = sandbox::USER_RESTRICTED_NON_ADMIN;
+    mInitialTokenLevel = sandbox::USER_UNPROTECTED;
+    mDelayedTokenLevel = sandbox::USER_UNPROTECTED;
     mUseAlternateDesktop = false;
     mUseAlternateWindowStation = false;
-    // If we are using an LPAC then we can't set an integrity level and the
-    // process will default to low integrity anyway.
-    if (StaticPrefs::security_sandbox_utility_wmf_cdm_lpac_enabled()) {
-      mInitialIntegrityLevel = sandbox::INTEGRITY_LEVEL_LAST;
-      mDelayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_LAST;
+    mLockdownDefaultDacl = false;
+    mAddRestrictingRandomSid = false;
 
+    // When we have an LPAC we can't set an integrity level and the process will
+    // default to low integrity anyway. Without an LPAC using low integrity
+    // causes problems with the CDMs.
+    mInitialIntegrityLevel = sandbox::INTEGRITY_LEVEL_LAST;
+    mDelayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_LAST;
+
+    if (StaticPrefs::security_sandbox_utility_wmf_cdm_lpac_enabled()) {
       mPackagePrefix = u"fx.sb.cdm"_ns;
       mWellKnownCapabilites = {
           sandbox::WellKnownCapabilities::kPrivateNetworkClientServer,
@@ -1534,13 +1555,11 @@ struct UtilityMfMediaEngineCdmSandboxProps : public UtilitySandboxProps {
           L"lpacMediaFoundationCdmData",
           L"registryRead",
           kLpacFirefoxInstallFiles,
+          L"lpacDeviceAccess",
       };
-    } else {
-      mDelayedIntegrityLevel = sandbox::INTEGRITY_LEVEL_LOW;
     }
     mUseWin32kLockdown = false;
-    mDelayedMitigations = sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
-                          sandbox::MITIGATION_DLL_SEARCH_ORDER;
+    mDelayedMitigations = sandbox::MITIGATION_DLL_SEARCH_ORDER;
   }
 };
 #endif
@@ -1594,6 +1613,10 @@ void LogUtilitySandboxProps(const UtilitySandboxProps& us) {
                       us.mUseAlternateWindowStation ? "yes" : "no");
   logMsg.AppendPrintf("\tUse Alternate Desktop: %s\n",
                       us.mUseAlternateDesktop ? "yes" : "no");
+  logMsg.AppendPrintf("\tLockdown Default Dacl: %s\n",
+                      us.mLockdownDefaultDacl ? "yes" : "no");
+  logMsg.AppendPrintf("\tAdd Random Restricting SID: %s\n",
+                      us.mAddRestrictingRandomSid ? "yes" : "no");
   logMsg.AppendPrintf("\tUse Win32k Lockdown: %s\n",
                       us.mUseWin32kLockdown ? "yes" : "no");
   logMsg.AppendPrintf("\tUse CIG: %s\n", us.mUseCig ? "yes" : "no");
@@ -1656,8 +1679,12 @@ bool BuildUtilitySandbox(sandbox::TargetPolicy* policy,
     }
   }
 
-  policy->SetLockdownDefaultDacl();
-  policy->AddRestrictingRandomSid();
+  if (us.mLockdownDefaultDacl) {
+    policy->SetLockdownDefaultDacl();
+  }
+  if (us.mAddRestrictingRandomSid) {
+    policy->AddRestrictingRandomSid();
+  }
 
   result = policy->SetProcessMitigations(us.mInitialMitigations);
   SANDBOX_ENSURE_SUCCESS(result, "Invalid flags for SetProcessMitigations.");
@@ -1775,6 +1802,9 @@ bool SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel,
   sandbox::MitigationFlags mitigations =
       sandbox::MITIGATION_BOTTOM_UP_ASLR | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
+      sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
       sandbox::MITIGATION_DEP_NO_ATL_THUNK | sandbox::MITIGATION_DEP;
 
   if (StaticPrefs::security_sandbox_gmp_shadow_stack_enabled()) {

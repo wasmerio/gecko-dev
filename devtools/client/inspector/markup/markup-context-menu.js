@@ -25,7 +25,7 @@ loader.lazyRequireGetter(
   "resource://devtools/shared/platform/clipboard.js"
 );
 
-loader.lazyGetter(this, "TOOLBOX_L10N", function() {
+loader.lazyGetter(this, "TOOLBOX_L10N", function () {
   return new LocalizationHelper("devtools/client/locales/toolbox.properties");
 });
 
@@ -214,11 +214,8 @@ class MarkupContextMenu {
    * Jumps to the custom element definition in the debugger.
    */
   _jumpToCustomElementDefinition() {
-    const {
-      url,
-      line,
-      column,
-    } = this.selection.nodeFront.customElementLocation;
+    const { url, line, column } =
+      this.selection.nodeFront.customElementLocation;
     this.toolbox.viewSourceInDebugger(
       url,
       line,
@@ -374,6 +371,7 @@ class MarkupContextMenu {
 
     const res = await this.toolbox.commands.scriptCommand.execute(evalString, {
       selectedNodeActor: this.selection.nodeFront.actorID,
+      disableBreaks: true,
     });
     hud.setInputValue(res.result);
     this.inspector.emit("console-var-ready");

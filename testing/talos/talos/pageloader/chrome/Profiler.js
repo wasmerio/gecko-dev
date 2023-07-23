@@ -18,7 +18,7 @@
 // relevant parts of our tests.
 var Profiler;
 
-(function() {
+(function () {
   var _profiler;
 
   // If this script is loaded in a framescript context, there won't be a
@@ -128,8 +128,8 @@ var Profiler;
           profile => {
             let profileFile = profiler_dir + "/" + currentTest + ".profile";
 
-            const { NetUtil } = ChromeUtils.import(
-              "resource://gre/modules/NetUtil.jsm"
+            const { NetUtil } = ChromeUtils.importESModule(
+              "resource://gre/modules/NetUtil.sys.mjs"
             );
             const { FileUtils } = ChromeUtils.importESModule(
               "resource://gre/modules/FileUtils.sys.mjs"
@@ -151,7 +151,7 @@ var Profiler;
             );
 
             // The last argument (the callback) is optional.
-            NetUtil.asyncCopy(istream, ostream, function(status) {
+            NetUtil.asyncCopy(istream, ostream, function (status) {
               if (!Components.isSuccessCode(status)) {
                 reject();
                 return;
@@ -161,7 +161,7 @@ var Profiler;
             });
           },
           error => {
-            console.error("Failed to gather profile: " + error);
+            console.error("Failed to gather profile:", error);
             reject();
           }
         );

@@ -160,7 +160,7 @@ const TEST_DATA = [
   },
 ];
 
-add_setup(async function() {
+add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
       // There are cases that URLBar loses focus before assertion of this test.
@@ -176,7 +176,7 @@ add_setup(async function() {
     title: "example title",
   });
 
-  registerCleanupFunction(async function() {
+  registerCleanupFunction(async function () {
     await PlacesUtils.history.clear();
     SpecialPowers.clipboardCopyString("");
   });
@@ -220,7 +220,7 @@ async function assertResult(expected) {
   Assert.equal(result.type, expected.type, "Type of autocomplete is correct");
 
   if (gURLBar.value) {
-    Assert.equal(gURLBar.getAttribute("usertyping"), "true");
+    Assert.ok(gURLBar.hasAttribute("usertyping"));
     Assert.ok(BrowserTestUtils.is_visible(gURLBar.goButton));
   } else {
     Assert.ok(!gURLBar.hasAttribute("usertyping"));

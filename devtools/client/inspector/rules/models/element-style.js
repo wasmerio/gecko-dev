@@ -343,7 +343,8 @@ class ElementStyle {
         earlier &&
         computedProp.priority === "important" &&
         earlier.priority !== "important" &&
-        !computedProp.textProp.rule.inherited
+        // For !important only consider rules applying to the same parent node.
+        computedProp.textProp.rule.inherited == earlier.textProp.rule.inherited
       ) {
         // New property is higher priority. Mark the earlier property
         // overridden (which will reverse its dirty state).
@@ -454,7 +455,7 @@ class ElementStyle {
       // longer matches the node. This strict check avoids accidentally causing
       // declarations to be overridden in the remaining matching rules.
       const isStyleRule =
-        rule.pseudoElement === "" && !!rule.matchedSelectors.length;
+        rule.pseudoElement === "" && !!rule.matchedDesugaredSelectors.length;
 
       // Style rules for pseudo-elements must always be considered, regardless if their
       // selector matches the node. As a convenience, declarations in rules for
@@ -652,9 +653,8 @@ class ElementStyle {
       return;
     }
 
-    const { declarationsToAdd, firstValue } = this._getValueAndExtraProperties(
-      value
-    );
+    const { declarationsToAdd, firstValue } =
+      this._getValueAndExtraProperties(value);
     const parsedValue = parseSingleValue(
       this.cssProperties.isKnown,
       firstValue

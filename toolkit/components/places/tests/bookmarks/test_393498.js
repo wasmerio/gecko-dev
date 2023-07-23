@@ -36,7 +36,7 @@ PlacesUtils.observers.addListener(
   observer.handlePlacesEvents
 );
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   PlacesUtils.observers.removeListener(
     ["bookmark-added", "bookmark-time-changed", "bookmark-title-changed"],
     observer.handlePlacesEvents
@@ -108,7 +108,7 @@ add_task(async function test_bookmark_update_notifications() {
   // Test notifications.
   Assert.equal(
     observer._itemTitleChangedId,
-    await PlacesUtils.promiseItemId(bookmark.guid)
+    await PlacesTestUtils.promiseItemId(bookmark.guid)
   );
   Assert.equal(observer._itemTitleChangedTitle, "Google");
 

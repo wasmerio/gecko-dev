@@ -778,6 +778,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Selection)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelectionListeners)
   MOZ_KnownLive(tmp)->RemoveAllRangesInternal(IgnoreErrors());
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFrameSelection)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mHighlightData.mHighlight)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_PTR
   NS_IMPL_CYCLE_COLLECTION_UNLINK_WEAK_REFERENCE
@@ -791,6 +792,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Selection)
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnchorFocusRange)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFrameSelection)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHighlightData.mHighlight)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectionChangeEventDispatcher)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectionListeners)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -1234,9 +1236,7 @@ nsresult Selection::StyledRanges::MaybeAddRangeAndTruncateOverlaps(
 
   // Remove all the overlapping ranges
   for (size_t i = startIndex; i < endIndex; ++i) {
-    if (mRanges[i].mRange->IsDynamicRange()) {
-      mRanges[i].mRange->AsDynamicRange()->UnregisterSelection(mSelection);
-    }
+    mRanges[i].mRange->UnregisterSelection(mSelection);
   }
   mRanges.RemoveElementsAt(startIndex, endIndex - startIndex);
 
@@ -1287,9 +1287,8 @@ nsresult Selection::StyledRanges::RemoveRangeAndUnregisterSelection(
   if (idx < 0) return NS_ERROR_DOM_NOT_FOUND_ERR;
 
   mRanges.RemoveElementAt(idx);
-  if (aRange.IsDynamicRange()) {
-    aRange.AsDynamicRange()->UnregisterSelection(mSelection);
-  }
+  aRange.UnregisterSelection(mSelection);
+
   return NS_OK;
 }
 nsresult Selection::RemoveCollapsedRanges() {
@@ -1889,7 +1888,7 @@ UniquePtr<SelectionDetails> Selection::LookUpSelection(
     newHead->mStart = AssertedCast<int32_t>(*start);
     newHead->mEnd = AssertedCast<int32_t>(*end);
     newHead->mSelectionType = aSelectionType;
-    newHead->mHighlightName = mHighlightName;
+    newHead->mHighlightData = mHighlightData;
     StyledRange* rd = mStyledRanges.FindRangeData(range);
     if (rd) {
       newHead->mTextRangeStyle = rd->mTextRangeStyle;
@@ -1987,9 +1986,7 @@ void Selection::SetAncestorLimiter(nsIContent* aLimiter) {
 void Selection::StyledRanges::UnregisterSelection() {
   uint32_t count = mRanges.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    if (mRanges[i].mRange->IsDynamicRange()) {
-      mRanges[i].mRange->AsDynamicRange()->UnregisterSelection(mSelection);
-    }
+    mRanges[i].mRange->UnregisterSelection(mSelection);
   }
 }
 
@@ -2169,7 +2166,11 @@ void Selection::AddRangeAndSelectFramesAndNotifyListenersInternal(
   RefPtr<nsRange> range = &aRange;
   if (aRange.IsInAnySelection()) {
     if (aRange.IsInSelection(*this)) {
-      // If we already have the range, we don't need to handle this.
+      // If we already have the range, we don't need to handle this except
+      // setting the interline position.
+      if (mSelectionType == SelectionType::eNormal) {
+        SetInterlinePosition(InterlinePosition::StartOfNextLine);
+      }
       return;
     }
     if (mSelectionType != SelectionType::eNormal &&
@@ -2237,10 +2238,8 @@ void Selection::AddHighlightRangeAndSelectFramesAndNotifyListeners(
   MOZ_ASSERT(mSelectionType == SelectionType::eHighlight);
 
   mStyledRanges.mRanges.AppendElement(StyledRange{&aRange});
-  if (aRange.IsDynamicRange()) {
-    RefPtr<nsRange> range = aRange.AsDynamicRange();
-    range->RegisterSelection(*this);
-  }
+  aRange.RegisterSelection(*this);
+
   if (!mFrameSelection) {
     return;  // nothing to do
   }
@@ -4098,9 +4097,10 @@ void Selection::SetColors(const nsAString& aForegroundColor,
 
 void Selection::ResetColors() { mCustomColors = nullptr; }
 
-void Selection::SetHighlightName(const nsAtom* aHighlightName) {
+void Selection::SetHighlightSelectionData(
+    HighlightSelectionData aHighlightSelectionData) {
   MOZ_ASSERT(mSelectionType == SelectionType::eHighlight);
-  mHighlightName = aHighlightName;
+  mHighlightData = std::move(aHighlightSelectionData);
 }
 
 JSObject* Selection::WrapObject(JSContext* aCx,

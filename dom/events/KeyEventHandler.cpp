@@ -166,7 +166,14 @@ bool KeyEventHandler::TryConvertToKeyboardShortcut(
   return true;
 }
 
-already_AddRefed<dom::Element> KeyEventHandler::GetHandlerElement() {
+bool KeyEventHandler::KeyElementIsDisabled() const {
+  RefPtr<dom::Element> keyElement = GetHandlerElement();
+  return keyElement &&
+         keyElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::disabled,
+                                 nsGkAtoms::_true, eCaseMatters);
+}
+
+already_AddRefed<dom::Element> KeyEventHandler::GetHandlerElement() const {
   if (mIsXULKey) {
     nsCOMPtr<dom::Element> element = do_QueryReferent(mHandlerElement);
     return element.forget();
@@ -539,7 +546,7 @@ void KeyEventHandler::GetEventType(nsAString& aEvent) {
     aEvent.Truncate();
     return;
   }
-  handlerElement->GetAttr(kNameSpaceID_None, nsGkAtoms::event, aEvent);
+  handlerElement->GetAttr(nsGkAtoms::event, aEvent);
 
   if (aEvent.IsEmpty() && mIsXULKey) {
     // If no type is specified for a XUL <key> element, let's assume that we're
@@ -573,7 +580,7 @@ void KeyEventHandler::ConstructPrototype(dom::Element* aKeyElement,
     }
     mEventName = NS_Atomize(event);
 
-    aKeyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::modifiers, modifiers);
+    aKeyElement->GetAttr(nsGkAtoms::modifiers, modifiers);
   } else {
     mCommand = ToNewUnicode(nsDependentString(aCommand));
     mEventName = NS_Atomize(aEvent);
@@ -585,9 +592,9 @@ void KeyEventHandler::ConstructPrototype(dom::Element* aKeyElement,
   nsAutoString key(aCharCode);
   if (key.IsEmpty()) {
     if (mIsXULKey) {
-      aKeyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::key, key);
+      aKeyElement->GetAttr(nsGkAtoms::key, key);
       if (key.IsEmpty()) {
-        aKeyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::charcode, key);
+        aKeyElement->GetAttr(nsGkAtoms::charcode, key);
       }
     }
   }
@@ -619,7 +626,7 @@ void KeyEventHandler::ConstructPrototype(dom::Element* aKeyElement,
   } else {
     key.Assign(aKeyCode);
     if (mIsXULKey) {
-      aKeyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::keycode, key);
+      aKeyElement->GetAttr(nsGkAtoms::keycode, key);
     }
 
     if (!key.IsEmpty()) {
@@ -670,7 +677,7 @@ void KeyEventHandler::ReportKeyConflict(const char16_t* aKey,
   nsCOMPtr<dom::Document> doc = aKeyElement->OwnerDoc();
 
   nsAutoString id;
-  aKeyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::id, id);
+  aKeyElement->GetAttr(nsGkAtoms::id, id);
   AutoTArray<nsString, 3> params;
   params.AppendElement(aKey);
   params.AppendElement(aModifiers);

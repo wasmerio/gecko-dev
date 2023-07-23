@@ -16,8 +16,10 @@ use crate::rule_tree::StrongRuleNode;
 use crate::selector_parser::{PseudoElement, SelectorImpl};
 use crate::stylist::RuleInclusion;
 use log::Level::Trace;
-use selectors::matching::{MatchingContext, NeedsSelectorFlags};
-use selectors::matching::{MatchingMode, VisitedHandlingMode};
+use selectors::matching::{
+    IgnoreNthChildForInvalidation, MatchingContext, MatchingMode, NeedsSelectorFlags,
+    RelativeSelectorMatchingState, VisitedHandlingMode,
+};
 use servo_arc::Arc;
 
 /// Whether pseudo-elements should be resolved or not.
@@ -420,7 +422,10 @@ where
         originating_element_style: &PrimaryStyle,
         layout_parent_style: Option<&ComputedValues>,
     ) -> Option<ResolvedStyle> {
-        let MatchingResults { rule_node, mut flags } = self.match_pseudo(
+        let MatchingResults {
+            rule_node,
+            mut flags,
+        } = self.match_pseudo(
             &originating_element_style.style.0,
             pseudo,
             VisitedHandlingMode::AllLinksUnvisited,
@@ -428,14 +433,16 @@ where
 
         let mut visited_rules = None;
         if originating_element_style.style().visited_style().is_some() {
-            visited_rules = self.match_pseudo(
-                &originating_element_style.style.0,
-                pseudo,
-                VisitedHandlingMode::RelevantLinkVisited,
-            ).map(|results| {
-                flags |= results.flags;
-                results.rule_node
-            });
+            visited_rules = self
+                .match_pseudo(
+                    &originating_element_style.style.0,
+                    pseudo,
+                    VisitedHandlingMode::RelevantLinkVisited,
+                )
+                .map(|results| {
+                    flags |= results.flags;
+                    results.rule_node
+                });
         }
 
         Some(self.cascade_style_and_visited(
@@ -466,6 +473,7 @@ where
             visited_handling,
             self.context.shared.quirks_mode(),
             NeedsSelectorFlags::Yes,
+            IgnoreNthChildForInvalidation::No,
         );
 
         let stylist = &self.context.shared.stylist;
@@ -498,6 +506,24 @@ where
                 }
             }
         }
+        // This is a bit awkward - ideally, the flag is set directly where `considered_relative_selector`
+        // is; however, in that context, the implementation detail of `extra_data` is not visible, so
+        // it's done here. A trait for manipulating the flags is an option, but not worth it for a single flag.
+        match matching_context.considered_relative_selector {
+            RelativeSelectorMatchingState::None => (),
+            RelativeSelectorMatchingState::Considered => {
+                matching_context
+                    .extra_data
+                    .cascade_input_flags
+                    .insert(ComputedValueFlags::CONSIDERED_RELATIVE_SELECTOR);
+            },
+            RelativeSelectorMatchingState::ConsideredAnchor => {
+                matching_context.extra_data.cascade_input_flags.insert(
+                    ComputedValueFlags::ANCHORS_RELATIVE_SELECTOR |
+                        ComputedValueFlags::CONSIDERED_RELATIVE_SELECTOR,
+                );
+            },
+        };
 
         MatchingResults {
             rule_node,
@@ -542,9 +568,9 @@ where
             visited_handling,
             self.context.shared.quirks_mode(),
             NeedsSelectorFlags::Yes,
+            IgnoreNthChildForInvalidation::No,
         );
-        matching_context.extra_data.originating_element_style =
-            Some(originating_element_style);
+        matching_context.extra_data.originating_element_style = Some(originating_element_style);
 
         // NB: We handle animation rules for ::before and ::after when
         // traversing them.

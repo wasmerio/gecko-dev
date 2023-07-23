@@ -15,7 +15,7 @@ add_task(async function test_missing_crypto_collection() {
 
   let empty = false;
   function maybe_empty(handler) {
-    return function(request, response) {
+    return function (request, response) {
       if (empty) {
         let body = "{}";
         response.setStatusLine(request.httpVersion, 200, "OK");
@@ -62,7 +62,7 @@ add_task(async function test_missing_crypto_collection() {
   try {
     let fresh = 0;
     let orig = Service._freshStart;
-    Service._freshStart = async function() {
+    Service._freshStart = async function () {
       _("Called _freshStart.");
       await orig.call(Service);
       fresh++;
@@ -87,7 +87,9 @@ add_task(async function test_missing_crypto_collection() {
     await sync_and_validate_telem();
     Assert.equal(fresh, 0);
   } finally {
-    Svc.Prefs.resetBranch("");
+    for (const pref of Svc.PrefBranch.getChildList("")) {
+      Svc.PrefBranch.clearUserPref(pref);
+    }
     await promiseStopServer(server);
   }
 });

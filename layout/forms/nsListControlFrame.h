@@ -56,8 +56,8 @@ class nsListControlFrame final : public nsHTMLScrollFrame,
   NS_DECL_FRAMEARENA_HELPERS(nsListControlFrame)
 
   Maybe<nscoord> GetNaturalBaselineBOffset(
-      mozilla::WritingMode aWM,
-      BaselineSharingGroup aBaselineGroup) const override;
+      mozilla::WritingMode aWM, BaselineSharingGroup aBaselineGroup,
+      BaselineExportContext) const override;
 
   // nsIFrame
   nsresult HandleEvent(nsPresContext* aPresContext,
@@ -232,8 +232,7 @@ class nsListControlFrame final : public nsHTMLScrollFrame,
    * Returns whether mContent supports multiple selection.
    */
   bool GetMultiple() const {
-    return mContent->AsElement()->HasAttr(kNameSpaceID_None,
-                                          nsGkAtoms::multiple);
+    return mContent->AsElement()->HasAttr(nsGkAtoms::multiple);
   }
 
   mozilla::dom::HTMLSelectElement& Select() const;

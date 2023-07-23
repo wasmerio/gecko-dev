@@ -112,7 +112,7 @@ class JSErrorBase {
 
  public:
   // Source file name, URL, etc., or null.
-  const char* filename;
+  JS::ConstUTF8CharsZ filename;
 
   // Unique identifier for the script source.
   unsigned sourceId;

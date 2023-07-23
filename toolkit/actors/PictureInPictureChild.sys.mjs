@@ -138,7 +138,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
         if (event.isTrusted) {
           this.togglePictureInPicture({
             video: event.target,
-            reason: event.detail,
+            reason: event.detail?.reason,
           });
         }
         break;
@@ -179,7 +179,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
         "MozStopPictureInPicture",
         {
           bubbles: true,
-          detail: reason,
+          detail: { reason },
         }
       );
       video.dispatchEvent(stopPipEvent);
@@ -224,7 +224,22 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
       webVTTSubtitles: !!video.textTracks?.length,
       scrubberPosition,
       timestamp,
+      volume: PictureInPictureChild.videoWrapper.getVolume(video),
     });
+
+    let args = {
+      firstTimeToggle: (!Services.prefs.getBoolPref(
+        TOGGLE_HAS_USED_PREF
+      )).toString(),
+    };
+
+    Services.telemetry.recordEvent(
+      "pictureinpicture",
+      "opened_method",
+      reason,
+      null,
+      args
+    );
   }
 
   /**
@@ -249,7 +264,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
           listOfVideos.sort((a, b) => b.duration - a.duration)[0];
       }
       if (video) {
-        this.togglePictureInPicture({ video });
+        this.togglePictureInPicture({ video, reason: "shortcut" });
       }
     }
   }
@@ -483,7 +498,8 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
           // For now we only update our cache if the site overrides change.
           // the user will need to refresh the page for changes to apply.
           try {
-            lazy.gSiteOverrides = PictureInPictureToggleChild.getSiteOverrides();
+            lazy.gSiteOverrides =
+              PictureInPictureToggleChild.getSiteOverrides();
           } catch (e) {
             // Ignore resulting TypeError if gSiteOverrides is still unloaded
             if (!(e instanceof TypeError)) {
@@ -606,9 +622,20 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
       this.eligiblePipVideos.delete(video);
     }
 
+    let videos = ChromeUtils.nondeterministicGetWeakSetKeys(
+      this.eligiblePipVideos
+    );
+
     this.sendAsyncMessage("PictureInPicture:UpdateEligiblePipVideoCount", {
-      count: ChromeUtils.nondeterministicGetWeakSetKeys(this.eligiblePipVideos)
-        .length,
+      pipCount: videos.length,
+      pipDisabledCount: videos.reduce(
+        (accumulator, currentVal) =>
+          accumulator +
+          (currentVal.getAttribute("disablePictureInPicture") === "true"
+            ? 1
+            : 0),
+        0
+      ),
     });
   }
 
@@ -618,9 +645,20 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
       this.eligiblePipVideos.delete(video);
     }
 
+    let videos = ChromeUtils.nondeterministicGetWeakSetKeys(
+      this.eligiblePipVideos
+    );
+
     this.sendAsyncMessage("PictureInPicture:UpdateEligiblePipVideoCount", {
-      count: ChromeUtils.nondeterministicGetWeakSetKeys(this.eligiblePipVideos)
-        .length,
+      pipCount: videos.length,
+      pipDisabledCount: videos.reduce(
+        (accumulator, currentVal) =>
+          accumulator +
+          (currentVal.getAttribute("disablePictureInPicture") === "true"
+            ? 1
+            : 0),
+        0
+      ),
     });
   }
 
@@ -629,20 +667,6 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
       this.eligiblePipVideos
     )[0];
     if (video) {
-      if (!video.isCloningElementVisually) {
-        let args = {
-          firstTimeToggle: (!Services.prefs.getBoolPref(
-            "media.videocontrols.picture-in-picture.video-toggle.has-used"
-          )).toString(),
-        };
-        Services.telemetry.recordEvent(
-          "pictureinpicture",
-          "opened_method",
-          "urlBar",
-          null,
-          args
-        );
-      }
       let pipEvent = new this.contentWindow.CustomEvent(
         "MozTogglePictureInPicture",
         {
@@ -681,13 +705,12 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
    * @param {Number} firstSeenStartSeconds the timestamp in seconds indicating when the PiP toggle was first seen
    */
   changeToIconIfDurationEnd(firstSeenStartSeconds) {
-    const {
-      displayDuration,
-    } = lazy.NimbusFeatures.pictureinpicture.getAllVariables({
-      defaultValues: {
-        displayDuration: TOGGLE_FIRST_TIME_DURATION_DAYS,
-      },
-    });
+    const { displayDuration } =
+      lazy.NimbusFeatures.pictureinpicture.getAllVariables({
+        defaultValues: {
+          displayDuration: TOGGLE_FIRST_TIME_DURATION_DAYS,
+        },
+      });
     if (!displayDuration || displayDuration < 0) {
       return;
     }
@@ -1036,23 +1059,12 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
       "toggle",
       1
     );
-    let args = {
-      firstTimeToggle: (!Services.prefs.getBoolPref(
-        TOGGLE_HAS_USED_PREF
-      )).toString(),
-    };
-    Services.telemetry.recordEvent(
-      "pictureinpicture",
-      "opened_method",
-      "toggle",
-      null,
-      args
-    );
 
     let pipEvent = new this.contentWindow.CustomEvent(
       "MozTogglePictureInPicture",
       {
         bubbles: true,
+        detail: { reason: "toggle" },
       }
     );
     video.dispatchEvent(pipEvent);
@@ -1292,8 +1304,8 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
     }
 
     // nimbusExperimentVariables will be defaultValues when the experiment is disabled
-    const nimbusExperimentVariables = lazy.NimbusFeatures.pictureinpicture.getAllVariables(
-      {
+    const nimbusExperimentVariables =
+      lazy.NimbusFeatures.pictureinpicture.getAllVariables({
         defaultValues: {
           oldToggle: true,
           title: null,
@@ -1301,8 +1313,7 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
           showIconOnly: false,
           displayDuration: TOGGLE_FIRST_TIME_DURATION_DAYS,
         },
-      }
-    );
+      });
 
     /**
      * If a Nimbus variable exists for the first-time PiP toggle design,
@@ -1462,9 +1473,8 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
    * @return {Boolean}
    */
   isMouseOverToggle(toggle, event) {
-    let toggleRect = toggle.ownerGlobal.windowUtils.getBoundsWithoutFlushing(
-      toggle
-    );
+    let toggleRect =
+      toggle.ownerGlobal.windowUtils.getBoundsWithoutFlushing(toggle);
 
     // The way the toggle is currently implemented with
     // absolute positioning, the root toggle element bounds don't actually
@@ -1930,6 +1940,9 @@ export class PictureInPictureChild extends JSWindowActorChild {
         } else {
           this.sendAsyncMessage("PictureInPicture:Unmuting");
         }
+        this.sendAsyncMessage("PictureInPicture:VolumeChange", {
+          volume: this.videoWrapper.getVolume(video),
+        });
         break;
       }
       case "resize": {
@@ -2132,6 +2145,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
       case "PictureInPicture:SetVideoTime": {
         const { scrubberPosition, wasPlaying } = message.data;
         this.setVideoTime(scrubberPosition, wasPlaying);
+        break;
+      }
+      case "PictureInPicture:SetVolume": {
+        const { volume } = message.data;
+        let video = this.getWeakVideo();
+        this.videoWrapper.setVolume(video, volume);
         break;
       }
     }
@@ -2556,12 +2575,16 @@ export class PictureInPictureChild extends JSWindowActorChild {
           this.closePictureInPicture({ reason: "closePlayerShortcut" });
           break;
         case "downArrow" /* Volume decrease */:
-          if (this.isKeyDisabled(lazy.KEYBOARD_CONTROLS.VOLUME)) {
+          if (
+            this.isKeyDisabled(lazy.KEYBOARD_CONTROLS.VOLUME) ||
+            this.videoWrapper.isMuted(video)
+          ) {
             return;
           }
           oldval = this.videoWrapper.getVolume(video);
-          this.videoWrapper.setVolume(video, oldval < 0.1 ? 0 : oldval - 0.1);
-          this.videoWrapper.setMuted(video, false);
+          newval = oldval < 0.1 ? 0 : oldval - 0.1;
+          this.videoWrapper.setVolume(video, newval);
+          this.videoWrapper.setMuted(video, newval === 0);
           break;
         case "upArrow" /* Volume increase */:
           if (this.isKeyDisabled(lazy.KEYBOARD_CONTROLS.VOLUME)) {
@@ -2842,9 +2865,8 @@ class PictureInPictureChildVideoWrapper {
         "PictureInPicture:EnableSubtitlesButton"
       );
     }
-    let pipWindowTracksContainer = this.#PictureInPictureChild.document.getElementById(
-      "texttracks"
-    );
+    let pipWindowTracksContainer =
+      this.#PictureInPictureChild.document.getElementById("texttracks");
     pipWindowTracksContainer.textContent = text;
   }
 

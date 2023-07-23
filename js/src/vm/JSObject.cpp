@@ -26,6 +26,7 @@
 #include "builtin/String.h"
 #include "builtin/Symbol.h"
 #include "builtin/WeakSetObject.h"
+#include "gc/AllocKind.h"
 #include "gc/GC.h"
 #include "js/CharacterEncoding.h"
 #include "js/friend/DumpFunctions.h"  // js::DumpObject
@@ -769,7 +770,7 @@ static MOZ_ALWAYS_INLINE NativeObject* NewObject(JSContext* cx,
     return nullptr;
   }
 
-  gc::InitialHeap heap = GetInitialHeap(newKind, clasp);
+  gc::Heap heap = GetInitialHeap(newKind, clasp);
   NativeObject* obj = NativeObject::create(cx, kind, heap, shape);
   if (!obj) {
     return nullptr;
@@ -1189,21 +1190,6 @@ bool ProxyObject::fixupAfterSwap(JSContext* cx,
   return true;
 }
 
-#ifdef DEBUG
-static bool IsBackgroundFinalizedWhenTenured(JSObject* obj) {
-  if (obj->isTenured()) {
-    return gc::IsBackgroundFinalized(obj->asTenured().getAllocKind());
-  }
-
-  if (obj->is<ProxyObject>()) {
-    return gc::IsBackgroundFinalized(
-        obj->as<ProxyObject>().allocKindForTenure());
-  }
-
-  return js::gc::CanUseBackgroundAllocKind(obj->getClass());
-}
-#endif
-
 static gc::AllocKind SwappableObjectAllocKind(JSObject* obj) {
   MOZ_ASSERT(ObjectMayBeSwapped(obj));
 
@@ -1222,8 +1208,7 @@ static gc::AllocKind SwappableObjectAllocKind(JSObject* obj) {
 void JSObject::swap(JSContext* cx, HandleObject a, HandleObject b,
                     AutoEnterOOMUnsafeRegion& oomUnsafe) {
   // Ensure swap doesn't cause a finalizer to be run at the wrong time.
-  MOZ_ASSERT(IsBackgroundFinalizedWhenTenured(a) ==
-             IsBackgroundFinalizedWhenTenured(b));
+  MOZ_ASSERT(a->isBackgroundFinalized() == b->isBackgroundFinalized());
 
   MOZ_ASSERT(a->compartment() == b->compartment());
 
@@ -1375,6 +1360,16 @@ void JSObject::swap(JSContext* cx, HandleObject a, HandleObject b,
     }
   }
 
+  // Restore original unique IDs.
+  if ((aid || bid) && (na || nb)) {
+    if ((aid && !gc::SetOrUpdateUniqueId(cx, a, aid)) ||
+        (bid && !gc::SetOrUpdateUniqueId(cx, b, bid))) {
+      oomUnsafe.crash("Failed to set unique ID after swap");
+    }
+  }
+  MOZ_ASSERT_IF(aid, gc::GetUniqueIdInfallible(a) == aid);
+  MOZ_ASSERT_IF(bid, gc::GetUniqueIdInfallible(b) == bid);
+
   // Preserve the IsUsedAsPrototype flag on the objects.
   if (aIsUsedAsPrototype) {
     if (!JSObject::setIsUsedAsPrototype(cx, a)) {
@@ -1386,16 +1381,6 @@ void JSObject::swap(JSContext* cx, HandleObject a, HandleObject b,
       oomUnsafe.crash("setIsUsedAsPrototype");
     }
   }
-
-  // Restore original unique IDs.
-  if ((aid || bid) && (na || nb)) {
-    if ((aid && !gc::SetOrUpdateUniqueId(cx, a, aid)) ||
-        (bid && !gc::SetOrUpdateUniqueId(cx, b, bid))) {
-      oomUnsafe.crash("Failed to set unique ID after swap");
-    }
-  }
-  MOZ_ASSERT_IF(aid, gc::GetUniqueIdInfallible(a) == aid);
-  MOZ_ASSERT_IF(bid, gc::GetUniqueIdInfallible(b) == bid);
 
   /*
    * We need a write barrier here. If |a| was marked and |b| was not, then
@@ -1448,10 +1433,12 @@ static NativeObject* DefineConstructorAndPrototype(
     return nullptr;
   }
 
-  RootedId id(cx, AtomToId(atom));
-  RootedValue value(cx, ObjectValue(*ctor));
-  if (!DefineDataProperty(cx, obj, id, value, 0)) {
-    return nullptr;
+  if (clasp->specShouldDefineConstructor()) {
+    RootedId id(cx, AtomToId(atom));
+    RootedValue value(cx, ObjectValue(*ctor));
+    if (!DefineDataProperty(cx, obj, id, value, 0)) {
+      return nullptr;
+    }
   }
 
   if (ctorp) {
@@ -1954,13 +1941,10 @@ bool js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto,
   }
 
   /*
-   * Disallow mutating the [[Prototype]] on Typed Objects, per the spec.
+   * Disallow mutating the [[Prototype]] on WebAssembly GC objects.
    */
   if (obj->is<WasmGcObject>()) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_CANT_SET_PROTO_OF,
-                              "incompatible WebAssembly object");
-    return false;
+    return result.fail(JSMSG_CANT_SET_PROTO);
   }
 
   /* ES6 9.1.2 step 5 forbids changing [[Prototype]] if not [[Extensible]]. */
@@ -2011,6 +1995,10 @@ bool js::PreventExtensions(JSContext* cx, HandleObject obj,
                            ObjectOpResult& result) {
   if (obj->is<ProxyObject>()) {
     return js::Proxy::preventExtensions(cx, obj, result);
+  }
+
+  if (obj->is<WasmGcObject>()) {
+    return result.failCantPreventExtensions();
   }
 
   if (!obj->nonProxyIsExtensible()) {
@@ -2228,6 +2216,7 @@ JS_PUBLIC_API bool js::ShouldIgnorePropertyDefinition(JSContext* cx,
        id == NameToId(cx->names().groupToMap))) {
     return true;
   }
+#endif
 
   // It's gently surprising that this is JSProto_Function, but the trick
   // to realize is that this is a -constructor function-, not a function
@@ -2237,9 +2226,7 @@ JS_PUBLIC_API bool js::ShouldIgnorePropertyDefinition(JSContext* cx,
       id == NameToId(cx->names().fromAsync)) {
     return true;
   }
-#endif
 
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
   if (key == JSProto_Array &&
       !cx->realm()->creationOptions().getChangeArrayByCopyEnabled() &&
       (id == NameToId(cx->names().with) ||
@@ -2256,7 +2243,6 @@ JS_PUBLIC_API bool js::ShouldIgnorePropertyDefinition(JSContext* cx,
        id == NameToId(cx->names().toSorted))) {
     return true;
   }
-#endif
 
 #ifdef ENABLE_NEW_SET_METHODS
   if (key == JSProto_Set &&
@@ -3275,6 +3261,15 @@ JS_PUBLIC_API void js::DumpBacktrace(JSContext* cx) {
 
 /* * */
 
+bool JSObject::isBackgroundFinalized() const {
+  if (isTenured()) {
+    return js::gc::IsBackgroundFinalized(asTenured().getAllocKind());
+  }
+
+  js::Nursery& nursery = runtimeFromMainThread()->gc.nursery();
+  return js::gc::IsBackgroundFinalized(allocKindForTenure(nursery));
+}
+
 js::gc::AllocKind JSObject::allocKindForTenure(
     const js::Nursery& nursery) const {
   using namespace js::gc;
@@ -3607,7 +3602,7 @@ void js::AssertJSClassInvariants(const JSClass* clasp) {
 
 /* static */
 void JSObject::debugCheckNewObject(Shape* shape, js::gc::AllocKind allocKind,
-                                   js::gc::InitialHeap heap) {
+                                   js::gc::Heap heap) {
   const JSClass* clasp = shape->getObjectClass();
 
   if (!ClassCanHaveFixedData(clasp)) {
@@ -3640,7 +3635,7 @@ void JSObject::debugCheckNewObject(Shape* shape, js::gc::AllocKind allocKind,
   }
 
   MOZ_ASSERT_IF(clasp->hasFinalize(),
-                heap == gc::TenuredHeap ||
+                heap == gc::Heap::Tenured ||
                     CanNurseryAllocateFinalizedClass(clasp) ||
                     clasp->isProxyObject());
 

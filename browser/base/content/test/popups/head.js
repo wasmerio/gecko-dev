@@ -151,11 +151,6 @@ async function testPropertyDeltas(
   };
   win.addEventListener("resize", resizeListener);
 
-  const useProperties = !Services.prefs.getBoolPref(
-    "dom.window_position_size_properties_replaceable.enabled",
-    true
-  );
-
   info("Starting property changes.");
   await new Promise(resolve => {
     let index = 0;
@@ -168,9 +163,7 @@ async function testPropertyDeltas(
 
         let targetValue = initialState[prop] + deltaObj[prop];
         info(`${pre} Setting ${prop} to ${targetValue}.`);
-        if (useProperties) {
-          win[prop] = targetValue;
-        } else if (sizeProps.includes(prop)) {
+        if (sizeProps.includes(prop)) {
           win.resizeTo(finalState.outerWidth, finalState.outerHeight);
         } else {
           win.moveTo(finalState.screenX, finalState.screenY);
@@ -309,7 +302,8 @@ class ResizeMoveTest {
 
     add_task(async () => {
       let tab = await ResizeMoveTest.GetOrCreateTab();
-      let browsingContext = await ResizeMoveTest.GetOrCreatePopupBrowsingContext();
+      let browsingContext =
+        await ResizeMoveTest.GetOrCreatePopupBrowsingContext();
       if (!browsingContext) {
         return;
       }

@@ -11,7 +11,6 @@ build environment.
 
 import argparse
 import errno
-import glob
 import hashlib
 import os
 import shutil
@@ -248,9 +247,21 @@ def fetch_std(manifest, targets):
     stds = []
     for target in targets:
         stds.append(fetch_package(manifest, "rust-std", target))
-        # not available for i686
-        if target != "i686-unknown-linux-musl":
-            stds.append(fetch_package(manifest, "rust-analysis", target))
+        analysis = fetch_optional(manifest, "rust-analysis", target)
+        if analysis:
+            stds.append(analysis)
+        else:
+            log(f"Missing rust-analysis for {target}")
+            # If it's missing for one of the searchfox targets, explicitly
+            # error out.
+            if target in (
+                "x86_64-unknown-linux-gnu",
+                "x86_64-apple-darwin",
+                "x86_64-pc-windows-msvc",
+                "thumbv7neon-linux-androideabi",
+            ):
+                raise AssertionError
+
     return stds
 
 
@@ -412,6 +423,7 @@ def build_src(install_dir, host, targets, patches):
         sanitizers = true
         extended = true
         tools = ["analysis", "cargo", "rustfmt", "clippy", "src", "rust-analyzer"]
+        cargo-native-static = true
 
         [rust]
         {omit_git_hash} = false
@@ -475,7 +487,6 @@ def repack(
     targets,
     channel="stable",
     cargo_channel=None,
-    compiler_builtins_hack=False,
     patches=[],
 ):
     install_dir = "rustc"
@@ -528,31 +539,6 @@ def repack(
         for std in stds:
             install(os.path.basename(std["url"]), install_dir)
             pass
-    # Workaround for https://github.com/rust-lang/rust/issues/98746:
-    # Remove debug symbols from the compiler_builtins rlib.
-    hack_targets = ()
-    if compiler_builtins_hack:
-        hack_targets = (
-            "x86_64-unknown-linux-gnu",
-            "i686-unknown-linux-gnu",
-            "x86_64-linux-android",
-            "i686-linux-android",
-            "thumbv7neon-linux-androideabi",
-            "aarch64-linux-android",
-        )
-        llvm_bin = os.path.join(os.environ["MOZ_FETCHES_DIR"], "clang", "bin")
-    for t in hack_targets:
-        if t not in targets:
-            continue
-        for lib in glob.glob(
-            os.path.join(
-                install_dir, "lib", "rustlib", t, "lib", "libcompiler_builtins*"
-            )
-        ):
-            log("Strip debuginfo from %s" % lib)
-            subprocess.check_call(
-                [os.path.join(llvm_bin, "llvm-strip"), "-d", os.path.abspath(lib)],
-            )
 
     log("Creating archive...")
     tar_file = install_dir + ".tar.zst"
@@ -637,11 +623,6 @@ def args():
         "--cargo-channel",
         help="Release channel version to use for cargo."
         " Defaults to the same as --channel.",
-    )
-    parser.add_argument(
-        "--compiler-builtins-hack",
-        action="store_true",
-        help="Enable workaround for " "https://github.com/rust-lang/rust/issues/98746.",
     )
     parser.add_argument(
         "--host",

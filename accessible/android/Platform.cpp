@@ -92,9 +92,6 @@ void a11y::ProxyEvent(RemoteAccessible* aTarget, uint32_t aEventType) {
   }
 
   switch (aEventType) {
-    case nsIAccessibleEvent::EVENT_FOCUS:
-      sessionAcc->SendFocusEvent(aTarget);
-      break;
     case nsIAccessibleEvent::EVENT_REORDER:
       sessionAcc->SendWindowContentChangedEvent();
       break;
@@ -134,9 +131,17 @@ void a11y::ProxyStateChangeEvent(RemoteAccessible* aTarget, uint64_t aState,
   }
 }
 
+void a11y::ProxyFocusEvent(RemoteAccessible* aTarget,
+                           const LayoutDeviceIntRect& aCaretRect) {
+  if (RefPtr<SessionAccessibility> sessionAcc =
+          SessionAccessibility::GetInstanceFor(aTarget)) {
+    sessionAcc->SendFocusEvent(aTarget);
+  }
+}
+
 void a11y::ProxyCaretMoveEvent(RemoteAccessible* aTarget, int32_t aOffset,
-                               bool aIsSelectionCollapsed,
-                               int32_t aGranularity) {
+                               bool aIsSelectionCollapsed, int32_t aGranularity,
+                               const LayoutDeviceIntRect& aCaretRect) {
   RefPtr<SessionAccessibility> sessionAcc =
       SessionAccessibility::GetInstanceFor(aTarget);
 
@@ -167,12 +172,10 @@ void a11y::ProxyShowHideEvent(RemoteAccessible* aTarget,
 void a11y::ProxySelectionEvent(RemoteAccessible*, RemoteAccessible*, uint32_t) {
 }
 
-void a11y::ProxyVirtualCursorChangeEvent(
-    RemoteAccessible* aTarget, RemoteAccessible* aOldPosition,
-    int32_t aOldStartOffset, int32_t aOldEndOffset,
-    RemoteAccessible* aNewPosition, int32_t aNewStartOffset,
-    int32_t aNewEndOffset, int16_t aReason, int16_t aBoundaryType,
-    bool aFromUser) {
+void a11y::ProxyVirtualCursorChangeEvent(RemoteAccessible* aTarget,
+                                         RemoteAccessible* aOldPosition,
+                                         RemoteAccessible* aNewPosition,
+                                         int16_t aReason, bool aFromUser) {
   if (!aNewPosition || !aFromUser) {
     return;
   }
@@ -186,13 +189,8 @@ void a11y::ProxyVirtualCursorChangeEvent(
 
   if (aReason == nsIAccessiblePivot::REASON_POINT) {
     sessionAcc->SendHoverEnterEvent(aNewPosition);
-  } else if (aBoundaryType == nsIAccessiblePivot::NO_BOUNDARY) {
+  } else {
     sessionAcc->SendAccessibilityFocusedEvent(aNewPosition);
-  }
-
-  if (aBoundaryType != nsIAccessiblePivot::NO_BOUNDARY) {
-    sessionAcc->SendTextTraversedEvent(aNewPosition, aNewStartOffset,
-                                       aNewEndOffset);
   }
 }
 

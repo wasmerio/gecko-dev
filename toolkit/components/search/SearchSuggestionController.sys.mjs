@@ -7,15 +7,10 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
   PromiseUtils: "resource://gre/modules/PromiseUtils.sys.mjs",
   SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
 });
-
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "FormHistory",
-  "resource://gre/modules/FormHistory.jsm"
-);
 
 const DEFAULT_FORM_HISTORY_PARAM = "searchbar-history";
 const HTTP_OK = 200;
@@ -341,7 +336,7 @@ export class SearchSuggestionController {
         // Do nothing since this is normal.
         return null;
       }
-      console.error("SearchSuggestionController rejection: " + reason);
+      console.error("SearchSuggestionController rejection:", reason);
       return null;
     }
     return Promise.all(promises).then(
@@ -649,8 +644,8 @@ export class SearchSuggestionController {
       if (typeof resultData === "string") {
         // Failure message
         console.error(
-          "SearchSuggestionController found an unexpected string value: " +
-            resultData
+          "SearchSuggestionController found an unexpected string value:",
+          resultData
         );
       } else if (resultData.localResults) {
         results.formHistoryResults = resultData.localResults;

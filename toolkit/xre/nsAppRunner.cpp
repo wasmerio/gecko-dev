@@ -1464,17 +1464,6 @@ nsXULAppInfo::GetAccessibilityEnabled(bool* aResult) {
 }
 
 NS_IMETHODIMP
-nsXULAppInfo::GetAccessibleHandlerUsed(bool* aResult) {
-#if defined(ACCESSIBILITY) && defined(XP_WIN)
-  *aResult = Preferences::GetBool("accessibility.handler.enabled", false) &&
-             a11y::IsHandlerRegistered();
-#else
-  *aResult = false;
-#endif
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsXULAppInfo::GetAccessibilityInstantiator(nsAString& aInstantiator) {
 #if defined(ACCESSIBILITY) && defined(XP_WIN)
   if (!GetAccService()) {
@@ -1495,15 +1484,6 @@ nsXULAppInfo::GetAccessibilityInstantiator(nsAString& aInstantiator) {
   }
 #else
   aInstantiator.Truncate();
-#endif
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXULAppInfo::GetShouldBlockIncompatJaws(bool* aResult) {
-  *aResult = false;
-#if defined(ACCESSIBILITY) && defined(XP_WIN)
-  *aResult = mozilla::a11y::Compatibility::IsOldJAWS();
 #endif
   return NS_OK;
 }
@@ -3570,19 +3550,7 @@ static bool RemoveComponentRegistries(nsIFile* aProfileDir,
   aLocalProfileDir->Clone(getter_AddRefs(file));
   if (!file) return false;
 
-#if defined(XP_UNIX) || defined(XP_BEOS)
-#  define PLATFORM_FASL_SUFFIX ".mfasl"
-#elif defined(XP_WIN)
-#  define PLATFORM_FASL_SUFFIX ".mfl"
-#endif
-
-  file->AppendNative(nsLiteralCString("XUL" PLATFORM_FASL_SUFFIX));
-  file->Remove(false);
-
-  file->SetNativeLeafName(nsLiteralCString("XPC" PLATFORM_FASL_SUFFIX));
-  file->Remove(false);
-
-  file->SetNativeLeafName("startupCache"_ns);
+  file->AppendNative("startupCache"_ns);
   nsresult rv = file->Remove(true);
   return NS_SUCCEEDED(rv) || rv == NS_ERROR_FILE_NOT_FOUND;
 }
@@ -4459,6 +4427,7 @@ enum struct ShouldNotProcessUpdatesReason {
   DevToolsLaunching,
   NotAnUpdatingTask,
   OtherInstanceRunning,
+  FirstStartup
 };
 
 const char* ShouldNotProcessUpdatesReasonAsString(
@@ -4477,6 +4446,14 @@ const char* ShouldNotProcessUpdatesReasonAsString(
 
 Maybe<ShouldNotProcessUpdatesReason> ShouldNotProcessUpdates(
     nsXREDirProvider& aDirProvider) {
+  // Don't process updates when launched from the installer.
+  // It's possible for a stale update to be present in the case of a paveover;
+  // ignore it and leave the update service to discard it.
+  if (ARG_FOUND == CheckArgExists("first-startup")) {
+    NS_WARNING("ShouldNotProcessUpdates(): FirstStartup");
+    return Some(ShouldNotProcessUpdatesReason::FirstStartup);
+  }
+
   // Do not process updates if we're launching devtools, as evidenced by
   // "--chrome ..." with the browser toolbox chrome document URL.
 
@@ -4767,6 +4744,18 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 #  ifdef MOZ_WIDGET_GTK
     else {
       gdk_display_manager_open_display(gdk_display_manager_get(), nullptr);
+    }
+#  endif
+    // Check that Wayland only and X11 only builds
+    // use appropriate displays.
+#  if defined(MOZ_WAYLAND) && !defined(MOZ_X11)
+    if (!GdkIsWaylandDisplay()) {
+      Output(true, "Wayland only build is missig Wayland display!\n");
+    }
+#  endif
+#  if !defined(MOZ_WAYLAND) && defined(MOZ_X11)
+    if (!GdkIsX11Display()) {
+      Output(true, "X11 only build is missig X11 display!\n");
     }
 #  endif
   }
@@ -5105,10 +5094,16 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 
   bool lastStartupWasCrash = CheckLastStartupWasCrash().unwrapOr(false);
 
+  CrashReporter::AnnotateCrashReport(
+      CrashReporter::Annotation::LastStartupWasCrash, lastStartupWasCrash);
+
   if (CheckArg("purgecaches") || PR_GetEnv("MOZ_PURGE_CACHES") ||
       lastStartupWasCrash || gSafeMode) {
     cachesOK = false;
   }
+
+  CrashReporter::AnnotateCrashReport(
+      CrashReporter::Annotation::StartupCacheValid, cachesOK && versionOK);
 
   // Every time a profile is loaded by a build with a different version,
   // it updates the compatibility.ini file saying what version last wrote
@@ -5836,7 +5831,8 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
     return NS_OK;
   });
 
-  mozilla::IOInterposerInit ioInterposerGuard;
+  mozilla::AutoIOInterposer ioInterposerGuard;
+  ioInterposerGuard.Init();
 
 #if defined(XP_WIN)
   // We should have already done this when we created the skeleton UI. However,
@@ -5942,7 +5938,7 @@ int XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
 nsresult XRE_InitCommandLine(int aArgc, char* aArgv[]) {
   nsresult rv = NS_OK;
 
-#if defined(OS_WIN)
+#if defined(XP_WIN)
   CommandLine::Init(aArgc, aArgv);
 #else
 

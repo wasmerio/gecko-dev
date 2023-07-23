@@ -3,9 +3,6 @@
 
 "use strict";
 
-const { Preferences } = ChromeUtils.importESModule(
-  "resource://gre/modules/Preferences.sys.mjs"
-);
 const { ctypes } = ChromeUtils.importESModule(
   "resource://gre/modules/ctypes.sys.mjs"
 );
@@ -41,15 +38,18 @@ add_task(async function setup() {
   Cc["@mozilla.org/updates/timer-manager;1"]
     .getService(Ci.nsIObserver)
     .observe(null, "utm-test-init", "");
-  Preferences.set("toolkit.telemetry.untrustedModulesPing.frequency", 0);
-  Preferences.set("app.update.url", "http://localhost");
+  Services.prefs.setIntPref(
+    "toolkit.telemetry.untrustedModulesPing.frequency",
+    0
+  );
+  Services.prefs.setStringPref("app.update.url", "http://localhost");
 
   let currentPid = Services.appinfo.processID;
   gCurrentPidStr = "browser.0x" + currentPid.toString(16);
 
   // Start the local ping server and setup Telemetry to use it during the tests.
   PingServer.start();
-  Preferences.set(
+  Services.prefs.setStringPref(
     TelemetryUtils.Preferences.Server,
     "http://localhost:" + PingServer.port
   );
@@ -57,7 +57,7 @@ add_task(async function setup() {
   return TelemetryController.testSetup();
 });
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   return PingServer.stop();
 });
 
@@ -156,7 +156,7 @@ add_task(async function test_send_ping() {
     );
     Assert.ok(typeof modRecord.trustFlags == "number", "'trustFlags' exists");
 
-    let mod = expectedModules.find(function(elem) {
+    let mod = expectedModules.find(function (elem) {
       return elem.nameMatch.test(modRecord.resolvedDllName);
     });
 

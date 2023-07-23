@@ -12,7 +12,7 @@ const TEST_URI =
 
 requestLongerTimeout(20);
 
-add_task(async function() {
+add_task(async function () {
   const hud = await openNewTabAndConsole(TEST_URI);
   const { jsterm } = hud;
   const { autocompletePopup: popup } = jsterm;
@@ -62,7 +62,7 @@ add_task(async function() {
 
   info("Waiting for pause");
   await pauseDebugger(dbg);
-  const stackFrames = dbg.selectors.getCallStackFrames();
+  const stackFrames = dbg.selectors.getCurrentThreadFrames();
 
   info("Opening Console again");
   await toolbox.selectTool("webconsole");

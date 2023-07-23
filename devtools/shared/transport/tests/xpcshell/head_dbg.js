@@ -12,7 +12,9 @@ var CC = Components.Constructor;
 const { require } = ChromeUtils.importESModule(
   "resource://devtools/shared/loader/Loader.sys.mjs"
 );
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 
 // We do not want to log packets by default, because in some tests,
 // we can be sending large amounts of data. The test harness has
@@ -138,7 +140,7 @@ function writeTestTempFile(fileName, content) {
 
 /** * Transport Factories ***/
 
-var socket_transport = async function() {
+var socket_transport = async function () {
   if (!DevToolsServer.listeningSockets) {
     const AuthenticatorType = DevToolsServer.Authenticators.get("PROMPT");
     const authenticator = new AuthenticatorType.Server();

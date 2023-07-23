@@ -46,7 +46,7 @@ class PanZoomControllerTest : BaseSessionTest() {
              }
              window.requestAnimationFrame(step);
            });
-            """.trimIndent()
+            """.trimIndent(),
         )
     }
 
@@ -181,7 +181,7 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "Visual viewport height equals to window.innerHeight",
             originalVH.roundToInt(),
-            equalTo(innerHeight.roundToInt())
+            equalTo(innerHeight.roundToInt()),
         )
 
         val originalScale = mainSession.evaluateJS("visualViewport.scale") as Double
@@ -251,7 +251,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             MotionEvent.ACTION_DOWN,
             x,
             y,
-            0
+            0,
         )
 
         val result = mainSession.panZoomController.onTouchEventForDetailResult(down)
@@ -262,12 +262,50 @@ class PanZoomControllerTest : BaseSessionTest() {
             MotionEvent.ACTION_UP,
             x,
             y,
-            0
+            0,
         )
 
         mainSession.panZoomController.onTouchEvent(up)
 
         return result
+    }
+
+    @WithDisplay(width = 100, height = 100)
+    @Test
+    fun pullToRefreshSubframe() {
+        setupDocument(PULL_TO_REFRESH_SUBFRAME_PATH)
+
+        // No touch handler and no room to scroll up
+        var value = sessionRule.waitForResult(sendDownEvent(50f, 10f))
+        assertThat(
+            "Touch when subframe has no room to scroll up should be unhandled",
+            value,
+            equalTo(PanZoomController.INPUT_RESULT_UNHANDLED),
+        )
+
+        // Touch handler with preventDefault
+        value = sessionRule.waitForResult(sendDownEvent(50f, 35f))
+        assertThat(
+            "Touch when content handles the input should indicate so",
+            value,
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
+        )
+
+        // Content with room to scroll up
+        value = sessionRule.waitForResult(sendDownEvent(50f, 60f))
+        assertThat(
+            "Touch when subframe has room to scroll up should be handled by content",
+            value,
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
+        )
+
+        // Touch handler without preventDefault and no room to scroll up
+        value = sessionRule.waitForResult(sendDownEvent(50f, 85f))
+        assertThat(
+            "Touch no room up and not handled by content should be unhandled",
+            value,
+            equalTo(PanZoomController.INPUT_RESULT_UNHANDLED),
+        )
     }
 
     @WithDisplay(width = 100, height = 100)
@@ -330,7 +368,7 @@ class PanZoomControllerTest : BaseSessionTest() {
              }
              window.requestAnimationFrame(step);
            });
-            """.trimIndent()
+            """.trimIndent(),
         )
     }
 
@@ -343,7 +381,7 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be UNHANDLED in root_100_percent.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_UNHANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_UNHANDLED),
         )
 
         // There is a 100% height iframe which is not scrollable.
@@ -354,17 +392,33 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be UNHANDLED in iframe_100_percent_height_no_scrollable.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_UNHANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_UNHANDLED),
         )
 
         // There is a 100% height iframe which is scrollable.
         setupTouchEventDocument(IFRAME_100_PERCENT_HEIGHT_SCROLLABLE_HTML_PATH, withEventHandler)
+
+        // Scroll down a bit to ensure the original tap cannot be the start of a
+        // pull to refresh gesture.
+        mainSession.evaluateJS(
+            """
+        const iframe = document.querySelector('iframe');
+        iframe.contentWindow.scrollTo({
+          left: 0,
+          top: 50,
+          behavior: 'instant',
+        });
+            """.trimIndent(),
+        )
+        waitForScroll(scrollWaitTimeout)
+        mainSession.flushApzRepaints()
+
         value = sessionRule.waitForResult(sendDownEvent(50f, 50f))
         // The input result should be handled in the iframe content.
         assertThat(
             "The input result should be HANDLED_CONTENT in iframe_100_percent_height_scrollable.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
         )
 
         // Scroll to the bottom of the iframe
@@ -376,7 +430,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             top: iframe.contentWindow.scrollMaxY,
             behavior: 'instant'
           });
-            """.trimIndent()
+            """.trimIndent(),
         )
         waitForScroll(scrollWaitTimeout)
         mainSession.flushApzRepaints()
@@ -386,7 +440,7 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be HANDLED_CONTENT in iframe_100_percent_height_scrollable.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
         )
 
         // The content height is greater than "screen height - the dynamic toolbar height".
@@ -395,7 +449,7 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be HANDLED in root_98vh.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED),
         )
 
         // The content height is equal to "screen height".
@@ -404,7 +458,7 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be HANDLED in root_100vh.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED),
         )
 
         // There is a 98vh iframe which is not scrollable.
@@ -414,17 +468,33 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be HANDLED in iframe_98vh_no_scrollable.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED),
         )
 
         // There is a 98vh iframe which is scrollable.
         setupTouchEventDocument(IFRAME_98VH_SCROLLABLE_HTML_PATH, withEventHandler)
+
+        // Scroll down a bit to ensure the original tap cannot be the start of a
+        // pull to refresh gesture.
+        mainSession.evaluateJS(
+            """
+        const iframe = document.querySelector('iframe');
+        iframe.contentWindow.scrollTo({
+          left: 0,
+          top: 50,
+          behavior: 'instant',
+        });
+            """.trimIndent(),
+        )
+        waitForScroll(scrollWaitTimeout)
+        mainSession.flushApzRepaints()
+
         value = sessionRule.waitForResult(sendDownEvent(50f, 50f))
         // The input result should be handled in the iframe content initially.
         assertThat(
             "The input result should be HANDLED_CONTENT initially in iframe_98vh_scrollable.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
         )
 
         // Scroll to the bottom of the iframe
@@ -436,7 +506,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             top: iframe.contentWindow.scrollMaxY,
             behavior: 'instant'
           });
-            """.trimIndent()
+            """.trimIndent(),
         )
         waitForScroll(scrollWaitTimeout)
         mainSession.flushApzRepaints()
@@ -446,7 +516,7 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be HANDLED in iframe_98vh_scrollable.html",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED),
         )
     }
 
@@ -480,7 +550,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             IFRAME_100_PERCENT_HEIGHT_NO_SCROLLABLE_HTML_PATH,
             IFRAME_100_PERCENT_HEIGHT_SCROLLABLE_HTML_PATH,
             IFRAME_98VH_SCROLLABLE_HTML_PATH,
-            IFRAME_98VH_NO_SCROLLABLE_HTML_PATH
+            IFRAME_98VH_NO_SCROLLABLE_HTML_PATH,
         )
         for (file in files) {
             setupDocument(file + "?event-prevent")
@@ -488,7 +558,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             assertThat(
                 "The input result should be HANDLED_CONTENT in " + file,
                 value,
-                equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT)
+                equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
             )
 
             // Scroll to the bottom edge if it's possible.
@@ -501,7 +571,7 @@ class PanZoomControllerTest : BaseSessionTest() {
               top: targetWindow.scrollMaxY,
               behavior: 'instant'
             });
-                """.trimIndent()
+                """.trimIndent(),
             )
             waitForScroll(scrollWaitTimeout)
             mainSession.flushApzRepaints()
@@ -510,7 +580,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             assertThat(
                 "The input result should be HANDLED_CONTENT in " + file,
                 value,
-                equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT)
+                equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
             )
         }
     }
@@ -524,7 +594,7 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The input result should be HANDLED_CONTENT",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED_CONTENT),
         )
     }
 
@@ -536,7 +606,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             MotionEvent.ACTION_DOWN,
             50f,
             90f,
-            0
+            0,
         )
 
         val result = mainSession.panZoomController.onTouchEventForDetailResult(down)
@@ -547,7 +617,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             MotionEvent.ACTION_MOVE,
             50f,
             70f,
-            0
+            0,
         )
         mainSession.panZoomController.onTouchEvent(move)
         move = MotionEvent.obtain(
@@ -556,7 +626,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             MotionEvent.ACTION_MOVE,
             50f,
             30f,
-            0
+            0,
         )
         mainSession.panZoomController.onTouchEvent(move)
 
@@ -566,7 +636,7 @@ class PanZoomControllerTest : BaseSessionTest() {
             MotionEvent.ACTION_UP,
             50f,
             10f,
-            0
+            0,
         )
         mainSession.panZoomController.onTouchEvent(up)
         return result
@@ -590,14 +660,14 @@ class PanZoomControllerTest : BaseSessionTest() {
         assertThat(
             "The initial input result should be HANDLED",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED),
         )
         // Trigger the next fling during the initial scrolling.
         value = sessionRule.waitForResult(fling())
         assertThat(
             "The input result should be IGNORED during the fast fling",
             value,
-            equalTo(PanZoomController.INPUT_RESULT_HANDLED)
+            equalTo(PanZoomController.INPUT_RESULT_HANDLED),
         )
     }
 

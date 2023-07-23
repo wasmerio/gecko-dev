@@ -1780,9 +1780,10 @@ bool Instance::init(JSContext* cx, const JSObjectVector& funcImports,
       }
 
       // Find the shape using the class and recursion group
+      const ObjectFlags objectFlags = {ObjectFlag::NotExtensible};
       typeDefData->shape =
           WasmGCShape::getShape(cx, clasp, cx->realm(), TaggedProto(),
-                                &typeDef.recGroup(), ObjectFlags());
+                                &typeDef.recGroup(), objectFlags);
       if (!typeDefData->shape) {
         return false;
       }
@@ -2534,7 +2535,7 @@ WasmStructObject* Instance::constantStructNewDefault(JSContext* cx,
   TypeDefInstanceData* typeDefData = typeDefInstanceData(typeIndex);
   // We assume that constant structs will have a long lifetime and hence
   // allocate them directly in the tenured heap.
-  return WasmStructObject::createStruct(cx, typeDefData, gc::TenuredHeap);
+  return WasmStructObject::createStruct(cx, typeDefData, gc::Heap::Tenured);
 }
 
 WasmArrayObject* Instance::constantArrayNewDefault(JSContext* cx,
@@ -2543,7 +2544,7 @@ WasmArrayObject* Instance::constantArrayNewDefault(JSContext* cx,
   TypeDefInstanceData* typeDefData = typeDefInstanceData(typeIndex);
   // We assume that constant arrays will have a long lifetime and hence
   // allocate them directly in the tenured heap.
-  return WasmArrayObject::createArray(cx, typeDefData, gc::TenuredHeap,
+  return WasmArrayObject::createArray(cx, typeDefData, gc::Heap::Tenured,
                                       numElements);
 }
 
@@ -2606,7 +2607,8 @@ JSString* Instance::createDisplayURL(JSContext* cx) {
   // fetched Response.
 
   if (metadata().filenameIsURL) {
-    return NewStringCopyZ<CanGC>(cx, metadata().filename.get());
+    const char* filename = metadata().filename.get();
+    return NewStringCopyUTF8N(cx, JS::UTF8Chars(filename, strlen(filename)));
   }
 
   // Otherwise, build wasm module URL from following parts:

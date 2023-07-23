@@ -7,11 +7,8 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -446,10 +443,10 @@ export class TouchBarHelper {
     switch (topic) {
       case "touchbar-location-change":
         let updatedInputs = ["Back", "Forward"];
-        gBuiltInInputs.Back.disabled = !TouchBarHelper.window.gBrowser
-          .canGoBack;
-        gBuiltInInputs.Forward.disabled = !TouchBarHelper.window.gBrowser
-          .canGoForward;
+        gBuiltInInputs.Back.disabled =
+          !TouchBarHelper.window.gBrowser.canGoBack;
+        gBuiltInInputs.Forward.disabled =
+          !TouchBarHelper.window.gBrowser.canGoForward;
         if (subject.QueryInterface(Ci.nsIWebProgress)?.isTopLevel) {
           this.activeUrl = data;
           // ReaderView button is disabled on every toplevel location change
@@ -657,7 +654,7 @@ export class TouchBarInput {
     // In the TouchBarInput constuctor, we filtered so children contains only
     // those inputs with titles to be localized. We can be confident that the
     // results in titles match up with the inputs to be localized.
-    children.forEach(function(child, index) {
+    children.forEach(function (child, index) {
       child.title = titles[index];
       localizedStrings[child.key] = child.title;
     });

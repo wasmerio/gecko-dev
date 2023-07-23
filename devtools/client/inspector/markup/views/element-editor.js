@@ -210,7 +210,7 @@ ElementEditor.prototype = {
           () => {
             doMods.apply();
           },
-          function() {
+          function () {
             undoMods.apply();
           }
         );
@@ -339,6 +339,7 @@ ElementEditor.prototype = {
     this.updateDisplayBadge();
     this.updateCustomBadge();
     this.updateScrollableBadge();
+    this.updateContainerBadge();
     this.updateTextEditor();
     this.updateUnavailableChildren();
     this.updateOverflowBadge();
@@ -507,6 +508,32 @@ ElementEditor.prototype = {
     this.elt.appendChild(this._customBadge);
   },
 
+  updateContainerBadge() {
+    const showContainerBadge =
+      this.node.containerType === "inline-size" ||
+      this.node.containerType === "size";
+
+    if (this._containerBadge && !showContainerBadge) {
+      this._containerBadge.remove();
+      this._containerBadge = null;
+    } else if (showContainerBadge && !this._containerBadge) {
+      this._createContainerBadge();
+    }
+  },
+
+  _createContainerBadge() {
+    this._containerBadge = this.doc.createElement("div");
+    this._containerBadge.classList.add("inspector-badge");
+    this._containerBadge.dataset.container = "true";
+    this._containerBadge.title = `container-type: ${this.node.containerType}`;
+
+    this._containerBadge.append(this.doc.createTextNode("container"));
+    // TODO: Move the logic to handle badges position in a dedicated helper (See Bug 1837921).
+    // Ideally badges order should be [event][display][container][custom]
+    this.elt.insertBefore(this._containerBadge, this._customBadge);
+    this.markup.emit("badge-added-event");
+  },
+
   /**
    * If node causes overflow, toggle its overflow highlight if its scrollable ancestor's
    * scrollable badge is active/inactive.
@@ -520,15 +547,14 @@ ElementEditor.prototype = {
 
     if (this.node.causesOverflow) {
       try {
-        const scrollableAncestor = await this.node.walkerFront.getScrollableAncestorNode(
-          this.node
-        );
+        const scrollableAncestor =
+          await this.node.walkerFront.getScrollableAncestorNode(this.node);
         const markupContainer = scrollableAncestor
           ? this.markup.getContainer(scrollableAncestor)
           : null;
 
-        showOverflowHighlight = !!markupContainer?.editor
-          .highlightingOverflowCausingElements;
+        showOverflowHighlight =
+          !!markupContainer?.editor.highlightingOverflowCausingElements;
       } catch (e) {
         // This call might fail if called asynchrously after the toolbox is finished
         // closing.
@@ -1074,9 +1100,8 @@ ElementEditor.prototype = {
    * highlights their container if the scroll badge is active.
    */
   async onScrollableBadgeClick() {
-    this.highlightingOverflowCausingElements = this._scrollableBadge.classList.toggle(
-      "active"
-    );
+    this.highlightingOverflowCausingElements =
+      this._scrollableBadge.classList.toggle("active");
 
     const { nodes } = await this.node.walkerFront.getOverflowCausingElements(
       this.node

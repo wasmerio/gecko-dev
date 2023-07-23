@@ -6,6 +6,8 @@
 
 #include "TextControlState.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/IMEContentObserver.h"
+#include "mozilla/IMEStateManager.h"
 #include "mozilla/TextInputListener.h"
 
 #include "nsCOMPtr.h"
@@ -1719,17 +1721,17 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
   PresShell* presShell = presContext->GetPresShell();
 
   // Setup the editor flags
-  uint32_t editorFlags = nsIEditor::eEditorPlaintextMask;
+
+  // Spell check is diabled at creation time. It is enabled once
+  // the editor comes into focus.
+  uint32_t editorFlags = nsIEditor::eEditorSkipSpellCheck;
+
   if (IsSingleLineTextControl()) {
     editorFlags |= nsIEditor::eEditorSingleLineMask;
   }
   if (IsPasswordTextControl()) {
     editorFlags |= nsIEditor::eEditorPasswordMask;
   }
-
-  // Spell check is diabled at creation time. It is enabled once
-  // the editor comes into focus.
-  editorFlags |= nsIEditor::eEditorSkipSpellCheck;
 
   bool shouldInitializeEditor = false;
   RefPtr<TextEditor> newTextEditor;  // the editor that we might create
@@ -1887,8 +1889,8 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
   // Check if the readonly attribute is set.
   //
   // TODO: Should probably call IsDisabled(), as it is cheaper.
-  if (mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::readonly) ||
-      mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::disabled)) {
+  if (mTextCtrlElement->HasAttr(nsGkAtoms::readonly) ||
+      mTextCtrlElement->HasAttr(nsGkAtoms::disabled)) {
     editorFlags |= nsIEditor::eEditorReadonlyMask;
   }
 
@@ -1930,21 +1932,10 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
     }
   }
 
-  if (IsPasswordTextControl()) {
-    // Disable undo for <input type="password">.  Note that we want to do this
-    // at the very end of InitEditor(), so the calls to EnableUndoRedo() when
-    // setting the default value don't screw us up.  Since changing the
-    // control type does a reframe, we don't have to worry about dynamic type
-    // changes here.
-    DebugOnly<bool> disabledUndoRedo = newTextEditor->DisableUndoRedo();
-    NS_WARNING_ASSERTION(disabledUndoRedo,
-                         "Failed to disable undo/redo transaction");
-  } else {
-    DebugOnly<bool> enabledUndoRedo =
-        newTextEditor->EnableUndoRedo(TextControlElement::DEFAULT_UNDO_CAP);
-    NS_WARNING_ASSERTION(enabledUndoRedo,
-                         "Failed to enable undo/redo transaction");
-  }
+  DebugOnly<bool> enabledUndoRedo =
+      newTextEditor->EnableUndoRedo(TextControlElement::DEFAULT_UNDO_CAP);
+  NS_WARNING_ASSERTION(enabledUndoRedo,
+                       "Failed to enable undo/redo transaction");
 
   if (!mEditorInitialized) {
     newTextEditor->PostCreate();
@@ -2959,6 +2950,14 @@ bool TextControlState::SetValueWithoutTextEditor(
       if (mBoundFrame) {
         mBoundFrame->UpdateValueDisplay(true);
       }
+
+      // If the text control element has focus, IMEContentObserver is not
+      // observing the content changes due to no bound frame or no TextEditor.
+      // Therefore, we need to let IMEContentObserver know all values are being
+      // replaced.
+      if (IMEContentObserver* observer = GetIMEContentObserver()) {
+        observer->OnTextControlValueChangedWhileNotObservable(mValue);
+      }
     }
 
     // If this is called as part of user input, we need to dispatch "input"
@@ -3049,6 +3048,14 @@ void TextControlState::GetPreviewText(nsAString& aValue) {
 
 bool TextControlState::EditorHasComposition() {
   return mTextEditor && mTextEditor->IsIMEComposing();
+}
+
+IMEContentObserver* TextControlState::GetIMEContentObserver() const {
+  if (NS_WARN_IF(!mTextCtrlElement) ||
+      mTextCtrlElement != IMEStateManager::GetFocusedElement()) {
+    return nullptr;
+  }
+  return IMEStateManager::GetActiveContentObserver();
 }
 
 }  // namespace mozilla

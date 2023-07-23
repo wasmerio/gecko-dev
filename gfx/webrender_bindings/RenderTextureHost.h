@@ -44,6 +44,14 @@ class RenderTextureHost {
  public:
   RenderTextureHost();
 
+  virtual gfx::SurfaceFormat GetFormat() const {
+    return gfx::SurfaceFormat::UNKNOWN;
+  }
+
+  virtual gfx::YUVRangedColorSpace GetYUVColorSpace() const {
+    return gfx::YUVRangedColorSpace::Default;
+  }
+
   virtual wr::WrExternalImage Lock(uint8_t aChannelIndex, gl::GLContext* aGL);
 
   virtual void Unlock() {}
@@ -105,6 +113,14 @@ class RenderTextureHost {
   virtual bool IsWrappingAsyncRemoteTexture() { return false; }
 
   virtual void Destroy();
+
+  virtual void SetIsSoftwareDecodedVideo() {
+    MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+  }
+  virtual bool IsSoftwareDecodedVideo() {
+    MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+    return false;
+  }
 
  protected:
   virtual ~RenderTextureHost();

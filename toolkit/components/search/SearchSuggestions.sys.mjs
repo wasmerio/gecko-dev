@@ -2,23 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { FormAutoCompleteResult } from "resource://gre/modules/nsFormAutoCompleteResult.sys.mjs";
+import { FormAutoCompleteResult } from "resource://gre/modules/FormAutoCompleteResult.sys.mjs";
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  FormAutoCompleteResult: "resource://gre/modules/FormAutoComplete.sys.mjs",
+  FormHistoryClient: "resource://gre/modules/FormAutoComplete.sys.mjs",
+
   SearchSuggestionController:
     "resource://gre/modules/SearchSuggestionController.sys.mjs",
 });
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "FormHistoryClient",
-  "resource://gre/modules/FormAutoComplete.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "FormAutoCompleteResult",
-  "resource://gre/modules/FormAutoComplete.jsm"
-);
 
 /**
  * SuggestAutoComplete is a base class that implements nsIAutoCompleteSearch
@@ -50,9 +43,6 @@ class SuggestAutoComplete {
     if (this.#listener) {
       let result = new FormAutoCompleteResult(
         searchString,
-        Ci.nsIAutoCompleteResult.RESULT_SUCCESS,
-        0,
-        "",
         results.map(result => ({
           value: result,
           label: result,
@@ -125,7 +115,8 @@ class SuggestAutoComplete {
       })
       .catch(result =>
         console.error(
-          "Could not initialize search service, bailing out: " + result
+          "Could not initialize search service, bailing out:",
+          result
         )
       );
   }

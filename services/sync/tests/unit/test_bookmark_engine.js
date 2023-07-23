@@ -7,14 +7,10 @@ const { BookmarkHTMLUtils } = ChromeUtils.importESModule(
 const { BookmarkJSONUtils } = ChromeUtils.importESModule(
   "resource://gre/modules/BookmarkJSONUtils.sys.mjs"
 );
-const {
-  Bookmark,
-  BookmarkFolder,
-  BookmarksEngine,
-  Livemark,
-} = ChromeUtils.importESModule(
-  "resource://services-sync/engines/bookmarks.sys.mjs"
-);
+const { Bookmark, BookmarkFolder, BookmarksEngine, Livemark } =
+  ChromeUtils.importESModule(
+    "resource://services-sync/engines/bookmarks.sys.mjs"
+  );
 const { Service } = ChromeUtils.importESModule(
   "resource://services-sync/service.sys.mjs"
 );
@@ -58,7 +54,9 @@ async function fetchAllRecordIds() {
 async function cleanupEngine(engine) {
   await engine.resetClient();
   await engine._store.wipe();
-  Svc.Prefs.resetBranch("");
+  for (const pref of Svc.PrefBranch.getChildList("")) {
+    Svc.PrefBranch.clearUserPref(pref);
+  }
   Service.recordManager.clearCache();
   // Note we don't finalize the engine here as add_bookmark_test() does.
 }
@@ -81,7 +79,7 @@ add_task(async function test_buffer_timeout() {
   await Service.recordManager.clearCache();
   await PlacesSyncUtils.bookmarks.reset();
   let engine = new BookmarksEngine(Service);
-  engine._newWatchdog = function() {
+  engine._newWatchdog = function () {
     // Return an already-aborted watchdog, so that we can abort merges
     // immediately.
     let watchdog = Async.watchdog();
@@ -163,7 +161,7 @@ add_bookmark_test(async function test_maintenance_after_failure(engine) {
   try {
     let syncStartup = engine._syncStartup;
     let syncError = new Error("Something is rotten in the state of Places");
-    engine._syncStartup = function() {
+    engine._syncStartup = function () {
       throw syncError;
     };
 
@@ -327,21 +325,6 @@ add_bookmark_test(async function test_delete_invalid_roots_from_server(engine) {
         "fetchLocalChangeRecords",
       ],
       "Bookmarks engine should report all merge steps"
-    );
-
-    await Assert.rejects(
-      PlacesUtils.promiseItemId("readinglist"),
-      /no item found for the given GUID/,
-      "Should not apply Reading List root"
-    );
-    await Assert.rejects(
-      PlacesUtils.promiseItemId(listBmk.id),
-      /no item found for the given GUID/,
-      "Should not apply items in Reading List"
-    );
-    ok(
-      (await PlacesUtils.promiseItemId(newBmk.id)) > 0,
-      "Should apply new bookmark"
     );
 
     deepEqual(
@@ -510,7 +493,7 @@ async function test_restoreOrImport(engine, { replace }) {
       "Verify that there's only one bookmark on the server, and it's Thunderbird."
     );
     // Of course, there's also the Bookmarks Toolbar and Bookmarks Menu...
-    let wbos = collection.keys(function(id) {
+    let wbos = collection.keys(function (id) {
       return !["menu", "toolbar", "mobile", "unfiled", folder1.guid].includes(
         id
       );
@@ -573,15 +556,12 @@ async function test_restoreOrImport(engine, { replace }) {
 
     _("Verify that there's the right bookmarks on the server.");
     // Of course, there's also the Bookmarks Toolbar and Bookmarks Menu...
-    let payloads = server
-      .user("foo")
-      .collection("bookmarks")
-      .payloads();
-    let bookmarkWBOs = payloads.filter(function(wbo) {
+    let payloads = server.user("foo").collection("bookmarks").payloads();
+    let bookmarkWBOs = payloads.filter(function (wbo) {
       return wbo.type == "bookmark";
     });
 
-    let folderWBOs = payloads.filter(function(wbo) {
+    let folderWBOs = payloads.filter(function (wbo) {
       return (
         wbo.type == "folder" &&
         wbo.id != "menu" &&
@@ -713,18 +693,13 @@ add_task(async function test_mismatched_types() {
     await store.applyIncoming(oldR);
     await engine._apply();
     _("Applied old. It's a folder.");
-    let oldID = await PlacesUtils.promiseItemId(oldR.id);
+    let oldID = await PlacesTestUtils.promiseItemId(oldR.id);
     _("Old ID: " + oldID);
     let oldInfo = await PlacesUtils.bookmarks.fetch(oldR.id);
     Assert.equal(oldInfo.type, PlacesUtils.bookmarks.TYPE_FOLDER);
 
     await store.applyIncoming(newR);
     await engine._apply();
-    await Assert.rejects(
-      PlacesUtils.promiseItemId(newR.id),
-      /no item found for the given GUID/,
-      "Should not apply Livemark"
-    );
   } finally {
     await cleanup(engine, server);
     await engine.finalize();
@@ -746,16 +721,15 @@ add_bookmark_test(async function test_misreconciled_root(engine) {
 
   // Let's find out where the toolbar is right now.
   let toolbarBefore = await store.createRecord("toolbar", "bookmarks");
-  let toolbarIDBefore = await PlacesUtils.promiseItemId(
+  let toolbarIDBefore = await PlacesTestUtils.promiseItemId(
     PlacesUtils.bookmarks.toolbarGuid
   );
   Assert.notEqual(-1, toolbarIDBefore);
 
   let parentRecordIDBefore = toolbarBefore.parentid;
-  let parentGUIDBefore = PlacesSyncUtils.bookmarks.recordIdToGuid(
-    parentRecordIDBefore
-  );
-  let parentIDBefore = await PlacesUtils.promiseItemId(parentGUIDBefore);
+  let parentGUIDBefore =
+    PlacesSyncUtils.bookmarks.recordIdToGuid(parentRecordIDBefore);
+  let parentIDBefore = await PlacesTestUtils.promiseItemId(parentGUIDBefore);
   Assert.equal("string", typeof parentGUIDBefore);
 
   _("Current parent: " + parentGUIDBefore + " (" + parentIDBefore + ").");
@@ -781,12 +755,11 @@ add_bookmark_test(async function test_misreconciled_root(engine) {
   // the real GUID, instead using a generated one. Sync does the translation.
   let toolbarAfter = await store.createRecord("toolbar", "bookmarks");
   let parentRecordIDAfter = toolbarAfter.parentid;
-  let parentGUIDAfter = PlacesSyncUtils.bookmarks.recordIdToGuid(
-    parentRecordIDAfter
-  );
-  let parentIDAfter = await PlacesUtils.promiseItemId(parentGUIDAfter);
+  let parentGUIDAfter =
+    PlacesSyncUtils.bookmarks.recordIdToGuid(parentRecordIDAfter);
+  let parentIDAfter = await PlacesTestUtils.promiseItemId(parentGUIDAfter);
   Assert.equal(
-    await PlacesUtils.promiseItemGuid(toolbarIDBefore),
+    await PlacesTestUtils.promiseItemGuid(toolbarIDBefore),
     PlacesUtils.bookmarks.toolbarGuid
   );
   Assert.equal(parentGUIDBefore, parentGUIDAfter);
@@ -1183,7 +1156,7 @@ add_task(async function test_resume_buffer() {
     // Replace applyIncomingBatch with a custom one that calls the original,
     // but forces it to throw on the 2nd chunk.
     let origApplyIncomingBatch = engine._store.applyIncomingBatch;
-    engine._store.applyIncomingBatch = function(records) {
+    engine._store.applyIncomingBatch = function (records) {
       if (records.length > batchChunkSize) {
         // Hacky way to make reading from the batchChunkSize'th record throw.
         delete records[batchChunkSize];

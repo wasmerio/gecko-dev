@@ -3,9 +3,6 @@
 
 "use strict";
 
-const { Preferences } = ChromeUtils.importESModule(
-  "resource://gre/modules/Preferences.sys.mjs"
-);
 const { AddonUtils } = ChromeUtils.importESModule(
   "resource://services-sync/addonutils.sys.mjs"
 );
@@ -13,9 +10,7 @@ const { AddonUtils } = ChromeUtils.importESModule(
 const HTTP_PORT = 8888;
 const SERVER_ADDRESS = "http://127.0.0.1:8888";
 
-var prefs = new Preferences();
-
-prefs.set(
+Services.prefs.setStringPref(
   "extensions.getAddons.get.url",
   SERVER_ADDRESS + "/search/guid:%IDS%"
 );
@@ -119,36 +114,32 @@ add_task(async function test_source_uri_rewrite() {
   // skewed.
 
   // We resort to monkeypatching because of the API design.
-  let oldFunction = Object.getPrototypeOf(AddonUtils)
-    .installAddonFromSearchResult;
+  let oldFunction =
+    Object.getPrototypeOf(AddonUtils).installAddonFromSearchResult;
 
   let installCalled = false;
-  Object.getPrototypeOf(
-    AddonUtils
-  ).installAddonFromSearchResult = async function testInstallAddon(
-    addon,
-    metadata
-  ) {
-    Assert.equal(
-      SERVER_ADDRESS + "/require.xpi?src=sync",
-      addon.sourceURI.spec
-    );
+  Object.getPrototypeOf(AddonUtils).installAddonFromSearchResult =
+    async function testInstallAddon(addon, metadata) {
+      Assert.equal(
+        SERVER_ADDRESS + "/require.xpi?src=sync",
+        addon.sourceURI.spec
+      );
 
-    installCalled = true;
+      installCalled = true;
 
-    const install = await AddonUtils.getInstallFromSearchResult(addon);
-    Assert.equal(
-      SERVER_ADDRESS + "/require.xpi?src=sync",
-      install.sourceURI.spec
-    );
-    Assert.deepEqual(
-      install.installTelemetryInfo,
-      { source: "sync" },
-      "Got the expected installTelemetryInfo"
-    );
+      const install = await AddonUtils.getInstallFromSearchResult(addon);
+      Assert.equal(
+        SERVER_ADDRESS + "/require.xpi?src=sync",
+        install.sourceURI.spec
+      );
+      Assert.deepEqual(
+        install.installTelemetryInfo,
+        { source: "sync" },
+        "Got the expected installTelemetryInfo"
+      );
 
-    return { id: addon.id, addon, install };
-  };
+      return { id: addon.id, addon, install };
+    };
 
   let server = createAndStartHTTPServer();
 

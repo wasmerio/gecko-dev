@@ -6,8 +6,11 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
 
+ChromeUtils.defineESModuleGetters(lazy, {
+  AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+});
+
 XPCOMUtils.defineLazyModuleGetters(lazy, {
-  AboutNewTab: "resource:///modules/AboutNewTab.jsm",
   ASRouter: "resource://activity-stream/lib/ASRouter.jsm",
 });
 
@@ -24,6 +27,23 @@ export class AboutNewTabParent extends JSWindowActorParent {
     let browsingContext = message.target.browsingContext;
     let browser = browsingContext.top.embedderElement;
     return browser ? gLoadedTabs.get(browser) : null;
+  }
+
+  handleEvent(event) {
+    if (event.type == "SwapDocShells") {
+      let oldBrowser = this.browsingContext.top.embedderElement;
+      let newBrowser = event.detail;
+
+      let tabDetails = gLoadedTabs.get(oldBrowser);
+      if (tabDetails) {
+        tabDetails.browser = newBrowser;
+        gLoadedTabs.delete(oldBrowser);
+        gLoadedTabs.set(newBrowser, tabDetails);
+
+        oldBrowser.removeEventListener("SwapDocShells", this);
+        newBrowser.addEventListener("SwapDocShells", this);
+      }
+    }
   }
 
   async receiveMessage(message) {
@@ -55,6 +75,9 @@ export class AboutNewTabParent extends JSWindowActorParent {
         };
         gLoadedTabs.set(browser, tabDetails);
 
+        browser.addEventListener("SwapDocShells", this);
+        browser.addEventListener("EndSwapDocShells", this);
+
         this.notifyActivityStreamChannel("onNewTabInit", message, tabDetails);
         break;
       }
@@ -76,6 +99,8 @@ export class AboutNewTabParent extends JSWindowActorParent {
         if (!tabDetails) {
           return;
         }
+
+        tabDetails.browser.removeEventListener("EndSwapDocShells", this);
 
         gLoadedTabs.delete(tabDetails.browser);
 

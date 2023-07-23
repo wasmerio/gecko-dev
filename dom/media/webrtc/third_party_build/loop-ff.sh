@@ -7,7 +7,7 @@ LOOP_OUTPUT_LOG=$LOG_DIR/log-loop-ff.txt
 
 function echo_log()
 {
-  echo "===loop-ff=== $@" 2>&1| tee --append $LOOP_OUTPUT_LOG
+  echo "===loop-ff=== $@" 2>&1| tee -a $LOOP_OUTPUT_LOG
 }
 
 function show_error_msg()
@@ -49,9 +49,9 @@ if [ "x$MOZ_ADVANCE_ONE_COMMIT" = "x" ]; then
   MOZ_ADVANCE_ONE_COMMIT=""
 fi
 
-if [ "x$SKIP_NEXT_REVERT_CHK" = "x" ]; then
-  SKIP_NEXT_REVERT_CHK="0"
-fi
+# if [ "x$SKIP_NEXT_REVERT_CHK" = "x" ]; then
+#   SKIP_NEXT_REVERT_CHK="0"
+# fi
 
 MOZ_CHANGED=0
 GIT_CHANGED=0
@@ -71,9 +71,17 @@ rm -f $LOOP_OUTPUT_LOG
 hg revert -C third_party/libwebrtc/README.moz-ff-commit &> /dev/null
 
 # check for a resume situation from fast-forward-libwebrtc.sh
+RESUME_FILE=$STATE_DIR/fast_forward.resume
 RESUME=""
-if [ -f $STATE_DIR/resume_state ]; then
-  RESUME=`tail -1 $STATE_DIR/resume_state`
+if [ -f $RESUME_FILE ]; then
+  RESUME=`tail -1 $RESUME_FILE`
+fi
+
+# check for the situation where we've encountered an error when running
+# detect_upstream_revert.sh and should skip running it a second time.
+SKIP_NEXT_REVERT_CHK=""
+if [ -f $STATE_DIR/loop.skip-revert-detect ]; then
+  SKIP_NEXT_REVERT_CHK=`tail -1 $STATE_DIR/loop.skip-revert-detect`
 fi
 
 ERROR_HELP=$"
@@ -118,14 +126,15 @@ echo_log "Commits remaining: $COMMITS_REMAINING"
 ERROR_HELP=$"Some portion of the detection and/or fixing of upstream revert commits
 has failed.  Please fix the state of the git hub repo at: $MOZ_LIBWEBRTC_SRC.
 When fixed, please resume this script with the following command:
-    SKIP_NEXT_REVERT_CHK=1 bash $SCRIPT_DIR/loop-ff.sh
+    bash $SCRIPT_DIR/loop-ff.sh
 "
-if [ "x$SKIP_NEXT_REVERT_CHK" == "x0" ]; then
+if [ "x$SKIP_NEXT_REVERT_CHK" == "x" ] && [ "x$RESUME" == "x" ]; then
   echo_log "Check for upcoming revert commit"
+  echo "true" > $STATE_DIR/loop.skip-revert-detect
   AUTO_FIX_REVERT_AS_NOOP=1 bash $SCRIPT_DIR/detect_upstream_revert.sh \
-      2>&1| tee --append $LOOP_OUTPUT_LOG
+      2>&1| tee -a $LOOP_OUTPUT_LOG
 fi
-SKIP_NEXT_REVERT_CHK="0"
+echo "" > $STATE_DIR/loop.skip-revert-detect
 ERROR_HELP=""
 
 echo_log "Looking for $STATE_DIR/$MOZ_LIBWEBRTC_NEXT_BASE.no-op-cherry-pick-msg"
@@ -135,7 +144,7 @@ if [ -f $STATE_DIR/$MOZ_LIBWEBRTC_NEXT_BASE.no-op-cherry-pick-msg ]; then
 fi
 
 echo_log "Moving from moz-libwebrtc commit $MOZ_LIBWEBRTC_BASE to $MOZ_LIBWEBRTC_NEXT_BASE"
-bash $SCRIPT_DIR/fast-forward-libwebrtc.sh 2>&1| tee --append $LOOP_OUTPUT_LOG
+bash $SCRIPT_DIR/fast-forward-libwebrtc.sh 2>&1| tee -a $LOOP_OUTPUT_LOG
 
 MOZ_CHANGED=`hg diff -c tip --stat \
    | egrep -ve "README.moz-ff-commit|README.mozilla|files changed," \
@@ -175,7 +184,7 @@ HANDLE_NOOP_COMMIT=""
     --patch-path "third_party/libwebrtc/moz-patch-stack" \
     --state-path $STATE_DIR \
     --target-branch-head $MOZ_TARGET_UPSTREAM_BRANCH_HEAD \
-    2>&1| tee --append $LOOP_OUTPUT_LOG
+    2>&1| tee -a $LOOP_OUTPUT_LOG
 
 MODIFIED_BUILD_RELATED_FILE_CNT=`hg diff -c tip --stat \
     --include 'third_party/libwebrtc/**BUILD.gn' \
@@ -200,7 +209,7 @@ echo_log "Modified BUILD.gn (or webrtc.gni) files: $MODIFIED_BUILD_RELATED_FILE_
 if [ "x$MODIFIED_BUILD_RELATED_FILE_CNT" != "x0" ]; then
   echo_log "Regenerate build files"
   ./mach python python/mozbuild/mozbuild/gn_processor.py \
-      $SCRIPT_DIR/gn-configs/webrtc.json 2>&1| tee --append $LOOP_OUTPUT_LOG
+      $SCRIPT_DIR/gn-configs/webrtc.json 2>&1| tee -a $LOOP_OUTPUT_LOG
 
   MOZ_BUILD_CHANGE_CNT=`hg status third_party/libwebrtc \
       --include 'third_party/libwebrtc/**moz.build' | wc -l | tr -d " "`
@@ -208,7 +217,7 @@ if [ "x$MODIFIED_BUILD_RELATED_FILE_CNT" != "x0" ]; then
     echo_log "Detected modified moz.build files, commiting"
   fi
 
-  bash $SCRIPT_DIR/commit-build-file-changes.sh 2>&1| tee --append $LOOP_OUTPUT_LOG
+  bash $SCRIPT_DIR/commit-build-file-changes.sh 2>&1| tee -a $LOOP_OUTPUT_LOG
 fi
 ERROR_HELP=""
 
@@ -217,7 +226,7 @@ The test build has failed.  Most likely this is due to an upstream api change th
 must be reflected in Mozilla code outside of the third_party/libwebrtc directory.
 "
 echo_log "Test build"
-./mach build 2>&1| tee --append $LOOP_OUTPUT_LOG
+./mach build 2>&1| tee -a $LOOP_OUTPUT_LOG
 ERROR_HELP=""
 
 if [ ! "x$MOZ_STOP_AFTER_COMMIT" = "x" ]; then

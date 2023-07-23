@@ -13,7 +13,6 @@
 #include "lib/jxl/ac_strategy.h"
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/base/padded_bytes.h"
-#include "lib/jxl/base/profiler.h"
 #include "lib/jxl/base/span.h"
 #include "lib/jxl/color_encoding_internal.h"
 #include "lib/jxl/common.h"
@@ -39,8 +38,6 @@ Status InitializePassesEncoder(const Image3F& opsin, const JxlCmsInterface& cms,
                                ThreadPool* pool, PassesEncoderState* enc_state,
                                ModularFrameEncoder* modular_frame_encoder,
                                AuxOut* aux_out) {
-  PROFILER_FUNC;
-
   PassesSharedState& JXL_RESTRICT shared = enc_state->shared;
 
   enc_state->histogram_idx.resize(shared.frame_dim.num_groups);
@@ -173,8 +170,10 @@ Status InitializePassesEncoder(const Image3F& opsin, const JxlCmsInterface& cms,
     // dc_frame_info.dc_level = shared.frame_header.dc_level + 1, and
     // dc_frame_info.dc_level is used by EncodeFrame. However, if EncodeFrame
     // outputs multiple frames, this assumption could be wrong.
-    shared.dc_storage =
-        CopyImage(dec_state->shared->dc_frames[shared.frame_header.dc_level]);
+    const Image3F& dc_frame =
+        dec_state->shared->dc_frames[shared.frame_header.dc_level];
+    shared.dc_storage = Image3F(dc_frame.xsize(), dc_frame.ysize());
+    CopyImageTo(dc_frame, &shared.dc_storage);
     ZeroFillImage(&shared.quant_dc);
     shared.dc = &shared.dc_storage;
     JXL_CHECK(encoded_size == 0);
@@ -208,8 +207,6 @@ Status InitializePassesEncoder(const Image3F& opsin, const JxlCmsInterface& cms,
 }
 
 void EncCache::InitOnce() {
-  PROFILER_FUNC;
-
   if (num_nzeroes.xsize() == 0) {
     num_nzeroes = Image3I(kGroupDimInBlocks, kGroupDimInBlocks);
   }

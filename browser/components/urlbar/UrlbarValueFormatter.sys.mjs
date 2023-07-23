@@ -5,16 +5,11 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarUtils: "resource:///modules/UrlbarUtils.sys.mjs",
 });
-
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "BrowserUIUtils",
-  "resource:///modules/BrowserUIUtils.jsm"
-);
 
 /**
  * Applies URL highlighting and other styling to the text in the urlbar input,
@@ -49,11 +44,12 @@ export class UrlbarValueFormatter {
     let instance = (this._updateInstance = {});
 
     // _getUrlMetaData does URI fixup, which depends on the search service, so
-    // make sure it's initialized.  It can be uninitialized here on session
-    // restore.  Skip this if the service is already initialized in order to
-    // avoid the async call in the common case.  However, we can't access
-    // Service.search before first paint (delayed startup) because there's a
-    // performance test that prohibits it, so first await delayed startup.
+    // make sure it's initialized, or URIFixup may force synchronous
+    // initialization. It can be uninitialized here on session restore. Skip
+    // this if the service is already initialized in order to avoid the async
+    // call in the common case. However, we can't access Service.search before
+    // first paint (delayed startup) because there's a performance test that
+    // prohibits it, so first await delayed startup.
     if (!this.window.gBrowserInit.delayedStartupFinished) {
       await this.window.delayedStartupPromise;
       if (this._updateInstance != instance) {
@@ -61,7 +57,10 @@ export class UrlbarValueFormatter {
       }
     }
     if (!Services.search.isInitialized) {
-      await Services.search.init();
+      try {
+        await Services.search.init();
+      } catch {}
+
       if (this._updateInstance != instance) {
         return;
       }
@@ -268,14 +267,8 @@ export class UrlbarValueFormatter {
       return false;
     }
 
-    let {
-      domain,
-      origin,
-      preDomain,
-      schemeWSlashes,
-      trimmedLength,
-      url,
-    } = urlMetaData;
+    let { domain, origin, preDomain, schemeWSlashes, trimmedLength, url } =
+      urlMetaData;
     // We strip http, so we should not show the scheme box for it.
     if (!lazy.UrlbarPrefs.get("trimURLs") || schemeWSlashes != "http://") {
       this.scheme.value = schemeWSlashes;

@@ -623,7 +623,6 @@ class RecursiveMakeBackend(MakeBackend):
 
         elif isinstance(obj, SandboxedWasmLibrary):
             self._process_sandboxed_wasm_library(obj, backend_file)
-            self._no_skip["syms"].add(backend_file.relobjdir)
 
         elif isinstance(obj, HostLibrary):
             self._process_linked_libraries(obj, backend_file)
@@ -1385,6 +1384,8 @@ class RecursiveMakeBackend(MakeBackend):
     def _build_target_for_obj(self, obj):
         if hasattr(obj, "output_category") and obj.output_category:
             target_name = obj.output_category
+        elif isinstance(obj, BaseRustLibrary):
+            target_name = f"{obj.KIND}-objects"
         else:
             target_name = obj.KIND
         if target_name == "wasm":

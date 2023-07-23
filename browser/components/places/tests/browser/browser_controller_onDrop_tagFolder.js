@@ -14,8 +14,8 @@ const TAG_NAME = "testTag";
 var bookmarks;
 var bookmarkId;
 
-add_setup(async function() {
-  registerCleanupFunction(async function() {
+add_setup(async function () {
+  registerCleanupFunction(async function () {
     sandbox.restore();
     await PlacesUtils.bookmarks.eraseEverything();
     await PlacesUtils.history.clear();
@@ -38,7 +38,7 @@ add_setup(async function() {
       },
     ],
   });
-  bookmarkId = await PlacesUtils.promiseItemId(bookmarks[0].guid);
+  bookmarkId = await PlacesTestUtils.promiseItemId(bookmarks[0].guid);
 });
 
 async function run_drag_test(startBookmarkIndex, newParentGuid) {

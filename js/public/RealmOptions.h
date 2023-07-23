@@ -172,6 +172,19 @@ class JS_PUBLIC_API RealmCreationOptions {
   bool getCoopAndCoepEnabled() const;
   RealmCreationOptions& setCoopAndCoepEnabled(bool flag);
 
+  bool getStreamsEnabled() const { return streams_; }
+  RealmCreationOptions& setStreamsEnabled(bool flag) {
+#ifdef MOZ_JS_STREAMS
+#  ifdef MOZ_DOM_STREAMS
+#    error "JS and DOM streams shouldn't be simultaneously configured"
+#  endif
+    streams_ = flag;
+#else
+    MOZ_ASSERT(!streams_);
+#endif
+    return *this;
+  }
+
   WeakRefSpecifier getWeakRefsEnabled() const { return weakRefs_; }
   RealmCreationOptions& setWeakRefsEnabled(WeakRefSpecifier spec) {
     weakRefs_ = spec;
@@ -226,13 +239,11 @@ class JS_PUBLIC_API RealmCreationOptions {
     return *this;
   }
 
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
   bool getChangeArrayByCopyEnabled() const { return changeArrayByCopy_; }
   RealmCreationOptions& setChangeArrayByCopyEnabled(bool flag) {
     changeArrayByCopy_ = flag;
     return *this;
   }
-#endif
 
 #ifdef ENABLE_NEW_SET_METHODS
   bool getNewSetMethodsEnabled() const { return newSetMethods_; }
@@ -261,6 +272,23 @@ class JS_PUBLIC_API RealmCreationOptions {
     return *this;
   }
 
+  // Force all date/time methods in JavaScript to use the UTC timezone for
+  // fingerprinting protection.
+  bool forceUTC() const { return forceUTC_; }
+  RealmCreationOptions& setForceUTC(bool flag) {
+    forceUTC_ = flag;
+    return *this;
+  }
+
+  // Always use the fdlibm implementation of math functions instead of the
+  // platform native libc implementations. Useful for fingerprinting protection
+  // and cross-platform consistency.
+  bool alwaysUseFdlibm() const { return alwaysUseFdlibm_; }
+  RealmCreationOptions& setAlwaysUseFdlibm(bool flag) {
+    alwaysUseFdlibm_ = flag;
+    return *this;
+  }
+
   uint64_t profilerRealmID() const { return profilerRealmID_; }
   RealmCreationOptions& setProfilerRealmID(uint64_t id) {
     profilerRealmID_ = id;
@@ -281,6 +309,7 @@ class JS_PUBLIC_API RealmCreationOptions {
   bool sharedMemoryAndAtomics_ = false;
   bool defineSharedArrayBufferConstructor_ = true;
   bool coopAndCoep_ = false;
+  bool streams_ = false;
   bool toSource_ = false;
   bool propertyErrorMessageFix_ = false;
   bool iteratorHelpers_ = false;
@@ -290,15 +319,15 @@ class JS_PUBLIC_API RealmCreationOptions {
   // Pref for String.prototype.{is,to}WellFormed() methods.
   bool wellFormedUnicodeStrings_ = false;
 #endif
-  bool arrayFromAsync_ = false;
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
+  bool arrayFromAsync_ = true;
   bool changeArrayByCopy_ = false;
-#endif
 #ifdef ENABLE_NEW_SET_METHODS
   bool newSetMethods_ = false;
 #endif
   bool secureContext_ = false;
   bool freezeBuiltins_ = false;
+  bool forceUTC_ = false;
+  bool alwaysUseFdlibm_ = false;
 };
 
 /**
@@ -320,14 +349,6 @@ class JS_PUBLIC_API RealmBehaviors {
   bool clampAndJitterTime() const { return clampAndJitterTime_; }
   RealmBehaviors& setClampAndJitterTime(bool flag) {
     clampAndJitterTime_ = flag;
-    return *this;
-  }
-
-  bool shouldResistFingerprinting() const {
-    return shouldResistFingerprinting_;
-  }
-  RealmBehaviors& setShouldResistFingerprinting(bool flag) {
-    shouldResistFingerprinting_ = flag;
     return *this;
   }
 
@@ -366,7 +387,6 @@ class JS_PUBLIC_API RealmBehaviors {
  private:
   bool discardSource_ = false;
   bool clampAndJitterTime_ = true;
-  bool shouldResistFingerprinting_ = false;
   bool isNonLive_ = false;
 };
 

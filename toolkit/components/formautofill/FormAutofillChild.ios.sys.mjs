@@ -22,9 +22,8 @@ export class FormAutofillChild {
 
   _doIdentifyAutofillFields(element) {
     this.fieldDetailsManager.updateActiveInput(element);
-    const validDetails = this.fieldDetailsManager.identifyAutofillFields(
-      element
-    );
+    const validDetails =
+      this.fieldDetailsManager.identifyAutofillFields(element);
 
     // Only ping swift if current field is a cc field
     if (validDetails?.find(field => field.elementWeakRef.get() === element)) {
@@ -57,9 +56,7 @@ export class FormAutofillChild {
   }
 
   fillFormFields(payload) {
-    this.fieldDetailsManager.activeHandler.autofillFormFields(
-      JSON.parse(payload)
-    );
+    this.fieldDetailsManager.activeHandler.autofillFormFields(payload);
   }
 }
 

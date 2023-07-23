@@ -184,6 +184,7 @@ Structure:
             DWriteEnabled: <bool>, // null on failure
             ContentBackend: <string> // One of "Cairo", "Skia", or "Direct2D 1.1"
             Headless: <bool>, // null on failure
+            TargetFrameRate: <number>, // frame rate in Hz, typically 60 or more
             //DWriteVersion: <string>, // temporarily removed, pending bug 1154500
             adapters: [
               {
@@ -386,6 +387,8 @@ The following is a partial list of `collected preferences <https://searchfox.org
 
 - ``browser.migrate.interactions.bookmarks``: True if the user has imported bookmarks from another browser before. This preference gets transferred during profile resets.
 
+- ``browser.migrate.interactions.csvpasswords``: True if the user has imported passwords through the migration wizard from a CSV file. This preference gets transferred during profile resets.
+
 - ``browser.migrate.interactions.history``: True if the user has imported history from another browser before. This preference gets transferred during profile resets.
 
 - ``browser.migrate.interactions.passwords``: True if the user has imported passwords from another browser before. This preference gets transferred during profile resets.
@@ -437,6 +440,8 @@ The following is a partial list of `collected preferences <https://searchfox.org
 - ``extensions.InstallTrigger.enabled``: Whether the InstallTrigger implementation should be enabled (or completely hidden), separate from InstallTriggerImpl because InstallTrigger is improperly used also for UA detection.
 
 - ``extensions.eventPages.enabled``: Whether non-persistent background pages (also known as Event pages) should be enabled for `"manifest_version": 2` extensions.
+
+- ``extensions.quarantinedDomains.enabled``: Whether "Quarantined Domains" is enabled.
 
 - ``extensions.manifestV3.enabled``: Whether `"manifest_version": 3` extensions should be allowed to install successfully.
 

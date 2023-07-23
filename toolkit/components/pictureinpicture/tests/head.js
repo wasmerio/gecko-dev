@@ -19,6 +19,7 @@ const TEST_PAGE = TEST_ROOT + "test-page.html";
 const TEST_PAGE_2 = TEST_ROOT_2 + "test-page.html";
 const TEST_PAGE_WITH_IFRAME = TEST_ROOT_2 + "test-page-with-iframe.html";
 const TEST_PAGE_WITH_SOUND = TEST_ROOT + "test-page-with-sound.html";
+const TEST_PAGE_WITHOUT_AUDIO = TEST_ROOT + "test-page-without-audio.html";
 const TEST_PAGE_WITH_NAN_VIDEO_DURATION =
   TEST_ROOT + "test-page-with-nan-video-duration.html";
 const TEST_PAGE_WITH_WEBVTT = TEST_ROOT + "test-page-with-webvtt.html";
@@ -26,6 +27,7 @@ const TEST_PAGE_MULTIPLE_CONTEXTS =
   TEST_ROOT + "test-page-multiple-contexts.html";
 const TEST_PAGE_TRANSPARENT_NESTED_IFRAMES =
   TEST_ROOT + "test-transparent-nested-iframes.html";
+const TEST_PAGE_PIP_DISABLED = TEST_ROOT + "test-page-pipDisabled.html";
 const WINDOW_TYPE = "Toolkit:PictureInPicture";
 const TOGGLE_POSITION_PREF =
   "media.videocontrols.picture-in-picture.video-toggle.position";
@@ -841,6 +843,17 @@ async function promiseFullscreenEntered(window, asyncFn) {
   await BrowserTestUtils.waitForCondition(() => {
     return !TelemetryStopwatch.running("FULLSCREEN_CHANGE_MS");
   });
+
+  if (AppConstants.platform == "macosx") {
+    // On macOS, the fullscreen transition takes some extra time
+    // to complete, and we don't receive events for it. We need to
+    // wait for it to complete or else input events in the next test
+    // might get eaten up. This is the best we can currently do.
+    //
+    // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+    dump(`BJW promiseFullscreenEntered: waiting for 2 second timeout.\n`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
 }
 
 /**
@@ -1097,7 +1110,11 @@ async function waitForTelemeryEvents(filter, length, process) {
       info(JSON.stringify(filtered, null, 2));
       return filtered && filtered.length >= length;
     },
-    "Waiting for one create pictureinpicture telemetry event.",
+    `Waiting for ${length} pictureinpicture telemetry event(s) with filter ${JSON.stringify(
+      filter,
+      null,
+      2
+    )}`,
     200,
     100
   );

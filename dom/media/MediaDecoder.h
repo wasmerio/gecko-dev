@@ -36,10 +36,6 @@ class nsIPrincipal;
 
 namespace mozilla {
 
-namespace dom {
-class MediaMemoryInfo;
-}
-
 class AbstractThread;
 class DOMMediaStream;
 class DecoderBenchmark;
@@ -50,6 +46,43 @@ class MediaFormatReader;
 class MediaDecoderStateMachineBase;
 struct MediaPlaybackEvent;
 struct SharedDummyTrack;
+
+template <typename T>
+struct DurationToType {
+  double operator()(double aDouble);
+  double operator()(const media::TimeUnit& aTimeUnit);
+};
+
+template <>
+struct DurationToType<double> {
+  double operator()(double aDouble) { return aDouble; }
+  double operator()(const media::TimeUnit& aTimeUnit) {
+    if (aTimeUnit.IsValid()) {
+      if (aTimeUnit.IsPosInf()) {
+        return std::numeric_limits<double>::infinity();
+      }
+      if (aTimeUnit.IsNegInf()) {
+        return -std::numeric_limits<double>::infinity();
+      }
+      return aTimeUnit.ToSeconds();
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+};
+
+using DurationToDouble = DurationToType<double>;
+
+template <>
+struct DurationToType<media::TimeUnit> {
+  media::TimeUnit operator()(double aDouble) {
+    return media::TimeUnit::FromSeconds(aDouble);
+  }
+  media::TimeUnit operator()(const media::TimeUnit& aTimeUnit) {
+    return aTimeUnit;
+  }
+};
+
+using DurationToTimeUnit = DurationToType<media::TimeUnit>;
 
 struct MOZ_STACK_CLASS MediaDecoderInit {
   MediaDecoderOwner* const mOwner;
@@ -223,8 +256,14 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   // supports range requests, we are playing a file, etc.).
   virtual bool IsTransportSeekable() = 0;
 
-  // Return the time ranges that can be seeked into.
+  // Return the time ranges that can be seeked into, in TimeUnits.
   virtual media::TimeIntervals GetSeekable();
+  // Return the time ranges that can be seeked into, in seconds, double
+  // precision.
+  virtual media::TimeRanges GetSeekableTimeRanges();
+
+  template <typename T>
+  T GetSeekableImpl();
 
   // Set the end time of the media resource. When playback reaches
   // this point the media pauses. aTime is in seconds.
@@ -455,7 +494,7 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
                               UniquePtr<MetadataTags> aTags,
                               MediaDecoderEventVisibility aEventVisibility);
 
-  void SetLogicalPosition(double aNewPosition);
+  void SetLogicalPosition(const media::TimeUnit& aNewPosition);
 
   /******
    * The following members should be accessed with the decoder lock held.
@@ -477,7 +516,10 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   already_AddRefed<layers::KnowsCompositor> GetCompositor();
 
   // Official duration of the media resource as observed by script.
-  double mDuration;
+  // This can be a TimeUnit representing the exact duration found by demuxing,
+  // as a TimeUnit. This can also be a duration set explicitly by script, as a
+  // double.
+  Variant<media::TimeUnit, double> mDuration;
 
   /******
    * The following member variables can be accessed from any thread.
@@ -701,36 +743,31 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   Maybe<SeekTarget> mDelayedSeekTarget;
 
  public:
-  AbstractCanonical<double>* CanonicalVolume() { return &mVolume; }
-  AbstractCanonical<bool>* CanonicalPreservesPitch() {
-    return &mPreservesPitch;
+  Canonical<double>& CanonicalVolume() { return mVolume; }
+  Canonical<bool>& CanonicalPreservesPitch() { return mPreservesPitch; }
+  Canonical<bool>& CanonicalLooping() { return mLooping; }
+  Canonical<nsAutoString>& CanonicalStreamName() { return mStreamName; }
+  Canonical<RefPtr<AudioDeviceInfo>>& CanonicalSinkDevice() {
+    return mSinkDevice;
   }
-  AbstractCanonical<bool>* CanonicalLooping() { return &mLooping; }
-  AbstractCanonical<nsAutoString>* CanonicalStreamName() {
-    return &mStreamName;
+  Canonical<RefPtr<VideoFrameContainer>>& CanonicalSecondaryVideoContainer() {
+    return mSecondaryVideoContainer;
   }
-  AbstractCanonical<RefPtr<AudioDeviceInfo>>* CanonicalSinkDevice() {
-    return &mSinkDevice;
+  Canonical<OutputCaptureState>& CanonicalOutputCaptureState() {
+    return mOutputCaptureState;
   }
-  AbstractCanonical<RefPtr<VideoFrameContainer>>*
-  CanonicalSecondaryVideoContainer() {
-    return &mSecondaryVideoContainer;
-  }
-  AbstractCanonical<OutputCaptureState>* CanonicalOutputCaptureState() {
-    return &mOutputCaptureState;
-  }
-  AbstractCanonical<nsMainThreadPtrHandle<SharedDummyTrack>>*
+  Canonical<nsMainThreadPtrHandle<SharedDummyTrack>>&
   CanonicalOutputDummyTrack() {
-    return &mOutputDummyTrack;
+    return mOutputDummyTrack;
   }
-  AbstractCanonical<CopyableTArray<RefPtr<ProcessedMediaTrack>>>*
+  Canonical<CopyableTArray<RefPtr<ProcessedMediaTrack>>>&
   CanonicalOutputTracks() {
-    return &mOutputTracks;
+    return mOutputTracks;
   }
-  AbstractCanonical<PrincipalHandle>* CanonicalOutputPrincipal() {
-    return &mOutputPrincipal;
+  Canonical<PrincipalHandle>& CanonicalOutputPrincipal() {
+    return mOutputPrincipal;
   }
-  AbstractCanonical<PlayState>* CanonicalPlayState() { return &mPlayState; }
+  Canonical<PlayState>& CanonicalPlayState() { return mPlayState; }
 
   void UpdateTelemetryHelperBasedOnPlayState(PlayState aState) const;
 
@@ -759,7 +796,8 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
     eSeamlessLoopingSeeking,
     eOther,
   };
-  PositionUpdate GetPositionUpdateReason(double aPrevPos, double aCurPos) const;
+  PositionUpdate GetPositionUpdateReason(double aPrevPos,
+                                         const media::TimeUnit& aCurPos) const;
 
   // Notify owner when the audible state changed
   void NotifyAudibleStateChanged();
@@ -771,12 +809,13 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   bool mCanPlayThrough = false;
 
   UniquePtr<TelemetryProbesReporter> mTelemetryProbesReporter;
+
+#  ifdef MOZ_WMF_MEDIA_ENGINE
+  // True when we need to update the newly created MDSM's status to make it
+  // consistent with the previous destroyed one.
+  bool mPendingStatusUpdateForNewlyCreatedStateMachine = false;
+#  endif
 };
-
-typedef MozPromise<mozilla::dom::MediaMemoryInfo, nsresult, true>
-    MediaMemoryPromise;
-
-RefPtr<MediaMemoryPromise> GetMediaMemorySizes(dom::Document* aDoc);
 
 }  // namespace mozilla
 

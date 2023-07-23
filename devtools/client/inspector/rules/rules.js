@@ -151,12 +151,10 @@ function CssRuleView(inspector, document, store) {
   this._onTogglePseudoClassPanel = this._onTogglePseudoClassPanel.bind(this);
   this._onTogglePseudoClass = this._onTogglePseudoClass.bind(this);
   this._onToggleClassPanel = this._onToggleClassPanel.bind(this);
-  this._onToggleLightColorSchemeSimulation = this._onToggleLightColorSchemeSimulation.bind(
-    this
-  );
-  this._onToggleDarkColorSchemeSimulation = this._onToggleDarkColorSchemeSimulation.bind(
-    this
-  );
+  this._onToggleLightColorSchemeSimulation =
+    this._onToggleLightColorSchemeSimulation.bind(this);
+  this._onToggleDarkColorSchemeSimulation =
+    this._onToggleDarkColorSchemeSimulation.bind(this);
   this._onTogglePrintSimulation = this._onTogglePrintSimulation.bind(this);
   this.highlightElementRule = this.highlightElementRule.bind(this);
   this.highlightProperty = this.highlightProperty.bind(this);
@@ -234,9 +232,8 @@ function CssRuleView(inspector, document, store) {
 
   this._handlePrefChange = this._handlePrefChange.bind(this);
   this._handleUAStylePrefChange = this._handleUAStylePrefChange.bind(this);
-  this._handleDefaultColorUnitPrefChange = this._handleDefaultColorUnitPrefChange.bind(
-    this
-  );
+  this._handleDefaultColorUnitPrefChange =
+    this._handleDefaultColorUnitPrefChange.bind(this);
   this._handleDraggablePrefChange = this._handleDraggablePrefChange.bind(this);
 
   this._prefObserver = new PrefObserver("devtools.");
@@ -417,9 +414,9 @@ CssRuleView.prototype = {
     // Handle click on the icon next to a CSS selector.
     if (target.classList.contains("js-toggle-selector-highlighter")) {
       event.stopPropagation();
-      let selector = target.dataset.selector;
-      // dataset.selector will be empty for inline styles (inherited or not)
-      // Rules associated with a regular selector should have this data-attirbute
+      let selector = target.dataset.computedSelector;
+      // dataset.computedSelector will be initially empty for inline styles (inherited or not)
+      // Rules associated with a regular selector should have this data-attribute
       // set in devtools/client/inspector/rules/views/rule-editor.js
       if (selector === "") {
         try {
@@ -430,12 +427,12 @@ CssRuleView.prototype = {
             selector = await rule.inherited.getUniqueSelector();
           } else {
             // This is an inline style from the current node.
-            selector = await this.inspector.selection.nodeFront.getUniqueSelector();
+            selector =
+              await this.inspector.selection.nodeFront.getUniqueSelector();
           }
 
-          // Now that the selector was computed, we can store it in
-          // dataset.selector for subsequent usage.
-          target.dataset.selector = selector;
+          // Now that the selector was computed, we can store it for subsequent usage.
+          target.dataset.computedSelector = selector;
         } finally {
           // Could not resolve a unique selector for the inline style.
         }
@@ -485,7 +482,7 @@ CssRuleView.prototype = {
             return;
           }
 
-          const query = `.js-toggle-selector-highlighter[data-selector='${selector}']`;
+          const query = `.js-toggle-selector-highlighter[data-computed-selector='${selector}']`;
           for (const node of this.styleDocument.querySelectorAll(query)) {
             node.classList.toggle(
               "highlighted",
@@ -785,7 +782,8 @@ CssRuleView.prototype = {
             this.searchData.searchPropertyMatch[1]
           )[1];
         } else {
-          this.searchData.searchPropertyName = this.searchData.searchPropertyMatch[1];
+          this.searchData.searchPropertyName =
+            this.searchData.searchPropertyMatch[1];
         }
 
         if (FILTER_STRICT_RE.test(this.searchData.searchPropertyMatch[2])) {
@@ -794,7 +792,8 @@ CssRuleView.prototype = {
             this.searchData.searchPropertyMatch[2]
           )[1];
         } else {
-          this.searchData.searchPropertyValue = this.searchData.searchPropertyMatch[2];
+          this.searchData.searchPropertyValue =
+            this.searchData.searchPropertyMatch[2];
         }
 
         // Strict search for stylesheets will match the property line regex.
@@ -1806,13 +1805,11 @@ CssRuleView.prototype = {
   },
 
   async _onToggleLightColorSchemeSimulation() {
-    const shouldSimulateLightScheme = this.colorSchemeLightSimulationButton.classList.toggle(
-      "checked"
-    );
+    const shouldSimulateLightScheme =
+      this.colorSchemeLightSimulationButton.classList.toggle("checked");
 
-    const darkColorSchemeEnabled = this.colorSchemeDarkSimulationButton.classList.contains(
-      "checked"
-    );
+    const darkColorSchemeEnabled =
+      this.colorSchemeDarkSimulationButton.classList.contains("checked");
     if (shouldSimulateLightScheme && darkColorSchemeEnabled) {
       this.colorSchemeDarkSimulationButton.classList.toggle("checked");
     }
@@ -1827,13 +1824,11 @@ CssRuleView.prototype = {
   },
 
   async _onToggleDarkColorSchemeSimulation() {
-    const shouldSimulateDarkScheme = this.colorSchemeDarkSimulationButton.classList.toggle(
-      "checked"
-    );
+    const shouldSimulateDarkScheme =
+      this.colorSchemeDarkSimulationButton.classList.toggle("checked");
 
-    const lightColorSchemeEnabled = this.colorSchemeLightSimulationButton.classList.contains(
-      "checked"
-    );
+    const lightColorSchemeEnabled =
+      this.colorSchemeLightSimulationButton.classList.contains("checked");
     if (shouldSimulateDarkScheme && lightColorSchemeEnabled) {
       this.colorSchemeLightSimulationButton.classList.toggle("checked");
     }

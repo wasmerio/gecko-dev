@@ -7,7 +7,7 @@
 #include "base/process_util.h"
 #include "base/task.h"
 
-#ifdef OS_POSIX
+#ifdef XP_UNIX
 #  include <errno.h>
 #endif
 #include <type_traits>
@@ -59,8 +59,9 @@ MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(
 
 namespace ipc {
 
-IPCResult IPCResult::Fail(NotNull<IProtocol*> actor, const char* where,
-                          const char* why) {
+/* static */
+IPCResult IPCResult::FailImpl(NotNull<IProtocol*> actor, const char* where,
+                              const char* why) {
   // Calls top-level protocol to handle the error.
   nsPrintfCString errorMsg("%s %s\n", where, why);
   actor->GetIPCChannel()->Listener()->ProcessingError(
@@ -77,7 +78,7 @@ void AnnotateSystemError() {
   int64_t error = 0;
 #if defined(XP_WIN)
   error = ::GetLastError();
-#elif defined(OS_POSIX)
+#else
   error = errno;
 #endif
   if (error) {
@@ -389,17 +390,20 @@ Maybe<IProtocol*> IProtocol::ReadActor(IPC::MessageReader* aReader,
   return Some(listener);
 }
 
-void IProtocol::FatalError(const char* const aErrorMsg) const {
+void IProtocol::FatalError(const char* const aErrorMsg) {
   HandleFatalError(aErrorMsg);
 }
 
-void IProtocol::HandleFatalError(const char* aErrorMsg) const {
+void IProtocol::HandleFatalError(const char* aErrorMsg) {
   if (IProtocol* manager = Manager()) {
     manager->HandleFatalError(aErrorMsg);
     return;
   }
 
   mozilla::ipc::FatalError(aErrorMsg, mSide == ParentSide);
+  if (CanSend()) {
+    GetIPCChannel()->InduceConnectionError();
+  }
 }
 
 bool IProtocol::AllocShmem(size_t aSize, Shmem* aOutMem) {

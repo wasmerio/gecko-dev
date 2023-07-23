@@ -35,7 +35,7 @@ async function clickVisibleButton(browser, selector) {
   });
 }
 
-add_setup(async function() {
+add_setup(async function () {
   SpecialPowers.pushPrefEnv({
     set: [
       ["ui.prefersReducedMotion", 1],
@@ -531,6 +531,16 @@ add_task(async function test_aboutwelcome_embedded_migration() {
         true /* wantsUntrusted */
       );
       let selector = shadow.querySelector("#browser-profile-selector");
+
+      // The migration wizard programmatically focuses the selector after
+      // the selection page is shown using an rAF. If we click the button
+      // before that occurs, then the focus can shift after the panel opens
+      // which will cause it to immediately close again. So we wait for the
+      // selection button to gain focus before continuing.
+      if (!selector.matches(":focus")) {
+        await ContentTaskUtils.waitForEvent(selector, "focus");
+      }
+
       selector.click();
       await shown;
 
@@ -598,6 +608,31 @@ add_task(async function test_aboutwelcome_embedded_migration() {
     }),
     "Should have sent telemetry for clicking the 'Continue' button."
   );
+
+  // Ensure that we can go back and get the migration wizard to appear
+  // again.
+  await SpecialPowers.spawn(browser, [], async () => {
+    const { MigrationWizardConstants } = ChromeUtils.importESModule(
+      "chrome://browser/content/migration/migration-wizard-constants.mjs"
+    );
+
+    let migrationWizardReady = ContentTaskUtils.waitForEvent(
+      content,
+      "MigrationWizard:Ready"
+    );
+
+    content.history.back();
+    await migrationWizardReady;
+
+    let wizard = content.document.querySelector("migration-wizard");
+    let shadow = wizard.openOrClosedShadowRoot;
+    let deck = shadow.querySelector("#wizard-deck");
+
+    Assert.equal(
+      deck.getAttribute("selected-view"),
+      `page-${MigrationWizardConstants.PAGES.SELECTION}`
+    );
+  });
 
   // cleanup
   await SpecialPowers.popPrefEnv(); // for the InternalTestingProfileMigrator.

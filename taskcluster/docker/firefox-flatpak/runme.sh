@@ -25,6 +25,10 @@ export DATE
 SCRIPT_DIRECTORY="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 TARGET_TAR_XZ_FULL_PATH="$ARTIFACTS_DIR/target.flatpak.tar.xz"
 SOURCE_DEST="${WORKSPACE}/source"
+
+# When updating this, please make sure to keep in sync the script for symbol
+# scraping at
+# https://github.com/mozilla/symbol-scrapers/blob/master/firefox-flatpak/script.sh
 FREEDESKTOP_VERSION="22.08"
 FIREFOX_BASEAPP_CHANNEL="22.08"
 
@@ -99,6 +103,10 @@ directory=lib/ffmpeg
 add-ld-path=.
 no-autodownload=true
 version=${FREEDESKTOP_VERSION}
+
+[Extension org.mozilla.firefox.systemconfig]
+directory=etc/firefox
+no-autodownload=true
 EOF
 
 cat <<EOF > build/metadata.locale
@@ -118,6 +126,7 @@ for size in 16 32 48 64 128; do
     install -D -m644 "${appdir}/lib/firefox/browser/chrome/icons/default/default${size}.png" "${appdir}/share/icons/hicolor/${size}x${size}/apps/org.mozilla.firefox.png"
 done
 mkdir -p "${appdir}/lib/ffmpeg"
+mkdir -p "${appdir}/etc/firefox"
 
 appstream-compose --prefix="${appdir}" --origin=flatpak --basename=org.mozilla.firefox org.mozilla.firefox
 appstream-util mirror-screenshots "${appdir}"/share/app-info/xmls/org.mozilla.firefox.xml.gz "https://dl.flathub.org/repo/screenshots/org.mozilla.firefox-${FLATPAK_BRANCH}" build/screenshots "build/screenshots/org.mozilla.firefox-${FLATPAK_BRANCH}"

@@ -36,7 +36,7 @@ class PerformanceService;
 class PerformanceStorage;
 class PerformanceTiming;
 class PerformanceEventTiming;
-class WorkerPrivate;
+class WorkerGlobalScope;
 class EventCounts;
 
 // Base class for main-thread and worker Performance API
@@ -52,7 +52,7 @@ class Performance : public DOMEventTargetHelper {
       nsDOMNavigationTiming* aDOMTiming, nsITimedChannel* aChannel);
 
   static already_AddRefed<Performance> CreateForWorker(
-      WorkerPrivate* aWorkerPrivate);
+      WorkerGlobalScope* aGlobalScope);
 
   // This will return nullptr if called outside of a Window or Worker.
   static already_AddRefed<Performance> Get(JSContext* aCx,
@@ -215,6 +215,9 @@ class Performance : public DOMEventTargetHelper {
  private:
   MOZ_ALWAYS_INLINE bool CanAddResourceTimingEntry();
   void BufferEvent();
+  void MaybeEmitExternalProfilerMarker(
+      const nsAString& aName, Maybe<const PerformanceMeasureOptions&> aOptions,
+      Maybe<const nsAString&> aStartMark, const Optional<nsAString>& aEndMark);
 
   // The attributes of a PerformanceMeasureOptions that we call
   // ResolveTimestamp* on.

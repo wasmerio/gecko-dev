@@ -235,7 +235,7 @@ function wasmRunWithDebugger(wast, lib, init, done) {
     let dbg = new Debugger(g);
 
     g.eval(`
-var wasm = wasmTextToBinary('${wast}');
+var wasm = wasmTextToBinary(\`${wast}\`);
 var lib = ${lib || 'undefined'};
 var m = new WebAssembly.Instance(new WebAssembly.Module(wasm), lib);`);
 
@@ -430,8 +430,8 @@ let WasmArrayrefValues = [];
 if (wasmGcEnabled()) {
     let { newStruct, newArray } = wasmEvalText(`
       (module
-        (type $s (struct))
-        (type $a (array i32))
+        (type $s (sub (struct)))
+        (type $a (sub (array i32)))
         (func (export "newStruct") (result anyref)
             struct.new $s)
         (func (export "newArray") (result anyref)

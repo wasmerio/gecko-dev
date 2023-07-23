@@ -39,6 +39,12 @@ loader.lazyRequireGetter(
   "resource://devtools/client/shared/redux/subscriber.js",
   true
 );
+loader.lazyRequireGetter(
+  this,
+  "getMappedExpression",
+  "resource://devtools/client/debugger/src/actions/expressions.js",
+  true
+);
 
 const DBG_STRINGS_URI = [
   "devtools/client/locales/debugger.properties",
@@ -72,21 +78,17 @@ class DebuggerPanel {
     const fluentL10n = new FluentL10n();
     await fluentL10n.init(["devtools/shared/debugger-paused-reasons.ftl"]);
 
-    const {
-      actions,
-      store,
-      selectors,
-      client,
-    } = await this.panelWin.Debugger.bootstrap({
-      commands: this.commands,
-      fluentBundles: fluentL10n.getBundles(),
-      resourceCommand: this.toolbox.resourceCommand,
-      workers: {
-        sourceMapLoader: this.toolbox.sourceMapLoader,
-        parserWorker: this.toolbox.parserWorker,
-      },
-      panel: this,
-    });
+    const { actions, store, selectors, client } =
+      await this.panelWin.Debugger.bootstrap({
+        commands: this.commands,
+        fluentBundles: fluentL10n.getBundles(),
+        resourceCommand: this.toolbox.resourceCommand,
+        workers: {
+          sourceMapLoader: this.toolbox.sourceMapLoader,
+          parserWorker: this.toolbox.parserWorker,
+        },
+        panel: this,
+      });
 
     this._actions = actions;
     this._store = store;
@@ -106,9 +108,8 @@ class DebuggerPanel {
       currentThreadActorID &&
       currentThreadActorID !== getCurrentThread(oldState)
     ) {
-      const threadFront = this.commands.client.getFrontByID(
-        currentThreadActorID
-      );
+      const threadFront =
+        this.commands.client.getFrontByID(currentThreadActorID);
       this.toolbox.selectTarget(threadFront?.targetFront.actorID);
     }
   }
@@ -195,7 +196,11 @@ class DebuggerPanel {
   }
 
   getMappedExpression(expression) {
-    return this._actions.getMappedExpression(expression);
+    const thread = this._selectors.getCurrentThread(this._getState());
+    return getMappedExpression(expression, thread, {
+      getState: this._store.getState,
+      parserWorker: this.toolbox.parserWorker,
+    });
   }
 
   /**
@@ -217,8 +222,7 @@ class DebuggerPanel {
   }
 
   selectSourceURL(url, line, column) {
-    const cx = this._selectors.getContext(this._getState());
-    return this._actions.selectSourceURL(cx, url, { line, column });
+    return this._actions.selectSourceURL(url, { line, column });
   }
 
   /**
@@ -334,8 +338,7 @@ class DebuggerPanel {
   }
 
   selectThread(threadActorID) {
-    const cx = this._selectors.getContext(this._getState());
-    this._actions.selectThread(cx, threadActorID);
+    this._actions.selectThread(threadActorID);
   }
 
   toggleJavascriptTracing() {

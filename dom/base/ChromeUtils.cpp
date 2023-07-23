@@ -23,7 +23,6 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/FormAutofillNative.h"
 #include "mozilla/IntentionalCrash.h"
-#include "mozilla/PerformanceMetricsCollector.h"
 #include "mozilla/PerfStats.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcInfo.h"
@@ -52,6 +51,7 @@
 #include "mozilla/ipc/UtilityProcessManager.h"
 #include "mozilla/ipc/UtilityProcessHost.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
+#include "mozilla/WheelHandlingHelper.h"
 #include "IOActivityMonitor.h"
 #include "nsNativeTheme.h"
 #include "nsThreadUtils.h"
@@ -1474,35 +1474,6 @@ bool ChromeUtils::VsyncEnabled(GlobalObject& aGlobal) {
   return mozilla::gfx::VsyncSource::GetFastestVsyncRate().isSome();
 }
 
-/* static */
-already_AddRefed<Promise> ChromeUtils::RequestPerformanceMetrics(
-    GlobalObject& aGlobal, ErrorResult& aRv) {
-  MOZ_ASSERT(XRE_IsParentProcess());
-
-  // Creating a JS promise
-  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
-  MOZ_ASSERT(global);
-  RefPtr<Promise> domPromise = Promise::Create(global, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-  MOZ_ASSERT(domPromise);
-  RefPtr<nsISerialEventTarget> target =
-      global->EventTargetFor(TaskCategory::Performance);
-
-  // requesting metrics, that will be returned into the promise
-  PerformanceMetricsCollector::RequestMetrics()->Then(
-      target, __func__,
-      [domPromise,
-       target](nsTArray<dom::PerformanceInfoDictionary>&& aResults) {
-        domPromise->MaybeResolve(std::move(aResults));
-      },
-      [domPromise](const nsresult& aRv) { domPromise->MaybeReject(aRv); });
-
-  // sending back the promise instance
-  return domPromise.forget();
-}
-
 void ChromeUtils::SetPerfStatsCollectionMask(GlobalObject& aGlobal,
                                              uint64_t aMask) {
   PerfStats::SetCollectionMask(static_cast<PerfStats::MetricMask>(aMask));
@@ -1697,6 +1668,15 @@ void ChromeUtils::ResetLastExternalProtocolIframeAllowed(
 }
 
 /* static */
+void ChromeUtils::EndWheelTransaction(GlobalObject& aGlobal) {
+  // This allows us to end the current wheel transaction from the browser
+  // chrome. We do not need to perform any checks before calling
+  // EndTransaction(), as it should do nothing in the case that there is
+  // no current wheel transaction.
+  WheelTransaction::EndTransaction();
+}
+
+/* static */
 void ChromeUtils::RegisterWindowActor(const GlobalObject& aGlobal,
                                       const nsACString& aName,
                                       const WindowActorOptions& aOptions,
@@ -1857,6 +1837,24 @@ void ChromeUtils::GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
     auto idlName = static_cast<UtilityActorName>(i);
     aNames.AppendElement(WebIDLUtilityActorNameValues::GetString(idlName));
   }
+}
+
+/* static */
+bool ChromeUtils::ShouldResistFingerprinting(GlobalObject& aGlobal,
+                                             JSRFPTarget aTarget) {
+  RFPTarget target;
+  switch (aTarget) {
+    case JSRFPTarget::RoundWindowSize:
+      target = RFPTarget::RoundWindowSize;
+      break;
+    case JSRFPTarget::SiteSpecificZoom:
+      target = RFPTarget::SiteSpecificZoom;
+      break;
+    default:
+      MOZ_CRASH("Unhandled JSRFPTarget enum value");
+  }
+
+  return nsRFPService::IsRFPEnabledFor(target);
 }
 
 std::atomic<uint32_t> ChromeUtils::sDevToolsOpenedCount = 0;

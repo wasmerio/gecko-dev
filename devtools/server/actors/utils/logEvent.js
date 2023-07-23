@@ -28,11 +28,8 @@ function getThrownMessage(completion) {
 module.exports.getThrownMessage = getThrownMessage;
 
 function logEvent({ threadActor, frame, level, expression, bindings }) {
-  const {
-    sourceActor,
-    line,
-    column,
-  } = threadActor.sourcesManager.getFrameLocation(frame);
+  const { sourceActor, line, column } =
+    threadActor.sourcesManager.getFrameLocation(frame);
   const displayName = formatDisplayName(frame);
 
   // TODO remove this branch when (#1592584) lands (#1609540)
@@ -42,19 +39,27 @@ function logEvent({ threadActor, frame, level, expression, bindings }) {
       bindings: { displayName, ...bindings },
       url: sourceActor.url,
       lineNumber: line,
+      disableBreaks: true,
     });
 
     return undefined;
   }
 
-  const completion = frame.evalWithBindings(
-    expression,
-    {
-      displayName,
-      ...bindings,
-    },
-    { hideFromDebugger: true }
-  );
+  let completion;
+  // Ensure disabling all types of breakpoints for all sources while evaluating the log points
+  threadActor.insideClientEvaluation = { disableBreaks: true };
+  try {
+    completion = frame.evalWithBindings(
+      expression,
+      {
+        displayName,
+        ...bindings,
+      },
+      { hideFromDebugger: true }
+    );
+  } finally {
+    threadActor.insideClientEvaluation = null;
+  }
 
   let value;
   if (!completion) {

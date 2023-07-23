@@ -8,16 +8,16 @@
 #define mozilla_EventListenerManager_h_
 
 #include "mozilla/BasicEvents.h"
-#include "mozilla/dom/AbortFollower.h"
-#include "mozilla/dom/EventListenerBinding.h"
 #include "mozilla/JSEventHandler.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/dom/AbortFollower.h"
+#include "mozilla/dom/EventListenerBinding.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMEventListener.h"
-#include "nsTObserverArray.h"
 #include "nsTArray.h"
+#include "nsTObserverArray.h"
 
 class nsIEventListenerInfo;
 class nsPIDOMWindowInner;
@@ -159,15 +159,13 @@ class EventListenerManagerBase {
   uint16_t mMayHaveTouchEventListener : 1;
   uint16_t mMayHaveMouseEnterLeaveEventListener : 1;
   uint16_t mMayHavePointerEnterLeaveEventListener : 1;
-  uint16_t mMayHaveKeyEventListener : 1;
-  uint16_t mMayHaveInputOrCompositionEventListener : 1;
   uint16_t mMayHaveSelectionChangeEventListener : 1;
   uint16_t mMayHaveFormSelectEventListener : 1;
   uint16_t mMayHaveTransitionEventListener : 1;
   uint16_t mClearingListeners : 1;
   uint16_t mIsMainThreadELM : 1;
   uint16_t mMayHaveListenersForUntrustedEvents : 1;
-  // 1 unused flag.
+  // 3 unused flags.
 };
 
 /*
@@ -273,15 +271,23 @@ class EventListenerManager final : public EventListenerManagerBase {
       }
     }
 
-    MOZ_ALWAYS_INLINE bool IsListening(const WidgetEvent* aEvent) const {
-      if (mFlags.mInSystemGroup != aEvent->mFlags.mInSystemGroup) {
-        return false;
-      }
-      // FIXME Should check !mFlags.mCapture when the event is in target
-      //       phase because capture phase event listeners should not be fired.
-      //       But it breaks at least <xul:dialog>'s buttons. Bug 235441.
+    MOZ_ALWAYS_INLINE bool MatchesEventMessage(
+        const WidgetEvent* aEvent, EventMessage aEventMessage) const;
+
+    MOZ_ALWAYS_INLINE bool MatchesEventGroup(const WidgetEvent* aEvent) const {
+      return mFlags.mInSystemGroup == aEvent->mFlags.mInSystemGroup;
+    }
+
+    MOZ_ALWAYS_INLINE bool MatchesEventPhase(const WidgetEvent* aEvent) const {
       return ((mFlags.mCapture && aEvent->mFlags.mInCapturePhase) ||
               (!mFlags.mCapture && aEvent->mFlags.mInBubblingPhase));
+    }
+
+    // Allow only trusted events, except when listener permits untrusted
+    // events.
+    MOZ_ALWAYS_INLINE bool AllowsEventTrustedness(
+        const WidgetEvent* aEvent) const {
+      return aEvent->IsTrusted() || mFlags.mAllowUntrustedEvents;
     }
   };
 
@@ -505,21 +511,6 @@ class EventListenerManager final : public EventListenerManagerBase {
     return mMayHaveTransitionEventListener;
   }
 
-  /**
-   * Returns true if there may be a key event listener (keydown, keypress,
-   * or keyup) registered, or false if there definitely isn't.
-   */
-  bool MayHaveKeyEventListener() const { return mMayHaveKeyEventListener; }
-
-  /**
-   * Returns true if there may be an advanced input event listener (input,
-   * compositionstart, compositionupdate, or compositionend) registered,
-   * or false if there definitely isn't.
-   */
-  bool MayHaveInputOrCompositionEventListener() const {
-    return mMayHaveInputOrCompositionEventListener;
-  }
-
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
   uint32_t ListenerCount() const { return mListeners.Length(); }
@@ -561,7 +552,7 @@ class EventListenerManager final : public EventListenerManagerBase {
    * function returns that legacy version. Otherwise, this function simply
    * returns the passed-in EventMessage.
    */
-  EventMessage GetLegacyEventMessage(EventMessage aEventMessage) const;
+  static EventMessage GetLegacyEventMessage(EventMessage aEventMessage);
 
   /**
    * Get the event message for the given event name.

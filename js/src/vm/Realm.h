@@ -381,6 +381,14 @@ class JS::Realm : public JS::shadow::Realm {
   // features are used.
   bool isAsyncStackCapturingEnabled = false;
 
+  // Allow to collect more than 50 stack traces for throw even if the global is
+  // not a debuggee.
+  //
+  // Similarly to isAsyncStackCapturingEnabled, this is a lightweight
+  // alternative for making the global a debuggee, when no actual debugging
+  // features are required.
+  bool isUnlimitedStacksCapturingEnabled = false;
+
  private:
   void updateDebuggerObservesFlag(unsigned flag);
 
@@ -679,6 +687,10 @@ class JS::Realm : public JS::shadow::Realm {
   // Initializes randomNumberGenerator if needed.
   mozilla::non_crypto::XorShift128PlusRNG& getOrCreateRandomNumberGenerator();
 
+  // Resets randomNumberGenerator to null, so it'll be reinitialized on next
+  // use.
+  void resetRandomNumberGenerator();
+
   const mozilla::non_crypto::XorShift128PlusRNG*
   addressOfRandomNumberGenerator() const {
     return randomNumberGenerator_.ptr();
@@ -712,6 +724,9 @@ class JS::Realm : public JS::shadow::Realm {
   }
   static constexpr size_t offsetOfRegExps() {
     return offsetof(JS::Realm, regExps);
+  }
+  static constexpr size_t offsetOfJitRealm() {
+    return offsetof(JS::Realm, jitRealm_);
   }
   static constexpr size_t offsetOfDebugModeBits() {
     return offsetof(JS::Realm, debugModeBits_);

@@ -935,11 +935,28 @@ nsresult WorkerScriptLoader::LoadScript(
     nsCOMPtr<nsIReferrerInfo> referrerInfo;
     uint32_t secFlags;
     if (request->IsModuleRequest()) {
-      referrerInfo =
-          new ReferrerInfo(request->mReferrer, request->ReferrerPolicy());
-      rv = GetModuleSecFlags(
-          loadContext->IsTopLevel(), principal, mWorkerScriptType,
-          request->mURI, mWorkerRef->Private()->WorkerCredentials(), secFlags);
+      // https://fetch.spec.whatwg.org/#concept-main-fetch
+      // Step 8. If request’s referrer policy is the empty string, then set
+      //         request’s referrer policy to request’s policy container’s
+      //         referrer policy.
+      ReferrerPolicy policy =
+          request->ReferrerPolicy() == ReferrerPolicy::_empty
+              ? mWorkerRef->Private()->GetReferrerPolicy()
+              : request->ReferrerPolicy();
+
+      referrerInfo = new ReferrerInfo(request->mReferrer, policy);
+
+      // https://html.spec.whatwg.org/multipage/webappapis.html#default-classic-script-fetch-options
+      // The default classic script fetch options are a script fetch options
+      // whose ... credentials mode is "same-origin", ....
+      RequestCredentials credentials =
+          mWorkerRef->Private()->WorkerType() == WorkerType::Classic
+              ? RequestCredentials::Same_origin
+              : mWorkerRef->Private()->WorkerCredentials();
+
+      rv = GetModuleSecFlags(loadContext->IsTopLevel(), principal,
+                             mWorkerScriptType, request->mURI, credentials,
+                             secFlags);
     } else {
       referrerInfo = ReferrerInfo::CreateForFetch(principal, nullptr);
       if (parentWorker && !loadContext->IsTopLevel()) {
@@ -1334,6 +1351,9 @@ nsresult ScriptLoaderRunnable::Run() {
       mScriptLoader->IsDebuggerScript()) {
     for (ThreadSafeRequestHandle* handle : mLoadingRequests) {
       handle->mRunnable = this;
+    }
+
+    for (ThreadSafeRequestHandle* handle : mLoadingRequests) {
       nsresult rv = mScriptLoader->LoadScript(handle);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         LoadingFinished(handle, rv);
@@ -1663,10 +1683,6 @@ bool ScriptExecutorRunnable::WorkerRun(JSContext* aCx,
 }
 
 nsresult ScriptExecutorRunnable::Cancel() {
-  // We need to check first if cancel is called twice
-  nsresult rv = MainThreadWorkerSyncRunnable::Cancel();
-  NS_ENSURE_SUCCESS(rv, rv);
-
   if (mScriptLoader->AllScriptsExecuted() &&
       mScriptLoader->AllModuleRequestsLoaded()) {
     mScriptLoader->ShutdownScriptLoader(false, false);

@@ -46,7 +46,7 @@ const createMockThemeManifest = (id, version) => ({
   name: "A mock colorway theme",
   author: "Mozilla",
   version,
-  icons: { "32": "icon.svg" },
+  icons: { 32: "icon.svg" },
   theme: {
     colors: {
       toolbar: "red",
@@ -437,17 +437,16 @@ add_task(
     const promiseInstallsEnded = Promise.all([
       AddonTestUtils.promiseInstallEvent(
         "onInstallEnded",
-        addon => addon.id === ADDON_ID
+        install => install.addon.id === ADDON_ID
       ),
       AddonTestUtils.promiseInstallEvent(
         "onInstallEnded",
-        addon => addon.id === ADDON_ID_RETAINED
+        install => install.addon.id === ADDON_ID_RETAINED
       ),
     ]);
 
-    const promiseActiveThemeStartupCompleted = AddonTestUtils.promiseWebExtensionStartup(
-      ADDON_ID
-    );
+    const promiseActiveThemeStartupCompleted =
+      AddonTestUtils.promiseWebExtensionStartup(ADDON_ID);
 
     const promiseBackgroundUpdatesFound = TestUtils.topicObserved(
       "addons-background-updates-found"
@@ -521,9 +520,8 @@ add_task(
       ),
     ]);
 
-    const promiseDefaultThemeEnabled = AddonTestUtils.promiseAddonEvent(
-      "onEnabled"
-    );
+    const promiseDefaultThemeEnabled =
+      AddonTestUtils.promiseAddonEvent("onEnabled");
 
     await updatedActiveTheme.uninstall();
     await updatedRetainedTheme.uninstall();

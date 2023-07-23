@@ -8,8 +8,11 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   FirstStartup: "resource://gre/modules/FirstStartup.sys.mjs",
   HeadlessShell: "resource:///modules/HeadlessShell.sys.mjs",
+  HomePage: "resource:///modules/HomePage.sys.mjs",
+  LaterRun: "resource:///modules/LaterRun.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
@@ -17,11 +20,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   UpdatePing: "resource://gre/modules/UpdatePing.sys.mjs",
 });
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
-  HomePage: "resource:///modules/HomePage.jsm",
-  LaterRun: "resource:///modules/LaterRun.jsm",
-});
 XPCOMUtils.defineLazyServiceGetters(lazy, {
   UpdateManager: ["@mozilla.org/updates/update-manager;1", "nsIUpdateManager"],
   WinTaskbar: ["@mozilla.org/windows-taskbar;1", "nsIWinTaskbar"],
@@ -244,7 +242,7 @@ function openBrowserWindow(
     let uriArray = Cc["@mozilla.org/array;1"].createInstance(
       Ci.nsIMutableArray
     );
-    urlOrUrlList.forEach(function(uri) {
+    urlOrUrlList.forEach(function (uri) {
       var sstring = Cc["@mozilla.org/supports-string;1"].createInstance(
         Ci.nsISupportsString
       );
@@ -695,7 +693,8 @@ nsBrowserContentHandler.prototype = {
             // into account because that requires waiting for the session file
             // to be read. If a crash occurs after updating, before restarting,
             // we may open the startPage in addition to restoring the session.
-            willRestoreSession = lazy.SessionStartup.isAutomaticRestoreEnabled();
+            willRestoreSession =
+              lazy.SessionStartup.isAutomaticRestoreEnabled();
 
             overridePage = Services.urlFormatter.formatURLPref(
               "startup.homepage_override_url"
@@ -743,7 +742,7 @@ nsBrowserContentHandler.prototype = {
                 return new URL(val);
               } catch (ex) {
                 // Invalid URL, so filter out below
-                console.error(`Invalid once url: ${ex}`);
+                console.error("Invalid once url:", ex);
                 return null;
               }
             })
@@ -765,7 +764,7 @@ nsBrowserContentHandler.prototype = {
         }
       } catch (ex) {
         // Invalid json pref, so ignore (and clear below)
-        console.error(`Invalid once pref: ${ex}`);
+        console.error("Invalid once pref:", ex);
       } finally {
         prefb.clearUserPref(ONCE_PREF);
       }
@@ -1042,6 +1041,13 @@ nsDefaultCommandLineHandler.prototype = {
   handle: function dch_handle(cmdLine) {
     var urilist = [];
 
+    if (cmdLine && cmdLine.state == Ci.nsICommandLine.STATE_INITIAL_LAUNCH) {
+      // Since the purpose of this is to record early in startup,
+      // only record on launches, not already-running invocations.
+      Services.telemetry.setEventRecordingEnabled("telemetry", true);
+      Glean.fogValidation.validateEarlyEvent.record();
+    }
+
     if (AppConstants.platform == "win") {
       // Windows itself does disk I/O when the notification service is
       // initialized, so make sure that is lazy.
@@ -1058,10 +1064,8 @@ nsDefaultCommandLineHandler.prototype = {
         }
 
         async function handleNotification() {
-          const {
-            launchUrl,
-            privilegedName,
-          } = await alertService.handleWindowsTag(tag);
+          const { launchUrl, privilegedName } =
+            await alertService.handleWindowsTag(tag);
 
           // If `launchUrl` or `privilegedName` are provided, then the
           // notification was from a prior instance of the application and we
@@ -1124,7 +1128,8 @@ nsDefaultCommandLineHandler.prototype = {
         handleNotification()
           .catch(e => {
             console.error(
-              `Error handling Windows notification with tag '${tag}': ${e}`
+              `Error handling Windows notification with tag '${tag}':`,
+              e
             );
           })
           .finally(() => {
@@ -1203,6 +1208,28 @@ nsDefaultCommandLineHandler.prototype = {
       console.error(e);
     }
 
+    if (
+      AppConstants.platform == "win" &&
+      cmdLine.handleFlag("to-handle-default-browser-agent", false)
+    ) {
+      // The Default Browser Agent launches Firefox in response to a Windows
+      // native notification, but it does so in a non-standard manner.
+      Services.telemetry.setEventRecordingEnabled(
+        "browser.launched_to_handle",
+        true
+      );
+      Glean.browserLaunchedToHandle.systemNotification.record({
+        name: "default-browser-agent",
+      });
+
+      let thanksURI = Services.io.newURI(
+        Services.urlFormatter.formatURLPref(
+          "browser.shell.defaultBrowserAgent.thanksURL"
+        )
+      );
+      urilist.push(thanksURI);
+    }
+
     if (cmdLine.findFlag("screenshot", true) != -1) {
       lazy.HeadlessShell.handleCmdLineArgs(
         cmdLine,
@@ -1214,9 +1241,7 @@ nsDefaultCommandLineHandler.prototype = {
     for (let i = 0; i < cmdLine.length; ++i) {
       var curarg = cmdLine.getArgument(i);
       if (curarg.match(/^-/)) {
-        console.error(
-          "Warning: unrecognized command line flag " + curarg + "\n"
-        );
+        console.error("Warning: unrecognized command line flag", curarg);
         // To emulate the pre-nsICommandLine behavior, we ignore
         // the argument after an unrecognized flag.
         ++i;
@@ -1225,11 +1250,8 @@ nsDefaultCommandLineHandler.prototype = {
           urilist.push(resolveURIInternal(cmdLine, curarg));
         } catch (e) {
           console.error(
-            "Error opening URI '" +
-              curarg +
-              "' from the command line: " +
-              e +
-              "\n"
+            `Error opening URI ${curarg} from the command line:`,
+            e
           );
         }
       }

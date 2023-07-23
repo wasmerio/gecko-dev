@@ -11,12 +11,8 @@ import {
   makeOriginalSource,
   waitForState,
 } from "../../../utils/test-head";
-const {
-  getSource,
-  getSourceCount,
-  getSelectedSource,
-  getSourceByURL,
-} = selectors;
+const { getSource, getSourceCount, getSelectedSource, getSourceByURL } =
+  selectors;
 import sourceQueue from "../../../utils/source-queue";
 import { generatedToOriginalId } from "devtools/client/shared/source-map-loader/index";
 
@@ -58,9 +54,9 @@ describe("sources - new sources", () => {
   });
 
   it("should automatically select a pending source", async () => {
-    const { dispatch, getState, cx } = createStore(mockCommandClient);
+    const { dispatch, getState } = createStore(mockCommandClient);
     const baseSourceURL = makeSourceURL("base.js");
-    await dispatch(actions.selectSourceURL(cx, baseSourceURL));
+    await dispatch(actions.selectSourceURL(baseSourceURL));
 
     expect(getSelectedSource(getState())).toBe(undefined);
     const baseSource = await dispatch(

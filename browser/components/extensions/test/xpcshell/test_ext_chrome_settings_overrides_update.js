@@ -2,19 +2,16 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-const { AddonTestUtils } = ChromeUtils.import(
-  "resource://testing-common/AddonTestUtils.jsm"
+const { AddonTestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/AddonTestUtils.sys.mjs"
 );
 
 ChromeUtils.defineESModuleGetters(this, {
+  AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
+  HomePage: "resource:///modules/HomePage.sys.mjs",
   PromiseUtils: "resource://gre/modules/PromiseUtils.sys.mjs",
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
-});
-
-XPCOMUtils.defineLazyModuleGetters(this, {
-  AddonManager: "resource://gre/modules/AddonManager.jsm",
-  HomePage: "resource:///modules/HomePage.jsm",
 });
 
 AddonTestUtils.init(this);
@@ -517,8 +514,8 @@ async function test_default_search_on_updating_addons_installed_before_bug175776
     },
   };
 
-  const { ExtensionSettingsStore } = ChromeUtils.import(
-    "resource://gre/modules/ExtensionSettingsStore.jsm"
+  const { ExtensionSettingsStore } = ChromeUtils.importESModule(
+    "resource://gre/modules/ExtensionSettingsStore.sys.mjs"
   );
 
   async function assertExtensionSettingsStore(

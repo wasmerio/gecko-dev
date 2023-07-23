@@ -41,6 +41,10 @@ export class FirefoxProfileMigrator extends MigratorBase {
     return "migration-wizard-migrator-display-name-firefox";
   }
 
+  static get brandImage() {
+    return "chrome://branding/content/icon128.png";
+  }
+
   _getAllProfiles() {
     let allProfiles = new Map();
     let profileService = Cc[
@@ -217,7 +221,7 @@ export class FirefoxProfileMigrator extends MigratorBase {
               newSessionFile.path
             );
             migrationPromise.then(
-              function() {
+              function () {
                 let buildID = Services.appinfo.platformBuildID;
                 let mstone = Services.appinfo.platformVersion;
                 // Force the browser to one-off resume the session that we give it:
@@ -238,7 +242,7 @@ export class FirefoxProfileMigrator extends MigratorBase {
                 savePrefs();
                 aCallback(true);
               },
-              function() {
+              function () {
                 aCallback(false);
               }
             );
@@ -353,7 +357,7 @@ export class FirefoxProfileMigrator extends MigratorBase {
         try {
           let oldRawPrefs = await readOldPrefs();
           let writePrefs = false;
-          const PREFS = ["bookmarks", "history", "passwords"];
+          const PREFS = ["bookmarks", "csvpasswords", "history", "passwords"];
 
           for (let pref of PREFS) {
             let fullPref = `browser\.migrate\.interactions\.${pref}`;

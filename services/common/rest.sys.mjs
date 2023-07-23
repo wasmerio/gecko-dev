@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+import { NetUtil } from "resource://gre/modules/NetUtil.sys.mjs";
+
 import { Log } from "resource://gre/modules/Log.sys.mjs";
 import { PromiseUtils } from "resource://gre/modules/PromiseUtils.sys.mjs";
 
@@ -659,7 +660,7 @@ RESTResponse.prototype = {
     try {
       this._log.trace("Processing response headers.");
       let channel = this.request.channel.QueryInterface(Ci.nsIHttpChannel);
-      channel.visitResponseHeaders(function(header, value) {
+      channel.visitResponseHeaders(function (header, value) {
         headers[header.toLowerCase()] = value;
       });
     } catch (ex) {

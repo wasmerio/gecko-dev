@@ -2,6 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/**
+ * PRIVACY WARNING
+ * ===============
+ *
+ * Database file names can be exposed through telemetry and in crash reports on
+ * the https://crash-stats.mozilla.org site, to allow recognizing the affected
+ * database.
+ * if your database name may contain privacy sensitive information, e.g. an
+ * URL origin, you should use openDatabaseWithFileURL and pass an explicit
+ * TelemetryFilename to it. That name will be used both for telemetry and for
+ * thread names in crash reports.
+ * If you have different needs (e.g. using the javascript module or an async
+ * connection from the main thread) please coordinate with the mozStorage peers.
+ */
+
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
@@ -188,7 +203,7 @@ XPCOMUtils.defineLazyGetter(lazy, "Barriers", () => {
    * The observer is passed the connection identifier of the database
    * connection that is being finalized.
    */
-  let finalizationObserver = function(subject, topic, identifier) {
+  let finalizationObserver = function (subject, topic, identifier) {
     let connectionData = ConnectionData.byId.get(identifier);
 
     if (connectionData === undefined) {
@@ -218,7 +233,7 @@ XPCOMUtils.defineLazyGetter(lazy, "Barriers", () => {
    */
   lazy.AsyncShutdown.profileBeforeChange.addBlocker(
     "Sqlite.sys.mjs shutdown blocker",
-    async function() {
+    async function () {
       await Barriers.shutdown.wait();
       // At this stage, all clients have had a chance to open (and close)
       // their databases. Some previous close operations may still be pending,

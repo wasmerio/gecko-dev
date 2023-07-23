@@ -6,7 +6,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef ipc_glue_MessageChannel_h
-#define ipc_glue_MessageChannel_h 1
+#define ipc_glue_MessageChannel_h
 
 #include "ipc/EnumSerializer.h"
 #include "mozilla/Atomics.h"
@@ -14,9 +14,9 @@
 #include "mozilla/LinkedList.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Vector.h"
-#if defined(OS_WIN)
+#if defined(XP_WIN)
 #  include "mozilla/ipc/Neutering.h"
-#endif  // defined(OS_WIN)
+#endif  // defined(XP_WIN)
 
 #include <functional>
 #include <map>
@@ -100,7 +100,6 @@ using RejectCallback = std::function<void(ResponseRejectReason)>;
 enum ChannelState {
   ChannelClosed,
   ChannelConnected,
-  ChannelTimeout,
   ChannelClosing,
   ChannelError
 };
@@ -198,11 +197,19 @@ class MessageChannel : HasResultCodes {
   // Close the underlying transport channel.
   void Close() MOZ_EXCLUDES(*mMonitor);
 
-  // Force the channel to behave as if a channel error occurred. Valid
-  // for process links only, not thread links.
-  void CloseWithError() MOZ_EXCLUDES(*mMonitor);
-
-  void CloseWithTimeout() MOZ_EXCLUDES(*mMonitor);
+  // Induce an error in this MessageChannel's connection.
+  //
+  // After this method is called, no more message notifications will be
+  // delivered to the listener, and the channel will be unable to send or
+  // receive future messages, as if the peer dropped the connection
+  // unexpectedly.
+  //
+  // The OnChannelError notification will be delivered either asynchronously or
+  // during an explicit call to Close(), whichever happens first.
+  //
+  // NOTE: If SetAbortOnError(true) has been called on this MessageChannel,
+  // calling this function will immediately exit the current process.
+  void InduceConnectionError() MOZ_EXCLUDES(*mMonitor);
 
   void SetAbortOnError(bool abort) MOZ_EXCLUDES(*mMonitor) {
     MonitorAutoLock lock(*mMonitor);
@@ -224,11 +231,6 @@ class MessageChannel : HasResultCodes {
     // that manage child processes which might create native UI, like
     // plugins.
     REQUIRE_DEFERRED_MESSAGE_PROTECTION = 1 << 0,
-    // Windows: When this flag is specified, any wait that occurs during
-    // synchronous IPC will be alertable, thus allowing a11y code in the
-    // chrome process to reenter content while content is waiting on a
-    // synchronous call.
-    REQUIRE_A11Y_REENTRY = 1 << 1,
   };
   void SetChannelFlags(ChannelFlags aFlags) { mFlags = aFlags; }
   ChannelFlags GetChannelFlags() { return mFlags; }
@@ -324,7 +326,7 @@ class MessageChannel : HasResultCodes {
   }
 #endif
 
-#ifdef OS_WIN
+#ifdef XP_WIN
   struct MOZ_STACK_CLASS SyncStackFrame {
     explicit SyncStackFrame(MessageChannel* channel);
     ~SyncStackFrame();
@@ -363,10 +365,7 @@ class MessageChannel : HasResultCodes {
 
  private:
   void SpinInternalEventLoop();
-#  if defined(ACCESSIBILITY)
-  bool WaitForSyncNotifyWithA11yReentry();
-#  endif  // defined(ACCESSIBILITY)
-#endif    // defined(OS_WIN)
+#endif  // defined(XP_WIN)
 
  private:
   void PostErrorNotifyTask() MOZ_REQUIRES(*mMonitor);
@@ -413,7 +412,7 @@ class MessageChannel : HasResultCodes {
   //
   // So in sum: true is a meaningful return value; false isn't,
   // necessarily.
-  bool WaitForSyncNotify(bool aHandleWindowsMessages) MOZ_REQUIRES(*mMonitor);
+  bool WaitForSyncNotify() MOZ_REQUIRES(*mMonitor);
 
   bool WaitResponse(bool aWaitTimedOut);
 
@@ -447,7 +446,15 @@ class MessageChannel : HasResultCodes {
     return mDispatchingAsyncMessageNestedLevel;
   }
 
+  // Check if there is still a live connection to our peer. This may change to
+  // `false` at any time due to the connection to our peer being closed or
+  // dropped (e.g. due to a crash).
   bool Connected() const MOZ_REQUIRES(*mMonitor);
+
+  // Check if there is either still a live connection to our peer, or we have
+  // received a `Goodbye` from our peer, and are actively shutting down our
+  // connection with our peer.
+  bool ConnectedOrClosing() const MOZ_REQUIRES(*mMonitor);
 
  private:
   // Executed on the IO thread.
@@ -457,9 +464,6 @@ class MessageChannel : HasResultCodes {
   // thread, in which case it shouldn't be delivered to the worker.
   bool MaybeInterceptSpecialIOMessage(const Message& aMsg)
       MOZ_REQUIRES(*mMonitor);
-
-  // Tell the IO thread to close the channel and wait for it to ACK.
-  void SynchronouslyClose() MOZ_REQUIRES(*mMonitor);
 
   // Returns true if ShouldDeferMessage(aMsg) is guaranteed to return true.
   // Otherwise, the result of ShouldDeferMessage(aMsg) may be true or false,
@@ -767,7 +771,7 @@ class MessageChannel : HasResultCodes {
   // Map of async Callbacks that are still waiting replies.
   CallbackMap mPendingResponses;
 
-#ifdef OS_WIN
+#ifdef XP_WIN
   HANDLE mEvent;
 #endif
 

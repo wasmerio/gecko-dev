@@ -10,7 +10,7 @@ const TEST_URI =
   "http://example.com/browser/devtools/client/webconsole/" +
   "test/browser/test-eval-in-stackframe.html";
 
-add_task(async function() {
+add_task(async function () {
   // TODO: Remove this pref change when middleware for terminating requests
   // when closing a panel is implemented
   await pushPref("devtools.debugger.features.inline-preview", false);
@@ -48,7 +48,7 @@ add_task(async function() {
   await openDebugger();
   await pauseDebugger(dbg);
 
-  const stackFrames = dbg.selectors.getCallStackFrames();
+  const stackFrames = dbg.selectors.getCurrentThreadFrames();
 
   info("frames added, select the console again");
   await openConsole();
@@ -83,7 +83,7 @@ add_task(async function() {
   );
   ok(true, "`foo + foo3` updated in `firstCall()`");
 
-  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], function() {
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], function () {
     is(
       content.wrappedJSObject.foo,
       "globalFooBug783499",

@@ -12,7 +12,6 @@
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
 #include "mozilla/dom/HTMLLabelElement.h"
-#include "mozilla/StaticPrefs_accessibility.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -75,8 +74,7 @@ RelatedAccIterator::RelatedAccIterator(DocAccessible* aDocument,
     : mDocument(aDocument), mRelAttr(aRelAttr), mProviders(nullptr), mIndex(0) {
   nsAutoString id;
   if (aDependentContent->IsElement() &&
-      aDependentContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::id,
-                                              id)) {
+      aDependentContent->AsElement()->GetAttr(nsGkAtoms::id, id)) {
     mProviders = mDocument->GetRelProviders(aDependentContent->AsElement(), id);
   }
 }
@@ -141,8 +139,7 @@ LocalAccessible* HTMLLabelIterator::Next() {
   LocalAccessible* walkUp = mAcc->LocalParent();
   while (walkUp && !walkUp->IsDoc()) {
     nsIContent* walkUpEl = walkUp->GetContent();
-    if (IsLabel(walkUp) &&
-        !walkUpEl->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::_for)) {
+    if (IsLabel(walkUp) && !walkUpEl->AsElement()->HasAttr(nsGkAtoms::_for)) {
       mLabelFilter = eSkipAncestorLabel;  // prevent infinite loop
       return walkUp;
     }
@@ -350,12 +347,6 @@ LocalAccessible* XULTreeItemIterator::Next() {
 ////////////////////////////////////////////////////////////////////////////////
 // RemoteAccIterator
 ////////////////////////////////////////////////////////////////////////////////
-
-RemoteAccIterator::RemoteAccIterator(nsTArray<uint64_t>&& aIds,
-                                     DocAccessibleParent* aDoc)
-    : mOwnedIds(std::move(aIds)), mIds(mOwnedIds), mDoc(aDoc), mIndex(0) {
-  MOZ_ASSERT(!StaticPrefs::accessibility_cache_enabled_AtStartup());
-}
 
 Accessible* RemoteAccIterator::Next() {
   while (mIndex < mIds.Length()) {

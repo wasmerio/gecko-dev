@@ -74,6 +74,7 @@
 #include "mozilla/CallState.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Components.h"
+#include "mozilla/ContentBlockingAllowList.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/DebugOnly.h"
@@ -150,6 +151,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/CustomElementRegistryBinding.h"
+#include "mozilla/dom/CustomElementTypes.h"
 #include "mozilla/dom/DOMArena.h"
 #include "mozilla/dom/DOMException.h"
 #include "mozilla/dom/DOMExceptionBinding.h"
@@ -168,8 +170,10 @@
 #include "mozilla/dom/FileBlobImpl.h"
 #include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/FilteredNodeIterator.h"
+#include "mozilla/dom/FormData.h"
 #include "mozilla/dom/FragmentOrElement.h"
 #include "mozilla/dom/FromParser.h"
+#include "mozilla/dom/HTMLElement.h"
 #include "mozilla/dom/HTMLFormElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
@@ -340,7 +344,6 @@
 #include "nsJSUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsLiteralString.h"
-#include "nsMappedAttributes.h"
 #include "nsMargin.h"
 #include "nsMimeTypes.h"
 #include "nsNameSpaceManager.h"
@@ -755,11 +758,7 @@ static void RecomputeResistFingerprintingAllDocs(const char*, void*) {
     bcGroup->GetDocGroups(docGroups);
     for (auto* docGroup : docGroups) {
       for (Document* doc : *docGroup) {
-        const bool old = doc->ShouldResistFingerprinting(
-            RFPTarget::IgnoreTargetAndReturnCachedValue);
-        doc->RecomputeResistFingerprinting();
-        if (old != doc->ShouldResistFingerprinting(
-                       RFPTarget::IsAlwaysEnabledForPrecompute)) {
+        if (doc->RecomputeResistFingerprinting()) {
           if (auto* pc = doc->GetPresContext()) {
             pc->MediaFeatureValuesChanged(
                 {MediaFeatureChangeReason::PreferenceChange},
@@ -955,6 +954,13 @@ mozilla::EventClassID nsContentUtils::GetEventClassIDFromMessage(
       MOZ_ASSERT_UNREACHABLE("Invalid event message?");
       return eBasicEventClass;
   }
+}
+
+bool nsContentUtils::IsExternalProtocol(nsIURI* aURI) {
+  bool doesNotReturnData = false;
+  nsresult rv = NS_URIChainHasFlags(
+      aURI, nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA, &doesNotReturnData);
+  return NS_SUCCEEDED(rv) && doesNotReturnData;
 }
 
 static nsAtom* GetEventTypeFromMessage(EventMessage aEventMessage) {
@@ -1556,15 +1562,11 @@ bool nsContentUtils::GetPseudoAttributeValue(const nsString& aSource,
 }
 
 bool nsContentUtils::IsJavaScriptLanguage(const nsString& aName) {
-  return aName.LowerCaseEqualsLiteral("javascript") ||
-         aName.LowerCaseEqualsLiteral("livescript") ||
-         aName.LowerCaseEqualsLiteral("mocha") ||
-         aName.LowerCaseEqualsLiteral("javascript1.0") ||
-         aName.LowerCaseEqualsLiteral("javascript1.1") ||
-         aName.LowerCaseEqualsLiteral("javascript1.2") ||
-         aName.LowerCaseEqualsLiteral("javascript1.3") ||
-         aName.LowerCaseEqualsLiteral("javascript1.4") ||
-         aName.LowerCaseEqualsLiteral("javascript1.5");
+  // Create MIME type as "text/" + given input
+  nsAutoString mimeType(u"text/");
+  mimeType.Append(aName);
+
+  return IsJavascriptMIMEType(mimeType);
 }
 
 void nsContentUtils::SplitMimeType(const nsAString& aValue, nsString& aType,
@@ -1840,7 +1842,7 @@ void nsContentUtils::GetOfflineAppManifest(Document* aDocument, nsIURI** aURI) {
   }
 
   nsAutoString manifestSpec;
-  docElement->GetAttr(kNameSpaceID_None, nsGkAtoms::manifest, manifestSpec);
+  docElement->GetAttr(nsGkAtoms::manifest, manifestSpec);
 
   // Manifest URIs can't have fragment identifiers.
   if (manifestSpec.IsEmpty() || manifestSpec.Contains('#')) {
@@ -1967,7 +1969,6 @@ void nsContentUtils::Shutdown() {
   }
 
   TextControlState::Shutdown();
-  nsMappedAttributes::Shutdown();
 }
 
 /**
@@ -2153,15 +2154,13 @@ bool nsContentUtils::IsCallerChromeOrElementTransformGettersEnabled(
 // Older Should RFP Functions ----------------------------------
 
 /* static */
-bool nsContentUtils::ShouldResistFingerprinting(
-    RFPTarget aTarget /* = RFPTarget::Unknown */) {
+bool nsContentUtils::ShouldResistFingerprinting(RFPTarget aTarget) {
   return nsRFPService::IsRFPEnabledFor(aTarget);
 }
 
 /* static */
-bool nsContentUtils::ShouldResistFingerprinting(
-    nsIGlobalObject* aGlobalObject,
-    RFPTarget aTarget /* = RFPTarget::Unknown */) {
+bool nsContentUtils::ShouldResistFingerprinting(nsIGlobalObject* aGlobalObject,
+                                                RFPTarget aTarget) {
   if (!aGlobalObject) {
     return ShouldResistFingerprinting("Null Object", aTarget);
   }
@@ -2169,6 +2168,7 @@ bool nsContentUtils::ShouldResistFingerprinting(
 }
 
 // Newer Should RFP Functions ----------------------------------
+// Utilities ---------------------------------------------------
 
 inline void LogDomainAndPrefList(const char* exemptedDomainsPrefName,
                                  nsAutoCString& url, bool isExemptDomain) {
@@ -2180,11 +2180,8 @@ inline void LogDomainAndPrefList(const char* exemptedDomainsPrefName,
            PromiseFlatCString(list).get()));
 }
 
-inline bool CookieJarSettingsSaysShouldResistFingerprinting(
+inline already_AddRefed<nsICookieJarSettings> GetCookieJarSettings(
     nsILoadInfo* aLoadInfo) {
-  // If the loadinfo's CookieJarSettings says that we _should_ resist
-  // fingerprinting we can always believe it. (This is the (*) rule from
-  // CookieJarSettings.h)
   nsCOMPtr<nsICookieJarSettings> cookieJarSettings;
   nsresult rv =
       aLoadInfo->GetCookieJarSettings(getter_AddRefs(cookieJarSettings));
@@ -2192,39 +2189,111 @@ inline bool CookieJarSettingsSaysShouldResistFingerprinting(
     // The TRRLoadInfo in particular does not implement this method
     // In that instance.  We will return false and let other code decide if
     // we shouldRFP for this connection
-    return false;
+    return nullptr;
   }
   if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_LOG(nsContentUtils::ResistFingerprintingLog(), LogLevel::Info,
             ("Called CookieJarSettingsSaysShouldResistFingerprinting but the "
              "loadinfo's CookieJarSettings couldn't be retrieved"));
+    return nullptr;
+  }
+
+  MOZ_ASSERT(cookieJarSettings);
+  return cookieJarSettings.forget();
+}
+
+bool ETPSaysShouldNotResistFingerprinting(nsIChannel* aChannel,
+                                          nsILoadInfo* aLoadInfo) {
+  // A positive return from this function should always be obeyed.
+  // A negative return means we should keep checking things.
+
+  // We do not want this check to apply to RFP, only to FPP
+  // There is one problematic combination of prefs; however:
+  // If RFP is enabled in PBMode only and FPP is enabled globally
+  // (so, in non-PBM mode) - we need to know if we're in PBMode or not.
+  // But that's kind of expensive and we'd like to avoid it if we
+  // don't have to, so special-case that scenario
+  if (StaticPrefs::privacy_fingerprintingProtection_DoNotUseDirectly() &&
+      !StaticPrefs::privacy_resistFingerprinting_DoNotUseDirectly() &&
+      StaticPrefs::privacy_resistFingerprinting_pbmode_DoNotUseDirectly()) {
+    if (NS_UsePrivateBrowsing(aChannel)) {
+      // In PBM (where RFP is enabled) do not exempt based on the ETP toggle
+      return false;
+    }
+  } else if (StaticPrefs::privacy_resistFingerprinting_DoNotUseDirectly() ||
+             StaticPrefs::
+                 privacy_resistFingerprinting_pbmode_DoNotUseDirectly()) {
+    // In RFP, never use the ETP toggle to exempt.
+    // We can safely return false here even if we are not in PBM mode
+    // and RFP_pbmode is enabled because we will later see that and
+    // return false from the ShouldRFP function entirely.
+    return false;
+  }
+
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
+      GetCookieJarSettings(aLoadInfo);
+  if (!cookieJarSettings) {
+    return false;
+  }
+
+  return ContentBlockingAllowList::Check(cookieJarSettings);
+}
+
+inline bool CookieJarSettingsSaysShouldResistFingerprinting(
+    nsILoadInfo* aLoadInfo) {
+  // A positive return from this function should always be obeyed.
+  // A negative return means we should keep checking things.
+
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
+      GetCookieJarSettings(aLoadInfo);
+  if (!cookieJarSettings) {
     return false;
   }
   return cookieJarSettings->GetShouldResistFingerprinting();
 }
 
+inline bool SchemeSaysShouldNotResistFingerprinting(nsIURI* aURI) {
+  return aURI->SchemeIs("chrome") || aURI->SchemeIs("resource") ||
+         aURI->SchemeIs("view-source") || aURI->SchemeIs("moz-extension") ||
+         (aURI->SchemeIs("about") && !NS_IsContentAccessibleAboutURI(aURI));
+}
+
+inline bool SchemeSaysShouldNotResistFingerprinting(nsIPrincipal* aPrincipal) {
+  if (aPrincipal->SchemeIs("chrome") || aPrincipal->SchemeIs("resource") ||
+      aPrincipal->SchemeIs("view-source") ||
+      aPrincipal->SchemeIs("moz-extension")) {
+    return true;
+  }
+
+  bool isSpecialAboutURI;
+  Unused << aPrincipal->IsContentAccessibleAboutURI(&isSpecialAboutURI);
+  return isSpecialAboutURI;
+}
+
 const char* kExemptedDomainsPrefName =
     "privacy.resistFingerprinting.exemptedDomains";
 
+// Functions ---------------------------------------------------
+
 /* static */
-bool nsContentUtils::ShouldResistFingerprinting(
-    const char* aJustification, RFPTarget aTarget /* = RFPTarget::Unknown */) {
+bool nsContentUtils::ShouldResistFingerprinting(const char* aJustification,
+                                                RFPTarget aTarget) {
   // See comment in header file for information about usage
   return ShouldResistFingerprinting(aTarget);
 }
 
 /* static */
-bool nsContentUtils::ShouldResistFingerprinting(
-    CallerType aCallerType, nsIGlobalObject* aGlobalObject,
-    RFPTarget aTarget /* = RFPTarget::Unknown */) {
+bool nsContentUtils::ShouldResistFingerprinting(CallerType aCallerType,
+                                                nsIGlobalObject* aGlobalObject,
+                                                RFPTarget aTarget) {
   if (aCallerType == CallerType::System) {
     return false;
   }
   return ShouldResistFingerprinting(aGlobalObject, aTarget);
 }
 
-bool nsContentUtils::ShouldResistFingerprinting(
-    nsIDocShell* aDocShell, RFPTarget aTarget /* = RFPTarget::Unknown */) {
+bool nsContentUtils::ShouldResistFingerprinting(nsIDocShell* aDocShell,
+                                                RFPTarget aTarget) {
   if (!aDocShell) {
     MOZ_LOG(nsContentUtils::ResistFingerprintingLog(), LogLevel::Info,
             ("Called nsContentUtils::ShouldResistFingerprinting(nsIDocShell*) "
@@ -2242,8 +2311,8 @@ bool nsContentUtils::ShouldResistFingerprinting(
 }
 
 /* static */
-bool nsContentUtils::ShouldResistFingerprinting(
-    nsIChannel* aChannel, RFPTarget aTarget /* = RFPTarget::Unknown */) {
+bool nsContentUtils::ShouldResistFingerprinting(nsIChannel* aChannel,
+                                                RFPTarget aTarget) {
   if (!aChannel) {
     MOZ_LOG(nsContentUtils::ResistFingerprintingLog(), LogLevel::Info,
             ("Called nsContentUtils::ShouldResistFingerprinting(nsIChannel* "
@@ -2265,20 +2334,24 @@ bool nsContentUtils::ShouldResistFingerprinting(
     return false;
   }
 
+  if (ETPSaysShouldNotResistFingerprinting(aChannel, loadInfo)) {
+    MOZ_LOG(nsContentUtils::ResistFingerprintingLog(), LogLevel::Debug,
+            ("Inside ShouldResistFingerprinting(nsIChannel*)"
+             " ETPSaysShouldNotResistFingerprinting said false"));
+    return false;
+  }
+
+  if (CookieJarSettingsSaysShouldResistFingerprinting(loadInfo)) {
+    return true;
+  }
+
   // Document types have no loading principal.  Subdocument types do have a
-  // loading principal, but it is the loading principal of the parent document;
-  // not the subdocument.
+  // loading principal, but it is the loading principal of the parent
+  // document; not the subdocument.
   auto contentType = loadInfo->GetExternalContentPolicyType();
+  // Case 1: Document or Subdocument load
   if (contentType == ExtContentPolicy::TYPE_DOCUMENT ||
       contentType == ExtContentPolicy::TYPE_SUBDOCUMENT) {
-    // This cookie jar check is relevant to both document and non-document
-    // cases. but it will be performed inside the ShouldRFP(nsILoadInfo) as
-    // well, so we put into this conditional to avoid doing it twice in that
-    // case.
-    if (CookieJarSettingsSaysShouldResistFingerprinting(loadInfo)) {
-      return true;
-    }
-
     nsCOMPtr<nsIURI> channelURI;
     nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(channelURI));
     MOZ_ASSERT(
@@ -2319,13 +2392,22 @@ bool nsContentUtils::ShouldResistFingerprinting(
   }
 
   // Case 2: Subresource Load
-  return ShouldResistFingerprinting(loadInfo, aTarget);
+  // Because this code is only used for subresource loads, this
+  // will check the parent's principal
+  nsIPrincipal* principal = loadInfo->GetLoadingPrincipal();
+
+  MOZ_ASSERT_IF(principal && !principal->IsSystemPrincipal() &&
+                    !principal->GetIsAddonOrExpandedAddonPrincipal(),
+                BasePrincipal::Cast(principal)->OriginAttributesRef() ==
+                    loadInfo->GetOriginAttributes());
+  return ShouldResistFingerprinting_dangerous(principal, "Internal Call",
+                                              aTarget);
 }
 
 /* static */
 bool nsContentUtils::ShouldResistFingerprinting_dangerous(
     nsIURI* aURI, const mozilla::OriginAttributes& aOriginAttributes,
-    const char* aJustification, RFPTarget aTarget /* = RFPTarget::Unknown */) {
+    const char* aJustification, RFPTarget aTarget) {
   // With this check, we can ensure that the prefs and target say yes, so only
   // an exemption would cause us to return false.
   if (!ShouldResistFingerprinting("Positive return check", aTarget)) {
@@ -2343,9 +2425,7 @@ bool nsContentUtils::ShouldResistFingerprinting_dangerous(
   }
 
   // Exclude internal schemes and web extensions
-  if (aURI->SchemeIs("about") || aURI->SchemeIs("chrome") ||
-      aURI->SchemeIs("resource") || aURI->SchemeIs("view-source") ||
-      aURI->SchemeIs("moz-extension")) {
+  if (SchemeSaysShouldNotResistFingerprinting(aURI)) {
     return false;
   }
 
@@ -2366,38 +2446,8 @@ bool nsContentUtils::ShouldResistFingerprinting_dangerous(
 }
 
 /* static */
-bool nsContentUtils::ShouldResistFingerprinting(
-    nsILoadInfo* aLoadInfo, RFPTarget aTarget /* = RFPTarget::Unknown */) {
-  MOZ_ASSERT(aLoadInfo->GetExternalContentPolicyType() !=
-                 ExtContentPolicy::TYPE_DOCUMENT &&
-             aLoadInfo->GetExternalContentPolicyType() !=
-                 ExtContentPolicy::TYPE_SUBDOCUMENT);
-
-  // With this check, we can ensure that the prefs and target say yes, so only
-  // an exemption would cause us to return false.
-  if (!ShouldResistFingerprinting("Positive return check", aTarget)) {
-    return false;
-  }
-
-  if (CookieJarSettingsSaysShouldResistFingerprinting(aLoadInfo)) {
-    return true;
-  }
-
-  // Because this function is only used for subresource loads, this
-  // will check the parent's principal
-  nsIPrincipal* principal = aLoadInfo->GetLoadingPrincipal();
-
-  MOZ_ASSERT_IF(principal && !principal->IsSystemPrincipal(),
-                BasePrincipal::Cast(principal)->OriginAttributesRef() ==
-                    aLoadInfo->GetOriginAttributes());
-  return ShouldResistFingerprinting_dangerous(principal, "Internal Call",
-                                              aTarget);
-}
-
-/* static */
 bool nsContentUtils::ShouldResistFingerprinting_dangerous(
-    nsIPrincipal* aPrincipal, const char* aJustification,
-    RFPTarget aTarget /* = RFPTarget::Unknown */) {
+    nsIPrincipal* aPrincipal, const char* aJustification, RFPTarget aTarget) {
   if (!aPrincipal) {
     MOZ_LOG(nsContentUtils::ResistFingerprintingLog(), LogLevel::Info,
             ("Called nsContentUtils::ShouldResistFingerprinting(nsILoadInfo* "
@@ -2427,9 +2477,8 @@ bool nsContentUtils::ShouldResistFingerprinting_dangerous(
     }
   }
 
-  // Exclude internal schemes
-  if (aPrincipal->SchemeIs("about") || aPrincipal->SchemeIs("chrome") ||
-      aPrincipal->SchemeIs("resource") || aPrincipal->SchemeIs("view-source")) {
+  // Exclude internal schemes and web extensions
+  if (SchemeSaysShouldNotResistFingerprinting(aPrincipal)) {
     return false;
   }
 
@@ -2444,7 +2493,7 @@ bool nsContentUtils::ShouldResistFingerprinting_dangerous(
   if (MOZ_LOG_TEST(nsContentUtils::ResistFingerprintingLog(),
                    mozilla::LogLevel::Debug)) {
     nsAutoCString origin;
-    aPrincipal->GetAsciiOrigin(origin);
+    aPrincipal->GetWebExposedOriginSerialization(origin);
     LogDomainAndPrefList(kExemptedDomainsPrefName, origin, isExemptDomain);
   }
 
@@ -2457,18 +2506,18 @@ bool nsContentUtils::ShouldResistFingerprinting_dangerous(
   // So perform this last-ditch check for that scenario.
   // We arbitrarily use https as the scheme, but it doesn't matter.
   nsCOMPtr<nsIURI> uri;
-  nsresult rv;
   if (isExemptDomain && StaticPrefs::privacy_firstparty_isolate() &&
       !originAttributes.mFirstPartyDomain.IsEmpty()) {
-    rv = NS_NewURI(getter_AddRefs(uri),
-                   u"https://"_ns + originAttributes.mFirstPartyDomain);
+    nsresult rv =
+        NS_NewURI(getter_AddRefs(uri),
+                  u"https://"_ns + originAttributes.mFirstPartyDomain);
     if (!NS_FAILED(rv)) {
       isExemptDomain =
           nsContentUtils::IsURIInPrefList(uri, kExemptedDomainsPrefName);
     }
   } else if (isExemptDomain && !originAttributes.mPartitionKey.IsEmpty()) {
-    rv = NS_NewURI(getter_AddRefs(uri),
-                   u"https://"_ns + originAttributes.mPartitionKey);
+    nsresult rv = NS_NewURI(getter_AddRefs(uri),
+                            u"https://"_ns + originAttributes.mPartitionKey);
     if (!NS_FAILED(rv)) {
       isExemptDomain =
           nsContentUtils::IsURIInPrefList(uri, kExemptedDomainsPrefName);
@@ -2477,6 +2526,8 @@ bool nsContentUtils::ShouldResistFingerprinting_dangerous(
 
   return !isExemptDomain;
 }
+
+// --------------------------------------------------------------------
 
 /* static */
 void nsContentUtils::CalcRoundedWindowSizeForResistingFingerprinting(
@@ -3341,7 +3392,7 @@ void nsContentUtils::GenerateStateKey(nsIContent* aContent, Document* aDocument,
 
         // Append the form name
         nsAutoString formName;
-        formElement->GetAttr(kNameSpaceID_None, nsGkAtoms::name, formName);
+        formElement->GetAttr(nsGkAtoms::name, formName);
         KeyAppendString(formName, aKey);
       } else {
         // Not in a form.  Append the control number, if this is a parser
@@ -3363,8 +3414,7 @@ void nsContentUtils::GenerateStateKey(nsIContent* aContent, Document* aDocument,
 
         // Append the control name
         nsAutoString name;
-        aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::name,
-                                       name);
+        aContent->AsElement()->GetAttr(nsGkAtoms::name, name);
         KeyAppendString(name, aKey);
       }
     }
@@ -3839,19 +3889,6 @@ imgLoader* nsContentUtils::GetImgLoaderForChannel(nsIChannel* aChannel,
   return context && context->UsePrivateBrowsing()
              ? imgLoader::PrivateBrowsingLoader()
              : imgLoader::NormalLoader();
-}
-
-// static
-bool nsContentUtils::IsImageInCache(nsIURI* aURI, Document* aDocument) {
-  imgILoader* loader = GetImgLoaderForDocument(aDocument);
-  nsCOMPtr<imgICache> cache = do_QueryInterface(loader);
-
-  // If something unexpected happened we return false, otherwise if props
-  // is set, the image is cached and we return true
-  nsCOMPtr<nsIProperties> props;
-  nsresult rv =
-      cache->FindEntryProperties(aURI, aDocument, getter_AddRefs(props));
-  return (NS_SUCCEEDED(rv) && props);
 }
 
 // static
@@ -5903,8 +5940,7 @@ void nsContentUtils::TriggerLink(nsIContent* aContent, nsIURI* aLinkURI,
     if ((!aContent->IsHTMLElement(nsGkAtoms::a) &&
          !aContent->IsHTMLElement(nsGkAtoms::area) &&
          !aContent->IsSVGElement(nsGkAtoms::a)) ||
-        !aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::download,
-                                        fileName) ||
+        !aContent->AsElement()->GetAttr(nsGkAtoms::download, fileName) ||
         NS_FAILED(aContent->NodePrincipal()->CheckMayLoad(aLinkURI, true))) {
       fileName.SetIsVoid(true);  // No actionable download attribute was found.
     }
@@ -6509,7 +6545,8 @@ SameOriginCheckerImpl::GetInterface(const nsIID& aIID, void** aResult) {
 }
 
 /* static */
-nsresult nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin) {
+nsresult nsContentUtils::GetWebExposedOriginSerialization(nsIURI* aURI,
+                                                          nsACString& aOrigin) {
   MOZ_ASSERT(aURI, "missing uri");
 
   // For Blob URI, the path is the URL of the owning page.
@@ -6525,7 +6562,7 @@ nsresult nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin) {
       return NS_OK;
     }
 
-    return GetASCIIOrigin(uri, aOrigin);
+    return GetWebExposedOriginSerialization(uri, aOrigin);
   }
 
   aOrigin.Truncate();
@@ -6558,24 +6595,26 @@ nsresult nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin) {
 }
 
 /* static */
-nsresult nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal,
-                                      nsAString& aOrigin) {
+nsresult nsContentUtils::GetWebExposedOriginSerialization(
+    nsIPrincipal* aPrincipal, nsAString& aOrigin) {
   MOZ_ASSERT(aPrincipal, "missing principal");
 
   aOrigin.Truncate();
-  nsAutoCString asciiOrigin;
+  nsAutoCString webExposedOriginSerialization;
 
-  nsresult rv = aPrincipal->GetAsciiOrigin(asciiOrigin);
+  nsresult rv = aPrincipal->GetWebExposedOriginSerialization(
+      webExposedOriginSerialization);
   if (NS_FAILED(rv)) {
-    asciiOrigin.AssignLiteral("null");
+    webExposedOriginSerialization.AssignLiteral("null");
   }
 
-  CopyUTF8toUTF16(asciiOrigin, aOrigin);
+  CopyUTF8toUTF16(webExposedOriginSerialization, aOrigin);
   return NS_OK;
 }
 
 /* static */
-nsresult nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin) {
+nsresult nsContentUtils::GetWebExposedOriginSerialization(nsIURI* aURI,
+                                                          nsAString& aOrigin) {
   MOZ_ASSERT(aURI, "missing uri");
   nsresult rv;
 
@@ -6588,15 +6627,15 @@ nsresult nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin) {
     rv = uriWithSpecialOrigin->GetOrigin(getter_AddRefs(origin));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    return GetUTFOrigin(origin, aOrigin);
+    return GetWebExposedOriginSerialization(origin, aOrigin);
   }
 #endif
 
-  nsAutoCString asciiOrigin;
-  rv = GetASCIIOrigin(aURI, asciiOrigin);
+  nsAutoCString webExposedOriginSerialization;
+  rv = GetWebExposedOriginSerialization(aURI, webExposedOriginSerialization);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  CopyUTF8toUTF16(asciiOrigin, aOrigin);
+  CopyUTF8toUTF16(webExposedOriginSerialization, aOrigin);
   return NS_OK;
 }
 
@@ -7068,10 +7107,11 @@ static void ReportPatternCompileFailure(nsAString& aPattern,
 }
 
 // static
-Maybe<bool> nsContentUtils::IsPatternMatching(nsAString& aValue,
-                                              nsAString& aPattern,
+Maybe<bool> nsContentUtils::IsPatternMatching(const nsAString& aValue,
+                                              nsString&& aPattern,
                                               const Document* aDocument,
-                                              bool aHasMultiple) {
+                                              bool aHasMultiple,
+                                              JS::RegExpFlags aFlags) {
   NS_ASSERTION(aDocument, "aDocument should be a valid pointer (not null)");
 
   // The fact that we're using a JS regexp under the hood should not be visible
@@ -7090,9 +7130,8 @@ Maybe<bool> nsContentUtils::IsPatternMatching(nsAString& aValue,
   // Check if the pattern by itself is valid first, and not that it only becomes
   // valid once we add ^(?: and )$.
   JS::Rooted<JS::Value> error(cx);
-  if (!JS::CheckRegExpSyntax(
-          cx, static_cast<char16_t*>(aPattern.BeginWriting()),
-          aPattern.Length(), JS::RegExpFlag::Unicode, &error)) {
+  if (!JS::CheckRegExpSyntax(cx, aPattern.BeginReading(), aPattern.Length(),
+                             aFlags, &error)) {
     return Nothing();
   }
 
@@ -7106,9 +7145,8 @@ Maybe<bool> nsContentUtils::IsPatternMatching(nsAString& aValue,
   aPattern.AppendLiteral(")$");
 
   JS::Rooted<JSObject*> re(
-      cx,
-      JS::NewUCRegExpObject(cx, static_cast<char16_t*>(aPattern.BeginWriting()),
-                            aPattern.Length(), JS::RegExpFlag::Unicode));
+      cx, JS::NewUCRegExpObject(cx, aPattern.BeginReading(), aPattern.Length(),
+                                aFlags));
   if (!re) {
     return Nothing();
   }
@@ -7116,9 +7154,8 @@ Maybe<bool> nsContentUtils::IsPatternMatching(nsAString& aValue,
   JS::Rooted<JS::Value> rval(cx, JS::NullValue());
   if (!aHasMultiple) {
     size_t idx = 0;
-    if (!JS::ExecuteRegExpNoStatics(
-            cx, re, static_cast<char16_t*>(aValue.BeginWriting()),
-            aValue.Length(), &idx, true, &rval)) {
+    if (!JS::ExecuteRegExpNoStatics(cx, re, aValue.BeginReading(),
+                                    aValue.Length(), &idx, true, &rval)) {
       return Nothing();
     }
     return Some(!rval.isNull());
@@ -7128,9 +7165,8 @@ Maybe<bool> nsContentUtils::IsPatternMatching(nsAString& aValue,
   while (tokenizer.hasMoreTokens()) {
     const nsAString& value = tokenizer.nextToken();
     size_t idx = 0;
-    if (!JS::ExecuteRegExpNoStatics(
-            cx, re, static_cast<const char16_t*>(value.BeginReading()),
-            value.Length(), &idx, true, &rval)) {
+    if (!JS::ExecuteRegExpNoStatics(cx, re, value.BeginReading(),
+                                    value.Length(), &idx, true, &rval)) {
       return Nothing();
     }
     if (rval.isNull()) {
@@ -7834,8 +7870,8 @@ void nsContentUtils::CallOnAllRemoteChildren(
   }
 }
 
-bool nsContentUtils::IPCDataTransferItemHasKnownFlavor(
-    const IPCDataTransferItem& aItem) {
+bool nsContentUtils::IPCTransferableDataItemHasKnownFlavor(
+    const IPCTransferableDataItem& aItem) {
   // Unknown types are converted to kCustomTypesMime.
   if (aItem.flavor().EqualsASCII(kCustomTypesMime)) {
     return true;
@@ -7850,16 +7886,16 @@ bool nsContentUtils::IPCDataTransferItemHasKnownFlavor(
   return false;
 }
 
-nsresult nsContentUtils::IPCTransferableToTransferable(
-    const IPCDataTransfer& aDataTransfer, bool aAddDataFlavor,
+nsresult nsContentUtils::IPCTransferableDataToTransferable(
+    const IPCTransferableData& aTransferableData, bool aAddDataFlavor,
     nsITransferable* aTransferable, const bool aFilterUnknownFlavors) {
   nsresult rv;
-  const nsTArray<IPCDataTransferItem>& items = aDataTransfer.items();
+  const nsTArray<IPCTransferableDataItem>& items = aTransferableData.items();
   for (const auto& item : items) {
-    if (aFilterUnknownFlavors && !IPCDataTransferItemHasKnownFlavor(item)) {
+    if (aFilterUnknownFlavors && !IPCTransferableDataItemHasKnownFlavor(item)) {
       NS_WARNING(
           "Ignoring unknown flavor in "
-          "nsContentUtils::IPCTransferableToTransferable");
+          "nsContentUtils::IPCTransferableDataToTransferable");
       continue;
     }
 
@@ -7869,8 +7905,8 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
 
     nsCOMPtr<nsISupports> transferData;
     switch (item.data().type()) {
-      case IPCDataTransferData::TIPCDataTransferString: {
-        const auto& data = item.data().get_IPCDataTransferString();
+      case IPCTransferableDataType::TIPCTransferableDataString: {
+        const auto& data = item.data().get_IPCTransferableDataString();
         nsCOMPtr<nsISupportsString> dataWrapper =
             do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -7881,8 +7917,8 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
         transferData = dataWrapper;
         break;
       }
-      case IPCDataTransferData::TIPCDataTransferCString: {
-        const auto& data = item.data().get_IPCDataTransferCString();
+      case IPCTransferableDataType::TIPCTransferableDataCString: {
+        const auto& data = item.data().get_IPCTransferableDataCString();
         nsCOMPtr<nsISupportsCString> dataWrapper =
             do_CreateInstance(NS_SUPPORTS_CSTRING_CONTRACTID, &rv);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -7893,8 +7929,8 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
         transferData = dataWrapper;
         break;
       }
-      case IPCDataTransferData::TIPCDataTransferInputStream: {
-        const auto& data = item.data().get_IPCDataTransferInputStream();
+      case IPCTransferableDataType::TIPCTransferableDataInputStream: {
+        const auto& data = item.data().get_IPCTransferableDataInputStream();
         nsCOMPtr<nsIInputStream> stream;
         rv = NS_NewByteInputStream(getter_AddRefs(stream),
                                    AsChars(data.data().AsSpan()),
@@ -7903,21 +7939,21 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
         transferData = stream.forget();
         break;
       }
-      case IPCDataTransferData::TIPCDataTransferImageContainer: {
-        const auto& data = item.data().get_IPCDataTransferImageContainer();
+      case IPCTransferableDataType::TIPCTransferableDataImageContainer: {
+        const auto& data = item.data().get_IPCTransferableDataImageContainer();
         nsCOMPtr<imgIContainer> container;
-        rv = DeserializeDataTransferImageContainer(data,
-                                                   getter_AddRefs(container));
+        rv = DeserializeTransferableDataImageContainer(
+            data, getter_AddRefs(container));
         NS_ENSURE_SUCCESS(rv, rv);
         transferData = container;
         break;
       }
-      case IPCDataTransferData::TIPCDataTransferBlob: {
-        const auto& data = item.data().get_IPCDataTransferBlob();
+      case IPCTransferableDataType::TIPCTransferableDataBlob: {
+        const auto& data = item.data().get_IPCTransferableDataBlob();
         transferData = IPCBlobUtils::Deserialize(data.blob());
         break;
       }
-      case IPCDataTransferData::T__None:
+      case IPCTransferableDataType::T__None:
         MOZ_ASSERT_UNREACHABLE();
         return NS_ERROR_FAILURE;
     }
@@ -7928,15 +7964,17 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
   return NS_OK;
 }
 
-nsresult nsContentUtils::IPCTransferableToTransferable(
-    const IPCDataTransfer& aDataTransfer, const bool& aIsPrivateData,
+nsresult nsContentUtils::IPCTransferableDataToTransferable(
+    const IPCTransferableData& aTransferableData, const bool& aIsPrivateData,
     nsIPrincipal* aRequestingPrincipal,
     const nsContentPolicyType& aContentPolicyType, bool aAddDataFlavor,
     nsITransferable* aTransferable, const bool aFilterUnknownFlavors) {
+  // Note that we need to set privacy status of transferable before adding any
+  // data into it.
   aTransferable->SetIsPrivateData(aIsPrivateData);
 
-  nsresult rv = IPCTransferableToTransferable(
-      aDataTransfer, aAddDataFlavor, aTransferable, aFilterUnknownFlavors);
+  nsresult rv = IPCTransferableDataToTransferable(
+      aTransferableData, aAddDataFlavor, aTransferable, aFilterUnknownFlavors);
   NS_ENSURE_SUCCESS(rv, rv);
 
   aTransferable->SetRequestingPrincipal(aRequestingPrincipal);
@@ -7944,27 +7982,46 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
   return NS_OK;
 }
 
-nsresult nsContentUtils::IPCTransferableItemToVariant(
-    const IPCDataTransferItem& aDataTransferItem,
-    nsIWritableVariant* aVariant) {
+nsresult nsContentUtils::IPCTransferableToTransferable(
+    const IPCTransferable& aIPCTransferable, bool aAddDataFlavor,
+    nsITransferable* aTransferable, const bool aFilterUnknownFlavors) {
+  nsresult rv = IPCTransferableDataToTransferable(
+      aIPCTransferable.data(), aIPCTransferable.isPrivateData(),
+      aIPCTransferable.requestingPrincipal(),
+      aIPCTransferable.contentPolicyType(), aAddDataFlavor, aTransferable,
+      aFilterUnknownFlavors);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (aIPCTransferable.cookieJarSettings().isSome()) {
+    nsCOMPtr<nsICookieJarSettings> cookieJarSettings;
+    net::CookieJarSettings::Deserialize(
+        aIPCTransferable.cookieJarSettings().ref(),
+        getter_AddRefs(cookieJarSettings));
+    aTransferable->SetCookieJarSettings(cookieJarSettings);
+  }
+  aTransferable->SetReferrerInfo(aIPCTransferable.referrerInfo());
+  return NS_OK;
+}
+
+nsresult nsContentUtils::IPCTransferableDataItemToVariant(
+    const IPCTransferableDataItem& aItem, nsIWritableVariant* aVariant) {
   MOZ_ASSERT(aVariant);
 
-  switch (aDataTransferItem.data().type()) {
-    case IPCDataTransferData::TIPCDataTransferString: {
-      const auto& data = aDataTransferItem.data().get_IPCDataTransferString();
+  switch (aItem.data().type()) {
+    case IPCTransferableDataType::TIPCTransferableDataString: {
+      const auto& data = aItem.data().get_IPCTransferableDataString();
       return aVariant->SetAsAString(nsDependentSubstring(
           reinterpret_cast<const char16_t*>(data.data().Data()),
           data.data().Size() / sizeof(char16_t)));
     }
-    case IPCDataTransferData::TIPCDataTransferCString: {
-      const auto& data = aDataTransferItem.data().get_IPCDataTransferCString();
+    case IPCTransferableDataType::TIPCTransferableDataCString: {
+      const auto& data = aItem.data().get_IPCTransferableDataCString();
       return aVariant->SetAsACString(nsDependentCSubstring(
           reinterpret_cast<const char*>(data.data().Data()),
           data.data().Size()));
     }
-    case IPCDataTransferData::TIPCDataTransferInputStream: {
-      const auto& data =
-          aDataTransferItem.data().get_IPCDataTransferInputStream();
+    case IPCTransferableDataType::TIPCTransferableDataInputStream: {
+      const auto& data = aItem.data().get_IPCTransferableDataInputStream();
       nsCOMPtr<nsIInputStream> stream;
       nsresult rv = NS_NewByteInputStream(getter_AddRefs(stream),
                                           AsChars(data.data().AsSpan()),
@@ -7972,21 +8029,20 @@ nsresult nsContentUtils::IPCTransferableItemToVariant(
       NS_ENSURE_SUCCESS(rv, rv);
       return aVariant->SetAsISupports(stream);
     }
-    case IPCDataTransferData::TIPCDataTransferImageContainer: {
-      const auto& data =
-          aDataTransferItem.data().get_IPCDataTransferImageContainer();
+    case IPCTransferableDataType::TIPCTransferableDataImageContainer: {
+      const auto& data = aItem.data().get_IPCTransferableDataImageContainer();
       nsCOMPtr<imgIContainer> container;
-      nsresult rv = DeserializeDataTransferImageContainer(
+      nsresult rv = DeserializeTransferableDataImageContainer(
           data, getter_AddRefs(container));
       NS_ENSURE_SUCCESS(rv, rv);
       return aVariant->SetAsISupports(container);
     }
-    case IPCDataTransferData::TIPCDataTransferBlob: {
-      const auto& data = aDataTransferItem.data().get_IPCDataTransferBlob();
+    case IPCTransferableDataType::TIPCTransferableDataBlob: {
+      const auto& data = aItem.data().get_IPCTransferableDataBlob();
       RefPtr<BlobImpl> blobImpl = IPCBlobUtils::Deserialize(data.blob());
       return aVariant->SetAsISupports(blobImpl);
     }
-    case IPCDataTransferData::T__None:
+    case IPCTransferableDataType::T__None:
       break;
   }
 
@@ -7994,18 +8050,19 @@ nsresult nsContentUtils::IPCTransferableItemToVariant(
   return NS_ERROR_UNEXPECTED;
 }
 
-void nsContentUtils::TransferablesToIPCTransferables(
-    nsIArray* aTransferables, nsTArray<IPCDataTransfer>& aIPC,
+void nsContentUtils::TransferablesToIPCTransferableDatas(
+    nsIArray* aTransferables, nsTArray<IPCTransferableData>& aIPC,
     bool aInSyncMessage, mozilla::dom::ContentParent* aParent) {
   aIPC.Clear();
   if (aTransferables) {
     uint32_t transferableCount = 0;
     aTransferables->GetLength(&transferableCount);
     for (uint32_t i = 0; i < transferableCount; ++i) {
-      IPCDataTransfer* dt = aIPC.AppendElement();
+      IPCTransferableData* dt = aIPC.AppendElement();
       nsCOMPtr<nsITransferable> transferable =
           do_QueryElementAt(aTransferables, i);
-      TransferableToIPCTransferable(transferable, dt, aInSyncMessage, aParent);
+      TransferableToIPCTransferableData(transferable, dt, aInSyncMessage,
+                                        aParent);
     }
   }
 }
@@ -8051,8 +8108,9 @@ static already_AddRefed<DataSourceSurface> BigBufferToDataSurface(
                                          aStride);
 }
 
-nsresult nsContentUtils::DeserializeDataTransferImageContainer(
-    const IPCDataTransferImageContainer& aData, imgIContainer** aContainer) {
+nsresult nsContentUtils::DeserializeTransferableDataImageContainer(
+    const IPCTransferableDataImageContainer& aData,
+    imgIContainer** aContainer) {
   const IntSize size(aData.width(), aData.height());
   size_t maxBufferSize = 0;
   size_t usedBufferSize = 0;
@@ -8086,20 +8144,20 @@ bool nsContentUtils::IsFlavorImage(const nsACString& aFlavor) {
 
 // FIXME: This can probably be removed once bug 1783240 lands, as `nsString`
 // will be implicitly serialized in shmem when sent over IPDL directly.
-static IPCDataTransferString AsIPCDataTransferString(
+static IPCTransferableDataString AsIPCTransferableDataString(
     Span<const char16_t> aInput) {
-  return IPCDataTransferString{BigBuffer(AsBytes(aInput))};
+  return IPCTransferableDataString{BigBuffer(AsBytes(aInput))};
 }
 
 // FIXME: This can probably be removed once bug 1783240 lands, as `nsCString`
 // will be implicitly serialized in shmem when sent over IPDL directly.
-static IPCDataTransferCString AsIPCDataTransferCString(
+static IPCTransferableDataCString AsIPCTransferableDataCString(
     Span<const char> aInput) {
-  return IPCDataTransferCString{BigBuffer(AsBytes(aInput))};
+  return IPCTransferableDataCString{BigBuffer(AsBytes(aInput))};
 }
 
-void nsContentUtils::TransferableToIPCTransferable(
-    nsITransferable* aTransferable, IPCDataTransfer* aIPCDataTransfer,
+void nsContentUtils::TransferableToIPCTransferableData(
+    nsITransferable* aTransferable, IPCTransferableData* aTransferableData,
     bool aInSyncMessage, mozilla::dom::ContentParent* aParent) {
   MOZ_ASSERT_IF(XRE_IsParentProcess(), aParent);
 
@@ -8129,24 +8187,27 @@ void nsContentUtils::TransferableToIPCTransferable(
         // and for OSX we need to create
         // nsContentAreaDragDropDataProvider as nsIFlavorDataProvider.
         if (flavorStr.EqualsLiteral(kFilePromiseMime)) {
-          IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+          IPCTransferableDataItem* item =
+              aTransferableData->items().AppendElement();
           item->flavor() = flavorStr;
           item->data() =
-              AsIPCDataTransferString(NS_ConvertUTF8toUTF16(flavorStr));
+              AsIPCTransferableDataString(NS_ConvertUTF8toUTF16(flavorStr));
           continue;
         }
 
         // Empty element, transfer only the flavor
-        IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+        IPCTransferableDataItem* item =
+            aTransferableData->items().AppendElement();
         item->flavor() = flavorStr;
-        item->data() = AsIPCDataTransferString(EmptyString());
+        item->data() = AsIPCTransferableDataString(EmptyString());
         continue;
       }
 
       // We need to handle nsIInputStream before nsISupportsCString, otherwise
       // nsStringInputStream would be converted into a wrong type.
       if (nsCOMPtr<nsIInputStream> stream = do_QueryInterface(data)) {
-        IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+        IPCTransferableDataItem* item =
+            aTransferableData->items().AppendElement();
         item->flavor() = flavorStr;
         nsCString imageData;
         DebugOnly<nsresult> rv =
@@ -8158,7 +8219,7 @@ void nsContentUtils::TransferableToIPCTransferable(
         // `nsCString` will be implicitly serialized in shmem when sent over
         // IPDL directly.
         item->data() =
-            IPCDataTransferInputStream(BigBuffer(AsBytes(Span(imageData))));
+            IPCTransferableDataInputStream(BigBuffer(AsBytes(Span(imageData))));
         continue;
       }
 
@@ -8166,9 +8227,10 @@ void nsContentUtils::TransferableToIPCTransferable(
         nsAutoString dataAsString;
         MOZ_ALWAYS_SUCCEEDS(text->GetData(dataAsString));
 
-        IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+        IPCTransferableDataItem* item =
+            aTransferableData->items().AppendElement();
         item->flavor() = flavorStr;
-        item->data() = AsIPCDataTransferString(dataAsString);
+        item->data() = AsIPCTransferableDataString(dataAsString);
         continue;
       }
 
@@ -8176,9 +8238,10 @@ void nsContentUtils::TransferableToIPCTransferable(
         nsAutoCString dataAsString;
         MOZ_ALWAYS_SUCCEEDS(ctext->GetData(dataAsString));
 
-        IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+        IPCTransferableDataItem* item =
+            aTransferableData->items().AppendElement();
         item->flavor() = flavorStr;
-        item->data() = AsIPCDataTransferCString(dataAsString);
+        item->data() = AsIPCTransferableDataCString(dataAsString);
         continue;
       }
 
@@ -8204,11 +8267,12 @@ void nsContentUtils::TransferableToIPCTransferable(
           continue;
         }
 
-        IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+        IPCTransferableDataItem* item =
+            aTransferableData->items().AppendElement();
         item->flavor() = flavorStr;
 
         mozilla::gfx::IntSize size = dataSurface->GetSize();
-        item->data() = IPCDataTransferImageContainer(
+        item->data() = IPCTransferableDataImageContainer(
             std::move(*surfaceData), size.width, size.height, stride,
             dataSurface->GetFormat());
         continue;
@@ -8265,12 +8329,37 @@ void nsContentUtils::TransferableToIPCTransferable(
           continue;
         }
 
-        IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+        IPCTransferableDataItem* item =
+            aTransferableData->items().AppendElement();
         item->flavor() = flavorStr;
-        item->data() = IPCDataTransferBlob(ipcBlob);
+        item->data() = IPCTransferableDataBlob(ipcBlob);
       }
     }
   }
+}
+
+void nsContentUtils::TransferableToIPCTransferable(
+    nsITransferable* aTransferable, IPCTransferable* aIPCTransferable,
+    bool aInSyncMessage, mozilla::dom::ContentParent* aParent) {
+  IPCTransferableData ipcTransferableData;
+  TransferableToIPCTransferableData(aTransferable, &ipcTransferableData,
+                                    aInSyncMessage, aParent);
+
+  Maybe<net::CookieJarSettingsArgs> cookieJarSettingsArgs;
+  if (nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
+          aTransferable->GetCookieJarSettings()) {
+    net::CookieJarSettingsArgs args;
+    net::CookieJarSettings::Cast(cookieJarSettings)->Serialize(args);
+    cookieJarSettingsArgs = Some(std::move(args));
+  }
+
+  aIPCTransferable->data() = std::move(ipcTransferableData);
+  aIPCTransferable->isPrivateData() = aTransferable->GetIsPrivateData();
+  aIPCTransferable->requestingPrincipal() =
+      aTransferable->GetRequestingPrincipal();
+  aIPCTransferable->cookieJarSettings() = std::move(cookieJarSettingsArgs);
+  aIPCTransferable->contentPolicyType() = aTransferable->GetContentPolicyType();
+  aIPCTransferable->referrerInfo() = aTransferable->GetReferrerInfo();
 }
 
 Maybe<BigBuffer> nsContentUtils::GetSurfaceData(DataSourceSurface& aSurface,
@@ -8578,8 +8667,7 @@ void nsContentUtils::FirePageShowEventForFrameLoaderSwap(
   }
 
   RefPtr<Document> doc = aItem->GetDocument();
-  NS_ASSERTION(doc, "What happened here?");
-  if (doc->IsShowing() == aFireIfShowing) {
+  if (doc && doc->IsShowing() == aFireIfShowing) {
     doc->OnPageShow(true, aChromeEventHandler, aOnlySystemGroup);
   }
 }
@@ -9566,7 +9654,7 @@ MOZ_CAN_RUN_SCRIPT
 static void DoCustomElementCreate(Element** aElement, JSContext* aCx,
                                   Document* aDoc, NodeInfo* aNodeInfo,
                                   CustomElementConstructor* aConstructor,
-                                  ErrorResult& aRv) {
+                                  ErrorResult& aRv, FromParser aFromParser) {
   JS::Rooted<JS::Value> constructResult(aCx);
   aConstructor->Construct(&constructResult, aRv, "Custom Element Create",
                           CallbackFunction::eRethrowExceptions);
@@ -9599,6 +9687,11 @@ static void DoCustomElementCreate(Element** aElement, JSContext* aCx,
       element->NodeInfo()->NameAtom() != localName) {
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return;
+  }
+
+  if (element->IsHTMLElement()) {
+    static_cast<HTMLElement*>(&*element)->InhibitRestoration(
+        !(aFromParser & FROM_PARSER_NETWORK));
   }
 
   element.forget(aElement);
@@ -9738,7 +9831,8 @@ nsresult nsContentUtils::NewXULOrHTMLElement(
       definition->mPrefixStack.AppendElement(nodeInfo->GetPrefixAtom());
       RefPtr<Document> doc = nodeInfo->GetDocument();
       DoCustomElementCreate(aResult, cx, doc, nodeInfo,
-                            MOZ_KnownLive(definition->mConstructor), rv);
+                            MOZ_KnownLive(definition->mConstructor), rv,
+                            aFromParser);
       if (rv.MaybeSetPendingException(cx)) {
         if (nodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
           NS_IF_ADDREF(*aResult = NS_NewHTMLUnknownElement(nodeInfo.forget(),
@@ -9890,6 +9984,78 @@ void nsContentUtils::EnqueueLifecycleCallback(
 }
 
 /* static */
+CustomElementFormValue nsContentUtils::ConvertToCustomElementFormValue(
+    const Nullable<OwningFileOrUSVStringOrFormData>& aState) {
+  if (aState.IsNull()) {
+    return void_t{};
+  }
+  const auto& state = aState.Value();
+  if (state.IsFile()) {
+    RefPtr<BlobImpl> impl = state.GetAsFile()->Impl();
+    return {std::move(impl)};
+  }
+  if (state.IsUSVString()) {
+    return state.GetAsUSVString();
+  }
+  return state.GetAsFormData()->ConvertToCustomElementFormValue();
+}
+
+/* static */
+Nullable<OwningFileOrUSVStringOrFormData>
+nsContentUtils::ExtractFormAssociatedCustomElementValue(
+    nsIGlobalObject* aGlobal,
+    const mozilla::dom::CustomElementFormValue& aCEValue) {
+  MOZ_ASSERT(aGlobal);
+
+  OwningFileOrUSVStringOrFormData value;
+  switch (aCEValue.type()) {
+    case CustomElementFormValue::TBlobImpl: {
+      RefPtr<File> file = File::Create(aGlobal, aCEValue.get_BlobImpl());
+      if (NS_WARN_IF(!file)) {
+        return {};
+      }
+      value.SetAsFile() = file;
+    } break;
+
+    case CustomElementFormValue::TnsString:
+      value.SetAsUSVString() = aCEValue.get_nsString();
+      break;
+
+    case CustomElementFormValue::TArrayOfFormDataTuple: {
+      const auto& array = aCEValue.get_ArrayOfFormDataTuple();
+      auto formData = MakeRefPtr<FormData>();
+
+      for (auto i = 0ul; i < array.Length(); ++i) {
+        const auto& item = array.ElementAt(i);
+        switch (item.value().type()) {
+          case FormDataValue::TnsString:
+            formData->AddNameValuePair(item.name(),
+                                       item.value().get_nsString());
+            break;
+
+          case FormDataValue::TBlobImpl: {
+            auto blobImpl = item.value().get_BlobImpl();
+            auto* blob = Blob::Create(aGlobal, blobImpl);
+            formData->AddNameBlobPair(item.name(), blob);
+          } break;
+
+          default:
+            continue;
+        }
+      }
+
+      value.SetAsFormData() = formData;
+    } break;
+    case CustomElementFormValue::Tvoid_t:
+      return {};
+    default:
+      NS_WARNING("Invalid CustomElementContentData type!");
+      return {};
+  }
+  return value;
+}
+
+/* static */
 void nsContentUtils::AppendDocumentLevelNativeAnonymousContentTo(
     Document* aDocument, nsTArray<nsIContent*>& aElements) {
   MOZ_ASSERT(aDocument);
@@ -9970,8 +10136,15 @@ bool nsContentUtils::IsImageAvailable(nsIContent* aLoadingNode, nsIURI* aURI,
   MOZ_ASSERT(triggeringPrincipal);
 
   Document* doc = aLoadingNode->OwnerDoc();
-  imgLoader* imgLoader = GetImgLoaderForDocument(doc);
-  return imgLoader->IsImageAvailable(aURI, triggeringPrincipal, aCORSMode, doc);
+  return IsImageAvailable(aURI, triggeringPrincipal, aCORSMode, doc);
+}
+
+bool nsContentUtils::IsImageAvailable(nsIURI* aURI,
+                                      nsIPrincipal* aTriggeringPrincipal,
+                                      CORSMode aCORSMode, Document* aDoc) {
+  imgLoader* imgLoader = GetImgLoaderForDocument(aDoc);
+  return imgLoader->IsImageAvailable(aURI, aTriggeringPrincipal, aCORSMode,
+                                     aDoc);
 }
 
 /* static */

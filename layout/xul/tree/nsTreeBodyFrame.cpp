@@ -452,6 +452,10 @@ nsresult nsTreeBodyFrame::GetView(nsITreeView** aView) {
 }
 
 nsresult nsTreeBodyFrame::SetView(nsITreeView* aView) {
+  if (aView == mView) {
+    return NS_OK;
+  }
+
   // First clear out the old view.
   nsCOMPtr<nsITreeView> oldView = std::move(mView);
   if (oldView) {
@@ -1770,7 +1774,7 @@ void nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex,
       mScratchArray.AppendElement((nsStaticAtom*)nsGkAtoms::even);
 
     XULTreeElement* tree = GetBaseElement();
-    if (tree && tree->HasAttr(kNameSpaceID_None, nsGkAtoms::editing)) {
+    if (tree && tree->HasAttr(nsGkAtoms::editing)) {
       mScratchArray.AppendElement((nsStaticAtom*)nsGkAtoms::editing);
     }
 

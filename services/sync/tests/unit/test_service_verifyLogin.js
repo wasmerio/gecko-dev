@@ -6,7 +6,7 @@ const { Service } = ChromeUtils.importESModule(
 );
 
 function login_handling(handler) {
-  return function(request, response) {
+  return function (request, response) {
     if (has_hawk_header(request)) {
       handler(request, response);
     } else {
@@ -78,13 +78,13 @@ add_task(async function test_verifyLogin() {
     Service._updateCachedURLs();
     Assert.ok(!Service.status.enforceBackoff);
     let backoffInterval;
-    Svc.Obs.add("weave:service:backoff:interval", function observe(
-      subject,
-      data
-    ) {
-      Svc.Obs.remove("weave:service:backoff:interval", observe);
-      backoffInterval = subject;
-    });
+    Svc.Obs.add(
+      "weave:service:backoff:interval",
+      function observe(subject, data) {
+        Svc.Obs.remove("weave:service:backoff:interval", observe);
+        backoffInterval = subject;
+      }
+    );
     Assert.equal(false, await Service.verifyLogin());
     Assert.ok(Service.status.enforceBackoff);
     Assert.equal(backoffInterval, 42);
@@ -110,7 +110,9 @@ add_task(async function test_verifyLogin() {
     Assert.equal(Service.status.service, LOGIN_FAILED);
     Assert.equal(Service.status.login, LOGIN_FAILED_NETWORK_ERROR);
   } finally {
-    Svc.Prefs.resetBranch("");
+    for (const pref of Svc.PrefBranch.getChildList("")) {
+      Svc.PrefBranch.clearUserPref(pref);
+    }
     server.stop(do_test_finished);
   }
 });

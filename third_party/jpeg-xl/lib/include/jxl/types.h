@@ -13,10 +13,9 @@
 #ifndef JXL_TYPES_H_
 #define JXL_TYPES_H_
 
+#include <jxl/jxl_export.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include "jxl/jxl_export.h"
 
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
@@ -54,14 +53,6 @@ typedef enum {
   /** Use 16-bit IEEE 754 half-precision floating point values */
   JXL_TYPE_FLOAT16 = 5,
 } JxlDataType;
-
-/* DEPRECATED: bit-packed 1-bit data type. Use JXL_TYPE_UINT8 instead.
- */
-JXL_DEPRECATED static const int JXL_TYPE_BOOLEAN = 1;
-
-/* DEPRECATED: uint32_t data type. Use JXL_TYPE_FLOAT instead.
- */
-JXL_DEPRECATED static const int JXL_TYPE_UINT32 = 4;
 
 /** Ordering of multi-byte data.
  */
@@ -110,7 +101,8 @@ typedef struct {
   size_t align;
 } JxlPixelFormat;
 
-/** Settings for the interpretation of the input and output buffers.
+/** Settings for the interpretation of UINT input and output buffers.
+ *  (buffers using a FLOAT data type are not affected by this)
  */
 typedef enum {
   /** This is the default setting, where the encoder expects the input pixels

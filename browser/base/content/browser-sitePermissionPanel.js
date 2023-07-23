@@ -64,9 +64,8 @@ var gPermissionPanel = {
       return null;
     }
     delete this._permissionPopup;
-    return (this._permissionPopup = document.getElementById(
-      "permission-popup"
-    ));
+    return (this._permissionPopup =
+      document.getElementById("permission-popup"));
   },
   get _permissionPopupMainView() {
     delete this._permissionPopupPopupMainView;
@@ -133,10 +132,8 @@ var gPermissionPanel = {
     let host = gIdentityHandler.getHostForDisplay();
 
     // Update header label
-    this._permissionPopupMainViewHeaderLabel.textContent = gNavigatorBundle.getFormattedString(
-      "permissions.header",
-      [host]
-    );
+    this._permissionPopupMainViewHeaderLabel.textContent =
+      gNavigatorBundle.getFormattedString("permissions.header", [host]);
 
     // Refresh the permission list
     this.updateSitePermissions();
@@ -411,6 +408,37 @@ var gPermissionPanel = {
       gBrowser.selectedBrowser
     );
 
+    // Don't display origin-keyed 3rdPartyStorage permissions that are covered by
+    // site-keyed 3rdPartyFrameStorage permissions.
+    let thirdPartyStorageSites = new Set(
+      permissions
+        .map(function (permission) {
+          let [id, key] = permission.id.split(
+            SitePermissions.PERM_KEY_DELIMITER
+          );
+          if (id == "3rdPartyFrameStorage") {
+            return key;
+          }
+          return null;
+        })
+        .filter(function (key) {
+          return key != null;
+        })
+    );
+    permissions = permissions.filter(function (permission) {
+      let [id, key] = permission.id.split(SitePermissions.PERM_KEY_DELIMITER);
+      if (id != "3rdPartyStorage") {
+        return true;
+      }
+      try {
+        let origin = Services.io.newURI(key);
+        let site = Services.eTLD.getSite(origin);
+        return !thirdPartyStorageSites.has(site);
+      } catch {
+        return false;
+      }
+    });
+
     this._sharingState = gBrowser.selectedTab._sharingState;
 
     if (this._sharingState?.geo) {
@@ -473,7 +501,8 @@ var gPermissionPanel = {
       }
     }
 
-    let totalBlockedPopups = gBrowser.selectedBrowser.popupBlocker.getBlockedPopupCount();
+    let totalBlockedPopups =
+      gBrowser.selectedBrowser.popupBlocker.getBlockedPopupCount();
     let hasBlockedPopupIndicator = false;
     for (let permission of permissions) {
       let [id, key] = permission.id.split(SitePermissions.PERM_KEY_DELIMITER);
@@ -508,8 +537,17 @@ var gPermissionPanel = {
           permission,
           idNoSuffix: id,
           isContainer: id == "geo" || id == "xr",
-          nowrapLabel: id == "3rdPartyStorage",
+          nowrapLabel: id == "3rdPartyStorage" || id == "3rdPartyFrameStorage",
         });
+
+        // We want permission items for the 3rdPartyFrameStorage to use the same
+        // anchor as 3rdPartyStorage permission items. They will be bundled together
+        // to a single display to the user.
+        if (id == "3rdPartyFrameStorage") {
+          anchor = this._permissionList.querySelector(
+            `[anchorfor="3rdPartyStorage"]`
+          );
+        }
 
         if (!item) {
           continue;
@@ -542,7 +580,7 @@ var gPermissionPanel = {
    * It is up to the caller to actually insert the element somewhere.
    *
    * @param permission - An object containing information representing the
-   *                     permission, typically obtained via SitePermissions.jsm
+   *                     permission, typically obtained via SitePermissions.sys.mjs
    * @param isContainer - If true, the permission item will be added to a vbox
    *                      and the vbox will be returned.
    * @param permClearButton - Whether to show an "x" button to clear the permission
@@ -785,13 +823,49 @@ var gPermissionPanel = {
       if (permission.sharingState && idNoSuffix === "xr") {
         let origins = browser.getDevicePermissionOrigins(idNoSuffix);
         for (let origin of origins) {
-          let principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(
-            origin
-          );
+          let principal =
+            Services.scriptSecurityManager.createContentPrincipalFromOrigin(
+              origin
+            );
           this._removePermPersistentAllow(principal, permission.id);
         }
         origins.clear();
       }
+
+      // For 3rdPartyFrameStorage permissions, we also need to remove
+      // any 3rdPartyStorage permissions for origins covered by
+      // the site of this permission. These permissions have the same
+      // dialog, but slightly different scopes, so we only show one in
+      // the list if they both exist and use it to stand in for both.
+      if (idNoSuffix == "3rdPartyFrameStorage") {
+        let [, matchSite] = permission.id.split(
+          SitePermissions.PERM_KEY_DELIMITER
+        );
+        let permissions = SitePermissions.getAllForBrowser(browser);
+        let removePermissions = permissions.filter(function (removePermission) {
+          let [id, key] = removePermission.id.split(
+            SitePermissions.PERM_KEY_DELIMITER
+          );
+          if (id != "3rdPartyStorage") {
+            return false;
+          }
+          try {
+            let origin = Services.io.newURI(key);
+            let site = Services.eTLD.getSite(origin);
+            return site == matchSite;
+          } catch {
+            return false;
+          }
+        });
+        for (let removePermission of removePermissions) {
+          SitePermissions.removeFromPrincipal(
+            gBrowser.contentPrincipal,
+            removePermission.id,
+            browser
+          );
+        }
+      }
+
       SitePermissions.removeFromPrincipal(
         gBrowser.contentPrincipal,
         permission.id,
@@ -990,11 +1064,9 @@ var gPermissionPanel = {
     MozXULElement.insertFTLIfNeeded("browser/sitePermissions.ftl");
     let text = document.createXULElement("label", { is: "text-link" });
     text.setAttribute("class", "permission-popup-permission-label");
-    text.setAttribute("data-l10n-id", "site-permissions-open-blocked-popups");
-    text.setAttribute(
-      "data-l10n-args",
-      JSON.stringify({ count: aTotalBlockedPopups })
-    );
+    document.l10n.setAttributes(text, "site-permissions-open-blocked-popups", {
+      count: aTotalBlockedPopups,
+    });
 
     text.addEventListener("click", () => {
       gBrowser.selectedBrowser.popupBlocker.unblockAllPopups();

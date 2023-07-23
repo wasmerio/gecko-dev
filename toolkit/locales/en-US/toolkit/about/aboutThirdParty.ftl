@@ -48,17 +48,20 @@ third-party-status-blocked = Blocked
 third-party-status-redirected = Redirected
 
 third-party-button-copy-to-clipboard = Copy raw data to clipboard
+third-party-loading-data =
+    .alt = Loading system information…
+    .title = Loading system information…
 third-party-button-reload = Reload with system info
     .title = Reload with system information
 third-party-button-open =
     .title = Open file location…
-third-party-button-to-block =
+third-party-button-to-block-module = Block this module
     .title = Block this module
     .aria-label = Block this module
-third-party-button-to-unblock =
+third-party-button-to-unblock-module = Unblock this module
     .title = Currently blocked. Click to unblock it.
     .aria-label = Currently blocked. Click to unblock it.
-third-party-button-to-unblock-disabled =
+third-party-button-to-unblock-module-disabled = Unblock this module (blocklist currently disabled)
     .title =
         Currently marked as blocked, although the blocklist is disabled for this run
         of { -brand-short-name }. Click to unblock it.

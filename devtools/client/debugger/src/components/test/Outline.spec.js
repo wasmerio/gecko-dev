@@ -25,7 +25,7 @@ function generateDefaults(overrides) {
     flashLineRange: jest.fn(),
     isHidden: false,
     symbols: {},
-    selectedLocation: { sourceId },
+    selectedLocation: { id: sourceId },
     onAlphabetizeClick: jest.fn(),
     ...overrides,
   };
@@ -70,13 +70,11 @@ describe("Outline", () => {
     expect(selectLocation).toHaveBeenCalledWith(mockcx, {
       line: startLine,
       column: undefined,
-      sourceId,
       source: {
         id: sourceId,
       },
       sourceActor: null,
       sourceActorId: undefined,
-      sourceUrl: "",
     });
   });
 
@@ -211,13 +209,11 @@ describe("Outline", () => {
       expect(props.selectLocation).toHaveBeenCalledWith(mockcx, {
         line: 24,
         column: undefined,
-        sourceId,
         source: {
           id: sourceId,
         },
         sourceActor: null,
         sourceActorId: undefined,
-        sourceUrl: "",
       });
     });
 
@@ -225,80 +221,6 @@ describe("Outline", () => {
       const { instance, props } = render({ selectedSource: null });
       await instance.selectItem({});
       expect(props.selectLocation).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("onContextMenu of Outline", () => {
-    it("is called onContextMenu for each item", async () => {
-      const event = { event: "oncontextmenu" };
-      const fn = makeSymbolDeclaration("exmple_function", 2);
-      const symbols = {
-        functions: [fn],
-      };
-
-      const { component, instance } = render({ symbols });
-      instance.onContextMenu = jest.fn(() => {});
-      await component
-        .find(".outline-list__element")
-        .simulate("contextmenu", event);
-
-      expect(instance.onContextMenu).toHaveBeenCalledWith(event, fn);
-    });
-
-    it("does not show menu with no selected source", async () => {
-      const mockEvent = {
-        preventDefault: jest.fn(),
-        stopPropagation: jest.fn(),
-      };
-      const { instance } = render({
-        selectedSource: null,
-      });
-      await instance.onContextMenu(mockEvent, {});
-      expect(mockEvent.preventDefault).toHaveBeenCalled();
-      expect(mockEvent.stopPropagation).toHaveBeenCalled();
-      expect(showMenu).not.toHaveBeenCalled();
-    });
-
-    it("shows menu to copy func, copies to clipboard on click", async () => {
-      const startLine = 12;
-      const endLine = 21;
-      const func = makeSymbolDeclaration(
-        "my_example_function",
-        startLine,
-        endLine
-      );
-      const symbols = {
-        functions: [func],
-      };
-      const mockEvent = {
-        preventDefault: jest.fn(),
-        stopPropagation: jest.fn(),
-      };
-      const { instance, props } = render({ symbols });
-      await instance.onContextMenu(mockEvent, func);
-
-      expect(mockEvent.preventDefault).toHaveBeenCalled();
-      expect(mockEvent.stopPropagation).toHaveBeenCalled();
-
-      const expectedMenuOptions = [
-        {
-          accesskey: "F",
-          click: expect.any(Function),
-          disabled: false,
-          id: "node-menu-copy-function",
-          label: "Copy function",
-        },
-      ];
-      expect(props.getFunctionText).toHaveBeenCalledWith(12);
-      expect(showMenu).toHaveBeenCalledWith(mockEvent, expectedMenuOptions);
-
-      showMenu.mock.calls[0][1][0].click();
-      expect(copyToTheClipboard).toHaveBeenCalledWith(mockFunctionText);
-      expect(props.flashLineRange).toHaveBeenCalledWith({
-        end: endLine,
-        sourceId,
-        start: startLine,
-      });
     });
   });
 });

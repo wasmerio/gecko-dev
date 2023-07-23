@@ -2,18 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
-import { BrowserTestUtils } from "resource://testing-common/BrowserTestUtils.sys.mjs";
-
-const { SitePermissions } = ChromeUtils.import(
-  "resource:///modules/SitePermissions.jsm"
-);
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+import { BrowserTestUtils } from "resource://testing-common/BrowserTestUtils.sys.mjs";
+import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+import { UrlClassifierTestUtils } from "resource://testing-common/UrlClassifierTestUtils.sys.mjs";
 
-let { UrlClassifierTestUtils } = ChromeUtils.import(
-  "resource://testing-common/UrlClassifierTestUtils.jsm"
-);
+import { SitePermissions } from "resource:///modules/SitePermissions.sys.mjs";
+
+import { NetUtil } from "resource://gre/modules/NetUtil.sys.mjs";
 
 const CC_SELECTORS = ["#identity-popup", "#urlbar-input-container"];
 const PP_SELECTORS = ["#protections-popup", "#urlbar-input-container"];
@@ -50,9 +46,8 @@ export var ControlCenter = {
           loadUsingSystemPrincipal: true,
         });
         channel = channel.QueryInterface(Ci.nsIFileChannel);
-        let browserWindow = Services.wm.getMostRecentWindow(
-          "navigator:browser"
-        );
+        let browserWindow =
+          Services.wm.getMostRecentWindow("navigator:browser");
         let gBrowser = browserWindow.gBrowser;
         BrowserTestUtils.loadURIString(
           gBrowser.selectedBrowser,
@@ -98,9 +93,10 @@ export var ControlCenter = {
     singlePermission: {
       selectors: CC_SELECTORS,
       async applyConfig() {
-        let principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(
-          PERMISSIONS_PAGE
-        );
+        let principal =
+          Services.scriptSecurityManager.createContentPrincipalFromOrigin(
+            PERMISSIONS_PAGE
+          );
         SitePermissions.setForPrincipal(
           principal,
           "camera",
@@ -118,10 +114,11 @@ export var ControlCenter = {
         // TODO: (Bug 1330601) Rewrite this to consider temporary (TAB) permission states.
         // There are 2 possible non-default permission states, so we alternate between them.
         let states = [SitePermissions.ALLOW, SitePermissions.BLOCK];
-        let principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(
-          PERMISSIONS_PAGE
-        );
-        SitePermissions.listPermissions().forEach(function(permission, index) {
+        let principal =
+          Services.scriptSecurityManager.createContentPrincipalFromOrigin(
+            PERMISSIONS_PAGE
+          );
+        SitePermissions.listPermissions().forEach(function (permission, index) {
           SitePermissions.setForPrincipal(
             principal,
             permission,
@@ -185,9 +182,8 @@ export var ControlCenter = {
     mixedActiveUnblocked: {
       selectors: CC_SELECTORS,
       async applyConfig() {
-        let browserWindow = Services.wm.getMostRecentWindow(
-          "navigator:browser"
-        );
+        let browserWindow =
+          Services.wm.getMostRecentWindow("navigator:browser");
         let gBrowser = browserWindow.gBrowser;
         await loadPage(MIXED_ACTIVE_CONTENT_URL);
         gBrowser.ownerGlobal.gIdentityHandler.disableMixedContentProtection();
@@ -203,9 +199,8 @@ export var ControlCenter = {
     mixedActiveUnblockedSubView: {
       selectors: CC_SELECTORS,
       async applyConfig() {
-        let browserWindow = Services.wm.getMostRecentWindow(
-          "navigator:browser"
-        );
+        let browserWindow =
+          Services.wm.getMostRecentWindow("navigator:browser");
         let gBrowser = browserWindow.gBrowser;
         await loadPage(MIXED_ACTIVE_CONTENT_URL);
         gBrowser.ownerGlobal.gIdentityHandler.disableMixedContentProtection();
@@ -258,9 +253,8 @@ export var ControlCenter = {
     trackingProtectionDisabled: {
       selectors: PP_SELECTORS,
       async applyConfig() {
-        let browserWindow = Services.wm.getMostRecentWindow(
-          "navigator:browser"
-        );
+        let browserWindow =
+          Services.wm.getMostRecentWindow("navigator:browser");
         let gBrowser = browserWindow.gBrowser;
         Services.prefs.setBoolPref("privacy.trackingprotection.enabled", true);
         await UrlClassifierTestUtils.addTestTrackers();

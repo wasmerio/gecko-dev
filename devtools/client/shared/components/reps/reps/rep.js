@@ -5,7 +5,7 @@
 "use strict";
 
 // Make this available to both AMD and CJS environments
-define(function(require, exports, module) {
+define(function (require, exports, module) {
   // Load all existing rep templates
   const Undefined = require("devtools/client/shared/components/reps/reps/undefined");
   const Null = require("devtools/client/shared/components/reps/reps/null");
@@ -87,7 +87,7 @@ define(function(require, exports, module) {
    * to the current value type. The value must be passed in as the 'object'
    * property.
    */
-  const Rep = function(props) {
+  const Rep = function (props) {
     const { object, defaultRep } = props;
     const rep = getRep(
       object,
@@ -135,18 +135,13 @@ define(function(require, exports, module) {
   };
 
   // Custom Formatters
-  // ToDo: This preference can be removed once the custom formatters feature is stable enough
   // Services.prefs isn't available in jsonviewer. It doesn't matter as we don't want to use
   // custom formatters there
   if (typeof Services == "object" && Services?.prefs) {
-    const customFormattersExperimentallyEnabled = Services.prefs.getBoolPref(
-      "devtools.custom-formatters",
+    const useCustomFormatters = Services.prefs.getBoolPref(
+      "devtools.custom-formatters.enabled",
       false
     );
-
-    const useCustomFormatters =
-      customFormattersExperimentallyEnabled &&
-      Services.prefs.getBoolPref("devtools.custom-formatters.enabled", false);
 
     if (useCustomFormatters) {
       const CustomFormatter = require("devtools/client/shared/components/reps/reps/custom-formatter");

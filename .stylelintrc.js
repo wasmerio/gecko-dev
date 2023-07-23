@@ -237,4 +237,87 @@ module.exports = {
       },
     ],
   },
+
+  overrides: [
+    {
+      files: "*.scss",
+      customSyntax: "postcss-scss",
+      extends: "stylelint-config-recommended-scss",
+    },
+    {
+      files: "browser/components/newtab/**",
+      customSyntax: "postcss-scss",
+      extends: "stylelint-config-standard-scss",
+      rules: {
+        "at-rule-disallowed-list": [
+          ["debug", "warn", "error"],
+          {
+            message: "Clean up %s directives before committing",
+          },
+        ],
+        "at-rule-no-vendor-prefix": null,
+        "color-function-notation": null,
+        "color-hex-case": "upper",
+        "comment-empty-line-before": [
+          "always",
+          {
+            except: ["first-nested"],
+            ignore: ["after-comment", "stylelint-commands"],
+          },
+        ],
+        "custom-property-empty-line-before": null,
+        "custom-property-pattern": null,
+        "declaration-block-no-duplicate-properties": true,
+        "declaration-block-no-redundant-longhand-properties": null,
+        "declaration-no-important": true,
+        "function-no-unknown": [
+          true,
+          {
+            ignoreFunctions: ["div"],
+          },
+        ],
+        "function-url-no-scheme-relative": true,
+        indentation: 2,
+        "keyframes-name-pattern": null,
+        "max-nesting-depth": [
+          8,
+          {
+            ignore: ["blockless-at-rules", "pseudo-classes"],
+          },
+        ],
+        "media-feature-name-no-vendor-prefix": null,
+        "no-descending-specificity": null,
+        "no-eol-whitespace": true,
+        "no-missing-end-of-source-newline": true,
+        "number-leading-zero": "always",
+        "number-no-trailing-zeros": true,
+        "property-disallowed-list": [
+          ["margin-left", "margin-right"],
+          {
+            message: "Use margin-inline instead of %s",
+          },
+        ],
+        "property-no-unknown": true,
+        "property-no-vendor-prefix": null,
+        "scss/dollar-variable-empty-line-before": null,
+        "scss/double-slash-comment-empty-line-before": [
+          "always",
+          {
+            except: ["first-nested"],
+            ignore: ["between-comments", "stylelint-commands", "inside-block"],
+          },
+        ],
+        "selector-class-pattern": null,
+        "selector-no-vendor-prefix": null,
+        "string-quotes": [
+          "single",
+          {
+            avoidEscape: true,
+          },
+        ],
+        "value-keyword-case": null,
+        "value-no-vendor-prefix": null,
+      },
+    },
+  ],
 };

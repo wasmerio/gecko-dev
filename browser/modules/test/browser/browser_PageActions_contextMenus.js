@@ -1,13 +1,13 @@
 "use strict";
 
-// This is a test for PageActions.jsm, specifically the context menus.
+// This is a test for PageActions.sys.mjs, specifically the context menus.
 
-XPCOMUtils.defineLazyModuleGetters(this, {
-  ExtensionCommon: "resource://gre/modules/ExtensionCommon.jsm",
+ChromeUtils.defineESModuleGetters(this, {
+  ExtensionCommon: "resource://gre/modules/ExtensionCommon.sys.mjs",
 });
 
 // Initialization.  Must run first.
-add_setup(async function() {
+add_setup(async function () {
   // The page action urlbar button, and therefore the panel, is only shown when
   // the current tab is actionable -- i.e., a normal web page.  about:blank is
   // not, so open a new tab first thing, and close it when this test is done.

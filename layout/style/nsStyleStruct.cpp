@@ -381,11 +381,6 @@ nsChangeHint nsStylePadding::CalcDifference(
   return hint;
 }
 
-static nscoord TwipsPerPixel(const Document& aDocument) {
-  auto* pc = aDocument.GetPresContext();
-  return pc ? pc->AppUnitsPerDevPixel() : mozilla::AppUnitsPerCSSPixel();
-}
-
 static inline BorderRadius ZeroBorderRadius() {
   auto zero = LengthPercentage::Zero();
   return {{{zero, zero}}, {{zero, zero}}, {{zero, zero}}, {{zero, zero}}};
@@ -409,8 +404,7 @@ nsStyleBorder::nsStyleBorder(const Document& aDocument)
       mBorderRightColor(StyleColor::CurrentColor()),
       mBorderBottomColor(StyleColor::CurrentColor()),
       mBorderLeftColor(StyleColor::CurrentColor()),
-      mComputedBorder(0, 0, 0, 0),
-      mTwipsPerPixel(TwipsPerPixel(aDocument)) {
+      mComputedBorder(0, 0, 0, 0) {
   MOZ_COUNT_CTOR(nsStyleBorder);
 
   nscoord medium = kMediumBorderWidth;
@@ -435,8 +429,7 @@ nsStyleBorder::nsStyleBorder(const nsStyleBorder& aSrc)
       mBorderBottomColor(aSrc.mBorderBottomColor),
       mBorderLeftColor(aSrc.mBorderLeftColor),
       mComputedBorder(aSrc.mComputedBorder),
-      mBorder(aSrc.mBorder),
-      mTwipsPerPixel(aSrc.mTwipsPerPixel) {
+      mBorder(aSrc.mBorder) {
   MOZ_COUNT_CTOR(nsStyleBorder);
   for (const auto side : mozilla::AllPhysicalSides()) {
     mBorderStyle[side] = aSrc.mBorderStyle[side];
@@ -481,8 +474,7 @@ nsChangeHint nsStyleBorder::CalcDifference(
   // force reflow of all descendants, but the hint would need to force
   // reflow of the frame's children (see how
   // ReflowInput::InitResizeFlags initializes the inline-resize flag).
-  if (mTwipsPerPixel != aNewData.mTwipsPerPixel ||
-      GetComputedBorder() != aNewData.GetComputedBorder() ||
+  if (GetComputedBorder() != aNewData.GetComputedBorder() ||
       mFloatEdge != aNewData.mFloatEdge ||
       mBorderImageOutset != aNewData.mBorderImageOutset ||
       mBoxDecorationBreak != aNewData.mBoxDecorationBreak) {
@@ -557,8 +549,7 @@ nsStyleOutline::nsStyleOutline(const Document& aDocument)
       mOutlineOffset({0.0f}),
       mOutlineColor(StyleColor::CurrentColor()),
       mOutlineStyle(StyleOutlineStyle::BorderStyle(StyleBorderStyle::None)),
-      mActualOutlineWidth(0),
-      mTwipsPerPixel(TwipsPerPixel(aDocument)) {
+      mActualOutlineWidth(0) {
   MOZ_COUNT_CTOR(nsStyleOutline);
 }
 
@@ -567,8 +558,7 @@ nsStyleOutline::nsStyleOutline(const nsStyleOutline& aSrc)
       mOutlineOffset(aSrc.mOutlineOffset),
       mOutlineColor(aSrc.mOutlineColor),
       mOutlineStyle(aSrc.mOutlineStyle),
-      mActualOutlineWidth(aSrc.mActualOutlineWidth),
-      mTwipsPerPixel(aSrc.mTwipsPerPixel) {
+      mActualOutlineWidth(aSrc.mActualOutlineWidth) {
   MOZ_COUNT_CTOR(nsStyleOutline);
 }
 
@@ -592,8 +582,7 @@ nsChangeHint nsStyleOutline::CalcDifference(
   }
 
   if (mOutlineWidth != aNewData.mOutlineWidth ||
-      mOutlineOffset != aNewData.mOutlineOffset ||
-      mTwipsPerPixel != aNewData.mTwipsPerPixel) {
+      mOutlineOffset != aNewData.mOutlineOffset) {
     return nsChangeHint_NeutralChange;
   }
 
@@ -719,8 +708,7 @@ nsStyleColumn::nsStyleColumn(const Document& aDocument)
       mColumnRuleColor(StyleColor::CurrentColor()),
       mColumnRuleStyle(StyleBorderStyle::None),
       mColumnRuleWidth(kMediumBorderWidth),
-      mActualColumnRuleWidth(0),
-      mTwipsPerPixel(TwipsPerPixel(aDocument)) {
+      mActualColumnRuleWidth(0) {
   MOZ_COUNT_CTOR(nsStyleColumn);
 }
 
@@ -734,8 +722,7 @@ nsStyleColumn::nsStyleColumn(const nsStyleColumn& aSource)
       mColumnFill(aSource.mColumnFill),
       mColumnSpan(aSource.mColumnSpan),
       mColumnRuleWidth(aSource.mColumnRuleWidth),
-      mActualColumnRuleWidth(aSource.mActualColumnRuleWidth),
-      mTwipsPerPixel(aSource.mTwipsPerPixel) {
+      mActualColumnRuleWidth(aSource.mActualColumnRuleWidth) {
   MOZ_COUNT_CTOR(nsStyleColumn);
 }
 
@@ -762,10 +749,7 @@ nsChangeHint nsStyleColumn::CalcDifference(
     return NS_STYLE_HINT_VISUAL;
   }
 
-  // XXX Is it right that we never check mTwipsPerPixel to return a
-  // non-nsChangeHint_NeutralChange hint?
-  if (mColumnRuleWidth != aNewData.mColumnRuleWidth ||
-      mTwipsPerPixel != aNewData.mTwipsPerPixel) {
+  if (mColumnRuleWidth != aNewData.mColumnRuleWidth) {
     return nsChangeHint_NeutralChange;
   }
 
@@ -2221,7 +2205,7 @@ nsStyleDisplay::nsStyleDisplay(const Document& aDocument)
       mOffsetDistance(LengthPercentage::Zero()),
       mOffsetRotate{true, StyleAngle{0.0}},
       mOffsetAnchor(StylePositionOrAuto::Auto()),
-      mOffsetPosition(StylePositionOrAuto::Auto()),
+      mOffsetPosition(StyleOffsetPosition::Auto()),
       mTransformOrigin{LengthPercentage::FromPercentage(0.5),
                        LengthPercentage::FromPercentage(0.5),
                        {0.}},
@@ -2229,6 +2213,7 @@ nsStyleDisplay::nsStyleDisplay(const Document& aDocument)
       mPerspectiveOrigin(Position::FromPercentage(0.5f)),
       mVerticalAlign(
           StyleVerticalAlign::Keyword(StyleVerticalAlignKeyword::Baseline)),
+      mBaselineSource(StyleBaselineSource::Auto),
       mWebkitLineClamp(0),
       mShapeMargin(LengthPercentage::Zero()),
       mShapeOutside(StyleShapeOutside::None()) {
@@ -2284,6 +2269,7 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
       mChildPerspective(aSource.mChildPerspective),
       mPerspectiveOrigin(aSource.mPerspectiveOrigin),
       mVerticalAlign(aSource.mVerticalAlign),
+      mBaselineSource(aSource.mBaselineSource),
       mWebkitLineClamp(aSource.mWebkitLineClamp),
       mShapeImageThreshold(aSource.mShapeImageThreshold),
       mShapeMargin(aSource.mShapeMargin),
@@ -2329,23 +2315,16 @@ static inline nsChangeHint CompareTransformValues(
 
 static inline nsChangeHint CompareMotionValues(
     const nsStyleDisplay& aDisplay, const nsStyleDisplay& aNewDisplay) {
-  if (aDisplay.mOffsetPath == aNewDisplay.mOffsetPath &&
-      aDisplay.mOffsetPosition == aNewDisplay.mOffsetPosition) {
+  if (aDisplay.mOffsetPath == aNewDisplay.mOffsetPath) {
     if (aDisplay.mOffsetDistance == aNewDisplay.mOffsetDistance &&
         aDisplay.mOffsetRotate == aNewDisplay.mOffsetRotate &&
-        aDisplay.mOffsetAnchor == aNewDisplay.mOffsetAnchor) {
+        aDisplay.mOffsetAnchor == aNewDisplay.mOffsetAnchor &&
+        aDisplay.mOffsetPosition == aNewDisplay.mOffsetPosition) {
       return nsChangeHint(0);
     }
 
     // No motion path transform is applied.
-    if (!aDisplay.IsStackingContext()) {
-      return nsChangeHint_NeutralChange;
-    }
-
-    // offset-distance and offset-rotate affect offset-path only.
-    if (aDisplay.mOffsetPath.IsNone() &&
-        aDisplay.mOffsetAnchor == aNewDisplay.mOffsetAnchor) {
-      // Only offset-distance and/or offset-rotate is changed.
+    if (aDisplay.mOffsetPath.IsNone()) {
       return nsChangeHint_NeutralChange;
     }
   }
@@ -2355,7 +2334,7 @@ static inline nsChangeHint CompareMotionValues(
   // Set the same hints as what we use for transform because motion path is
   // a kind of transform and will be combined with other transforms.
   nsChangeHint result = nsChangeHint_UpdateTransformLayer;
-  if (aDisplay.IsStackingContext() && aNewDisplay.IsStackingContext()) {
+  if (!aDisplay.mOffsetPath.IsNone() && !aNewDisplay.mOffsetPath.IsNone()) {
     result |= nsChangeHint_UpdatePostTransformOverflow;
   } else {
     result |= nsChangeHint_UpdateOverflow;
@@ -2520,7 +2499,8 @@ nsChangeHint nsStyleDisplay::CalcDifference(
   }
 
   if (mWebkitLineClamp != aNewData.mWebkitLineClamp ||
-      mVerticalAlign != aNewData.mVerticalAlign) {
+      mVerticalAlign != aNewData.mVerticalAlign ||
+      mBaselineSource != aNewData.mBaselineSource) {
     // XXX Can this just be AllReflowHints + RepaintFrame, and be included in
     // the block below?
     hint |= NS_STYLE_HINT_REFLOW;
@@ -3555,9 +3535,9 @@ void StyleCalcNode::ScaleLengthsBy(float aScale) {
       break;
     }
     case Tag::ModRem: {
-      const auto& mod_rem = AsModRem();
-      ScaleNode(*mod_rem.dividend);
-      ScaleNode(*mod_rem.divisor);
+      const auto& modRem = AsModRem();
+      ScaleNode(*modRem.dividend);
+      ScaleNode(*modRem.divisor);
       break;
     }
     case Tag::MinMax: {
@@ -3583,39 +3563,34 @@ void StyleCalcNode::ScaleLengthsBy(float aScale) {
       }
       break;
     }
+    case Tag::Abs: {
+      const auto& abs = AsAbs();
+      ScaleNode(*abs);
+      break;
+    }
   }
 }
 
 template <>
-template <typename ResultT, typename PercentageConverter>
-ResultT StyleCalcNode::ResolveInternal(ResultT aPercentageBasis,
-                                       PercentageConverter aConverter) const {
-  static_assert(std::is_same_v<decltype(aConverter(1.0f)), ResultT>);
-  static_assert(std::is_same_v<ResultT, nscoord> ||
-                std::is_same_v<ResultT, CSSCoord>);
-
+CSSCoord StyleCalcNode::ResolveInternal(CSSCoord aPercentageBasis) const {
   switch (tag) {
     case Tag::Leaf: {
-      auto& leaf = AsLeaf();
+      const auto& leaf = AsLeaf();
       if (leaf.IsPercentage()) {
-        return aConverter(leaf.AsPercentage()._0 * aPercentageBasis);
+        return leaf.AsPercentage()._0 * aPercentageBasis;
       }
-      if constexpr (std::is_same_v<ResultT, nscoord>) {
-        return leaf.AsLength().ToAppUnits();
-      } else {
-        return leaf.AsLength().ToCSSPixels();
-      }
+      return leaf.AsLength().ToCSSPixels();
     }
     case Tag::Negate: {
       const auto& negate = AsNegate();
-      auto value = negate->ResolveInternal(aPercentageBasis, aConverter);
+      auto value = negate->ResolveInternal(aPercentageBasis);
       return -value;
     }
     case Tag::Clamp: {
-      auto& clamp = AsClamp();
-      auto min = clamp.min->ResolveInternal(aPercentageBasis, aConverter);
-      auto center = clamp.center->ResolveInternal(aPercentageBasis, aConverter);
-      auto max = clamp.max->ResolveInternal(aPercentageBasis, aConverter);
+      const auto& clamp = AsClamp();
+      auto min = clamp.min->ResolveInternal(aPercentageBasis);
+      auto center = clamp.center->ResolveInternal(aPercentageBasis);
+      auto max = clamp.max->ResolveInternal(aPercentageBasis);
       return std::max(min, std::min(center, max));
     }
     case Tag::Round: {
@@ -3623,16 +3598,8 @@ ResultT StyleCalcNode::ResolveInternal(ResultT aPercentageBasis,
 
       // Make sure to do the math in CSS pixels, so that floor() and ceil()
       // below round to an integer number of CSS pixels, not app units.
-      CSSCoord step, value;
-      if constexpr (std::is_same_v<ResultT, CSSCoord>) {
-        step = round.step->ResolveInternal(aPercentageBasis, aConverter);
-        value = round.value->ResolveInternal(aPercentageBasis, aConverter);
-      } else {
-        step = CSSPixel::FromAppUnits(
-            round.step->ResolveInternal(aPercentageBasis, aConverter));
-        value = CSSPixel::FromAppUnits(
-            round.value->ResolveInternal(aPercentageBasis, aConverter));
-      }
+      const CSSCoord step = round.step->ResolveInternal(aPercentageBasis);
+      const CSSCoord value = round.value->ResolveInternal(aPercentageBasis);
 
       const float div = value / step;
       const CSSCoord lowerBound = std::floor(div) * step;
@@ -3658,49 +3625,28 @@ ResultT StyleCalcNode::ResolveInternal(ResultT aPercentageBasis,
         return CSSCoord(0);
       }();
 
-      if constexpr (std::is_same_v<ResultT, CSSCoord>) {
-        return result;
-      } else {
-        return CSSPixel::ToAppUnits(result);
-      }
+      return result;
     }
     case Tag::ModRem: {
-      const auto& mod_rem = AsModRem();
+      const auto& modRem = AsModRem();
 
-      // Make sure to do the math in CSS pixels, so that floor() and trunc()
-      // below round to an integer number of CSS pixels, not app units.
-      CSSCoord dividend, divisor;
-      if constexpr (std::is_same_v<ResultT, CSSCoord>) {
-        dividend =
-            mod_rem.dividend->ResolveInternal(aPercentageBasis, aConverter);
-        divisor =
-            mod_rem.divisor->ResolveInternal(aPercentageBasis, aConverter);
-      } else {
-        dividend = CSSPixel::FromAppUnits(
-            mod_rem.dividend->ResolveInternal(aPercentageBasis, aConverter));
-        divisor = CSSPixel::FromAppUnits(
-            mod_rem.divisor->ResolveInternal(aPercentageBasis, aConverter));
-      }
+      CSSCoord dividend = modRem.dividend->ResolveInternal(aPercentageBasis);
+      CSSCoord divisor = modRem.divisor->ResolveInternal(aPercentageBasis);
 
       const CSSCoord result =
-          mod_rem.op == StyleModRemOp::Mod
+          modRem.op == StyleModRemOp::Mod
               ? dividend - divisor * std::floor(dividend / divisor)
               : dividend - divisor * std::trunc(dividend / divisor);
 
-      if constexpr (std::is_same_v<ResultT, CSSCoord>) {
-        return result;
-      } else {
-        return CSSPixel::ToAppUnits(result);
-      }
+      return result;
     }
     case Tag::MinMax: {
       auto children = AsMinMax()._0.AsSpan();
       StyleMinMaxOp op = AsMinMax()._1;
 
-      ResultT result =
-          children[0].ResolveInternal(aPercentageBasis, aConverter);
-      for (auto& child : children.From(1)) {
-        ResultT candidate = child.ResolveInternal(aPercentageBasis, aConverter);
+      CSSCoord result = children[0].ResolveInternal(aPercentageBasis);
+      for (const auto& child : children.From(1)) {
+        CSSCoord candidate = child.ResolveInternal(aPercentageBasis);
         if (op == StyleMinMaxOp::Max) {
           result = std::max(result, candidate);
         } else {
@@ -3710,32 +3656,30 @@ ResultT StyleCalcNode::ResolveInternal(ResultT aPercentageBasis,
       return result;
     }
     case Tag::Sum: {
-      ResultT result = 0;
-      for (auto& child : AsSum().AsSpan()) {
-        result += child.ResolveInternal(aPercentageBasis, aConverter);
+      CSSCoord result = 0.0f;
+      for (const auto& child : AsSum().AsSpan()) {
+        result += child.ResolveInternal(aPercentageBasis);
       }
       return result;
     }
     case Tag::Hypot: {
       //  Doing math in CSS pixels to avoid exceeding integer range of app units
-      CSSCoord result = 0;
+      CSSCoord result = 0.0f;
       for (const auto& child : AsHypot().AsSpan()) {
-        CSSCoord value;
-        if constexpr (std::is_same_v<ResultT, CSSCoord>) {
-          value = child.ResolveInternal(aPercentageBasis, aConverter);
-        } else {
-          value = CSSPixel::FromAppUnits(
-              child.ResolveInternal(aPercentageBasis, aConverter));
-        }
+        CSSCoord value = child.ResolveInternal(aPercentageBasis);
         result += std::pow(value, 2);
       }
       result = std::sqrt(result);
 
-      if constexpr (std::is_same_v<ResultT, CSSCoord>) {
-        return result;
-      } else {
-        return CSSPixel::ToAppUnits(result);
+      return result;
+    }
+    case Tag::Abs: {
+      const auto& abs = AsAbs();
+      auto value = abs->ResolveInternal(aPercentageBasis);
+      if (value == 0) {
+        return value;
       }
+      return std::abs(value);
     }
   }
 
@@ -3745,8 +3689,7 @@ ResultT StyleCalcNode::ResolveInternal(ResultT aPercentageBasis,
 
 template <>
 CSSCoord StyleCalcNode::ResolveToCSSPixels(CSSCoord aBasis) const {
-  CSSCoord result =
-      ResolveInternal(aBasis, [](CSSCoord aPercent) { return aPercent; });
+  CSSCoord result = ResolveInternal(aBasis);
   if (std::isnan(float(result))) {
     return 0.0f;  // This matches style::values::normalize
   }
@@ -3754,9 +3697,9 @@ CSSCoord StyleCalcNode::ResolveToCSSPixels(CSSCoord aBasis) const {
 }
 
 template <>
-nscoord StyleCalcNode::Resolve(nscoord aBasis,
-                               CoordPercentageRounder aRounder) const {
-  return ResolveInternal(aBasis, aRounder);
+nscoord StyleCalcNode::Resolve(nscoord aBasis, CoordRounder aRounder) const {
+  CSSCoord result = ResolveToCSSPixels(CSSPixel::FromAppUnits(aBasis));
+  return aRounder(result * AppUnitsPerCSSPixel());
 }
 
 bool nsStyleDisplay::PrecludesSizeContainmentOrContentVisibilityWithFrame(

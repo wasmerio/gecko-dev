@@ -1474,7 +1474,7 @@ LayoutDeviceIntRect TextLeafPoint::ComputeBoundsFromFrame() const {
   nsIFrame* frame = local->GetFrame();
   MOZ_ASSERT(frame, "No frame found for acc!");
 
-  if (!frame->IsTextFrame()) {
+  if (!frame || !frame->IsTextFrame()) {
     return local->Bounds();
   }
 
@@ -1766,6 +1766,31 @@ bool TextLeafPoint::ContainsPoint(int32_t aX, int32_t aY) {
   }
 
   return CharBounds().Contains(aX, aY);
+}
+
+bool TextLeafRange::Crop(Accessible* aContainer) {
+  TextLeafPoint containerStart(aContainer, 0);
+  TextLeafPoint containerEnd(aContainer,
+                             nsIAccessibleText::TEXT_OFFSET_END_OF_TEXT);
+
+  if (mEnd < containerStart || containerEnd < mStart) {
+    // The range ends before the container, or starts after it.
+    return false;
+  }
+
+  if (mStart < containerStart) {
+    // If range start is before container start, adjust range start to
+    // start of container.
+    mStart = containerStart;
+  }
+
+  if (containerEnd < mEnd) {
+    // If range end is after container end, adjust range end to end of
+    // container.
+    mEnd = containerEnd;
+  }
+
+  return true;
 }
 
 LayoutDeviceIntRect TextLeafRange::Bounds() const {

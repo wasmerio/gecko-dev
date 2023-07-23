@@ -98,9 +98,9 @@ function continueResponses() {
  * Creates a download, which could be interrupted in the middle of it's progress.
  */
 function promiseInterruptibleDownload(extension = ".txt") {
-  let interruptibleFile = FileUtils.getFile("TmpD", [
-    `interruptible${extension}`,
-  ]);
+  let interruptibleFile = new FileUtils.File(
+    PathUtils.join(PathUtils.tempDir, `interruptible${extension}`)
+  );
   interruptibleFile.createUnique(
     Ci.nsIFile.NORMAL_FILE_TYPE,
     FileUtils.PERMS_FILE
@@ -166,7 +166,7 @@ function promisePanelOpened() {
   return new Promise(resolve => {
     // Hook to wait until the panel is shown.
     let originalOnPopupShown = DownloadsPanel.onPopupShown;
-    DownloadsPanel.onPopupShown = function() {
+    DownloadsPanel.onPopupShown = function () {
       DownloadsPanel.onPopupShown = originalOnPopupShown;
       originalOnPopupShown.apply(this, arguments);
 
@@ -250,6 +250,12 @@ async function task_openPanel() {
   let promise = promisePanelOpened();
   DownloadsPanel.showPanel();
   await promise;
+
+  await BrowserTestUtils.waitForMutationCondition(
+    DownloadsView.richListBox,
+    { attributeFilter: ["disabled"] },
+    () => !DownloadsView.richListBox.hasAttribute("disabled")
+  );
 }
 
 async function setDownloadDir() {
@@ -259,7 +265,7 @@ async function setDownloadDir() {
   );
   // Create this dir if it doesn't exist (ignores existing dirs)
   await IOUtils.makeDirectory(tmpDir);
-  registerCleanupFunction(async function() {
+  registerCleanupFunction(async function () {
     try {
       await IOUtils.remove(tmpDir, { recursive: true });
     } catch (e) {
@@ -310,34 +316,34 @@ function startServer() {
     response.finish();
   });
 
-  gHttpServer.registerPathHandler("/interruptible.txt", function(
-    aRequest,
-    aResponse
-  ) {
-    info("Interruptible request started.");
+  gHttpServer.registerPathHandler(
+    "/interruptible.txt",
+    function (aRequest, aResponse) {
+      info("Interruptible request started.");
 
-    // Process the first part of the response.
-    aResponse.processAsync();
-    aResponse.setHeader("Content-Type", "text/plain", false);
-    if (gShouldServeInterruptibleFileAsDownload) {
-      aResponse.setHeader("Content-Disposition", "attachment");
+      // Process the first part of the response.
+      aResponse.processAsync();
+      aResponse.setHeader("Content-Type", "text/plain", false);
+      if (gShouldServeInterruptibleFileAsDownload) {
+        aResponse.setHeader("Content-Disposition", "attachment");
+      }
+      aResponse.setHeader(
+        "Content-Length",
+        "" + TEST_DATA_SHORT.length * 2,
+        false
+      );
+      aResponse.write(TEST_DATA_SHORT);
+
+      // Wait on the current deferred object, then finish the request.
+      _gDeferResponses.promise
+        .then(function RIH_onSuccess() {
+          aResponse.write(TEST_DATA_SHORT);
+          aResponse.finish();
+          info("Interruptible request finished.");
+        })
+        .catch(console.error);
     }
-    aResponse.setHeader(
-      "Content-Length",
-      "" + TEST_DATA_SHORT.length * 2,
-      false
-    );
-    aResponse.write(TEST_DATA_SHORT);
-
-    // Wait on the current deferred object, then finish the request.
-    _gDeferResponses.promise
-      .then(function RIH_onSuccess() {
-        aResponse.write(TEST_DATA_SHORT);
-        aResponse.finish();
-        info("Interruptible request finished.");
-      })
-      .catch(console.error);
-  });
+  );
 }
 
 function serveInterruptibleAsDownload() {
@@ -380,7 +386,7 @@ function openLibrary(aLeftPaneRoot) {
 function promiseDownloadHasProgress(aDownload, progress) {
   return new Promise(resolve => {
     // Wait for the download to reach its progress.
-    let onchange = function() {
+    let onchange = function () {
       let downloadInProgress =
         !aDownload.stopped && aDownload.progress == progress;
       let downloadFinished =
@@ -437,7 +443,7 @@ async function simulateDropAndCheck(win, dropTarget, urls) {
         }
       },
     };
-    list.addView(view).then(function() {
+    list.addView(view).then(function () {
       EventUtils.synthesizeDrop(dropTarget, dropTarget, dragData, "link", win);
     });
   });

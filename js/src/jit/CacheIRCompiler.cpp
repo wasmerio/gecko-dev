@@ -1130,6 +1130,9 @@ void CacheIRWriter::copyStubData(uint8_t* dest) const {
       case StubField::Type::BaseScript:
         InitGCPtr<BaseScript*>(destWords, field.asWord());
         break;
+      case StubField::Type::JitCode:
+        InitGCPtr<JitCode*>(destWords, field.asWord());
+        break;
       case StubField::Type::Id:
         AsGCPtr<jsid>(destWords)->init(jsid::fromRawBits(field.asWord()));
         break;
@@ -1190,6 +1193,10 @@ void jit::TraceCacheIRStub(JSTracer* trc, T* stub,
       case StubField::Type::BaseScript:
         TraceEdge(trc, &stubInfo->getStubField<T, BaseScript*>(stub, offset),
                   "cacheir-script");
+        break;
+      case StubField::Type::JitCode:
+        TraceEdge(trc, &stubInfo->getStubField<T, JitCode*>(stub, offset),
+                  "cacheir-jitcode");
         break;
       case StubField::Type::Id:
         TraceEdge(trc, &stubInfo->getStubField<T, jsid>(stub, offset),
@@ -1327,7 +1334,7 @@ CacheIRStubInfo* CacheIRStubInfo::New(CacheKind kind, ICStubEngine engine,
   fieldTypes[numStubFields] = uint8_t(StubField::Type::Limit);
 
   return new (p) CacheIRStubInfo(kind, engine, makesGCCalls, stubDataOffset,
-                                 codeStart, writer.codeLength(), fieldTypes);
+                                 writer.codeLength());
 }
 
 bool OperandLocation::operator==(const OperandLocation& other) const {
@@ -5588,7 +5595,7 @@ bool CacheIRCompiler::emitArrayPush(ObjOperandId objId, ValOperandId rhsId) {
   Address elementsInitLength(scratch,
                              ObjectElements::offsetOfInitializedLength());
   Address elementsLength(scratch, ObjectElements::offsetOfLength());
-  Address elementsFlags(scratch, ObjectElements::offsetOfFlags());
+  Address capacity(scratch, ObjectElements::offsetOfCapacity());
 
   // Fail if length != initLength.
   masm.load32(elementsInitLength, scratchLength);
@@ -5598,7 +5605,6 @@ bool CacheIRCompiler::emitArrayPush(ObjOperandId objId, ValOperandId rhsId) {
   // If scratchLength < capacity, we can add a dense element inline. If not we
   // need to allocate more elements.
   Label allocElement, addNewElement;
-  Address capacity(scratch, ObjectElements::offsetOfCapacity());
   masm.spectreBoundsCheck32(scratchLength, capacity, InvalidReg, &allocElement);
   masm.jump(&addNewElement);
 
@@ -5738,14 +5744,14 @@ bool CacheIRCompiler::emitStoreTypedArrayElement(ObjOperandId objId,
   return true;
 }
 
-static gc::InitialHeap InitialBigIntHeap(JSContext* cx) {
+static gc::Heap InitialBigIntHeap(JSContext* cx) {
   JS::Zone* zone = cx->zone();
-  return zone->allocNurseryBigInts() ? gc::DefaultHeap : gc::TenuredHeap;
+  return zone->allocNurseryBigInts() ? gc::Heap::Default : gc::Heap::Tenured;
 }
 
 static void EmitAllocateBigInt(MacroAssembler& masm, Register result,
                                Register temp, const LiveRegisterSet& liveSet,
-                               gc::InitialHeap initialHeap, Label* fail) {
+                               gc::Heap initialHeap, Label* fail) {
   Label fallback, done;
   masm.newGCBigInt(result, temp, initialHeap, &fallback);
   masm.jump(&done);
@@ -5753,7 +5759,7 @@ static void EmitAllocateBigInt(MacroAssembler& masm, Register result,
     masm.bind(&fallback);
 
     // Request a minor collection at a later time if nursery allocation failed.
-    bool requestMinorGC = initialHeap == gc::DefaultHeap;
+    bool requestMinorGC = initialHeap == gc::Heap::Default;
 
     masm.PushRegsInMask(liveSet);
     using Fn = void* (*)(JSContext* cx, bool requestMinorGC);
@@ -5810,7 +5816,7 @@ bool CacheIRCompiler::emitLoadTypedArrayElementResult(
     save.takeUnchecked(scratch2);
     save.takeUnchecked(output);
 
-    gc::InitialHeap initialHeap = InitialBigIntHeap(cx_);
+    gc::Heap initialHeap = InitialBigIntHeap(cx_);
     EmitAllocateBigInt(masm, *bigInt, scratch1, save, initialHeap,
                        failure->label());
   }
@@ -6009,7 +6015,7 @@ bool CacheIRCompiler::emitLoadDataViewValueResult(
                            liveVolatileFloatRegs());
       save.takeUnchecked(bigInt);
       save.takeUnchecked(bigIntScratch);
-      gc::InitialHeap initialHeap = InitialBigIntHeap(cx_);
+      gc::Heap initialHeap = InitialBigIntHeap(cx_);
       EmitAllocateBigInt(masm, bigInt, bigIntScratch, save, initialHeap, &fail);
       masm.jump(&done);
 
@@ -7929,12 +7935,12 @@ bool CacheIRCompiler::emitCallStringConcatResult(StringOperandId lhsId,
 
   callvm.prepare();
 
-  masm.Push(static_cast<js::jit::Imm32>(js::gc::DefaultHeap));
+  masm.Push(static_cast<js::jit::Imm32>(int32_t(js::gc::Heap::Default)));
   masm.Push(rhs);
   masm.Push(lhs);
 
-  using Fn = JSString* (*)(JSContext*, HandleString, HandleString,
-                           js::gc::InitialHeap);
+  using Fn =
+      JSString* (*)(JSContext*, HandleString, HandleString, js::gc::Heap);
   callvm.call<Fn, ConcatStrings<CanGC>>();
 
   return true;
@@ -8076,95 +8082,6 @@ bool CacheIRCompiler::emitCallGetSparseElementResult(ObjOperandId objId,
   using Fn = bool (*)(JSContext* cx, Handle<NativeObject*> obj, int32_t int_id,
                       MutableHandleValue result);
   callvm.call<Fn, GetSparseElementHelper>();
-  return true;
-}
-
-bool CacheIRCompiler::emitCallRegExpMatcherResult(ObjOperandId regexpId,
-                                                  StringOperandId inputId,
-                                                  Int32OperandId lastIndexId) {
-  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
-
-  AutoCallVM callvm(masm, this, allocator);
-
-  Register regexp = allocator.useRegister(masm, regexpId);
-  Register input = allocator.useRegister(masm, inputId);
-  Register lastIndex = allocator.useRegister(masm, lastIndexId);
-
-  callvm.prepare();
-  masm.Push(ImmWord(0));  // nullptr MatchPairs.
-  masm.Push(lastIndex);
-  masm.Push(input);
-  masm.Push(regexp);
-
-  using Fn =
-      bool (*)(JSContext*, HandleObject regexp, HandleString input,
-               int32_t lastIndex, MatchPairs* pairs, MutableHandleValue output);
-  callvm.call<Fn, RegExpMatcherRaw>();
-  return true;
-}
-
-bool CacheIRCompiler::emitCallRegExpSearcherResult(ObjOperandId regexpId,
-                                                   StringOperandId inputId,
-                                                   Int32OperandId lastIndexId) {
-  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
-
-  AutoCallVM callvm(masm, this, allocator);
-
-  Register regexp = allocator.useRegister(masm, regexpId);
-  Register input = allocator.useRegister(masm, inputId);
-  Register lastIndex = allocator.useRegister(masm, lastIndexId);
-
-  callvm.prepare();
-  masm.Push(ImmWord(0));  // nullptr MatchPairs.
-  masm.Push(lastIndex);
-  masm.Push(input);
-  masm.Push(regexp);
-
-  using Fn = bool (*)(JSContext*, HandleObject regexp, HandleString input,
-                      int32_t lastIndex, MatchPairs* pairs, int32_t* result);
-  callvm.call<Fn, RegExpSearcherRaw>();
-  return true;
-}
-
-bool CacheIRCompiler::emitRegExpBuiltinExecMatchResult(
-    ObjOperandId regexpId, StringOperandId inputId) {
-  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
-
-  AutoCallVM callvm(masm, this, allocator);
-
-  Register regexp = allocator.useRegister(masm, regexpId);
-  Register input = allocator.useRegister(masm, inputId);
-  AutoScratchRegister lastIndex(allocator, masm);
-
-  callvm.prepare();
-  masm.Push(ImmWord(0));  // nullptr MatchPairs.
-  masm.Push(input);
-  masm.Push(regexp);
-
-  using Fn =
-      bool (*)(JSContext*, Handle<RegExpObject*> regexp, HandleString input,
-               MatchPairs* pairs, MutableHandleValue output);
-  callvm.call<Fn, RegExpBuiltinExecMatchFromJit>();
-  return true;
-}
-
-bool CacheIRCompiler::emitRegExpBuiltinExecTestResult(ObjOperandId regexpId,
-                                                      StringOperandId inputId) {
-  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
-
-  AutoCallVM callvm(masm, this, allocator);
-
-  Register regexp = allocator.useRegister(masm, regexpId);
-  Register input = allocator.useRegister(masm, inputId);
-  AutoScratchRegister lastIndex(allocator, masm);
-
-  callvm.prepare();
-  masm.Push(input);
-  masm.Push(regexp);
-
-  using Fn = bool (*)(JSContext*, Handle<RegExpObject*> regexp,
-                      HandleString input, bool* result);
-  callvm.call<Fn, RegExpBuiltinExecTestFromJit>();
   return true;
 }
 
@@ -9489,7 +9406,6 @@ void CacheIRCompiler::callVMInternal(MacroAssembler& masm, VMFunctionId id) {
   MOZ_ASSERT(mode_ == Mode::Baseline);
 
   TrampolinePtr code = cx_->runtime()->jitRuntime()->getVMWrapper(id);
-  MOZ_ASSERT(GetVMFunction(id).expectTailCall == NonTailCall);
 
   EmitBaselineCallVM(code, masm);
 }

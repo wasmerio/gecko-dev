@@ -187,7 +187,7 @@ export function isSourceWithMap(state, id) {
 }
 
 export function canPrettyPrintSource(state, location) {
-  const { sourceId } = location;
+  const sourceId = location.source.id;
   const source = getSource(state, sourceId);
   if (
     !source ||
@@ -258,7 +258,7 @@ export function getBreakpointPositionsForLine(state, sourceId, line) {
 }
 
 export function getBreakpointPositionsForLocation(state, location) {
-  const { sourceId } = location;
+  const sourceId = location.source.id;
   const positions = getBreakpointPositionsForSource(state, sourceId);
   return findPosition(positions, location);
 }
@@ -339,9 +339,8 @@ export function getSourcesToRemoveForThread(state, threadActorID) {
       sourcesToRemove.push(state.sources.mutableSources.get(sourceId));
 
       // Also remove any original sources related to this generated source
-      const originalSourceIds = state.sources.mutableOriginalSources.get(
-        sourceId
-      );
+      const originalSourceIds =
+        state.sources.mutableOriginalSources.get(sourceId);
       if (originalSourceIds?.length > 0) {
         for (const originalSourceId of originalSourceIds) {
           sourcesToRemove.push(

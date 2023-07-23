@@ -8,11 +8,8 @@ import org.hamcrest.Matchers.* // ktlint-disable no-wildcard-imports
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.geckoview.GeckoResult
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoSession.ContentDelegate
 import org.mozilla.geckoview.PanZoomController
 import org.mozilla.geckoview.PanZoomController.InputResultDetail
-import org.mozilla.geckoview.test.rule.GeckoSessionTestRule
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDisplay
 
 @RunWith(AndroidJUnit4::class)
@@ -22,11 +19,8 @@ class InputResultDetailTest : BaseSessionTest() {
 
     private fun setupDocument(documentPath: String) {
         mainSession.loadTestPath(documentPath)
-        sessionRule.waitUntilCalled(object : ContentDelegate {
-            @GeckoSessionTestRule.AssertCalled(count = 1)
-            override fun onFirstContentfulPaint(session: GeckoSession) {
-            }
-        })
+        mainSession.waitForPageStop()
+        mainSession.promiseAllPaintsDone()
         mainSession.flushApzRepaints()
     }
 
@@ -38,7 +32,7 @@ class InputResultDetailTest : BaseSessionTest() {
             MotionEvent.ACTION_DOWN,
             x,
             y,
-            0
+            0,
         )
 
         val result = mainSession.panZoomController.onTouchEventForDetailResult(down)
@@ -49,7 +43,7 @@ class InputResultDetailTest : BaseSessionTest() {
             MotionEvent.ACTION_UP,
             x,
             y,
-            0
+            0,
         )
 
         mainSession.panZoomController.onTouchEvent(up)
@@ -62,22 +56,22 @@ class InputResultDetailTest : BaseSessionTest() {
         actual: InputResultDetail,
         expectedHandledResult: Int,
         expectedScrollableDirections: Int,
-        expectedOverscrollDirections: Int
+        expectedOverscrollDirections: Int,
     ) {
         assertThat(
             testName + ": The handled result",
             actual.handledResult(),
-            equalTo(expectedHandledResult)
+            equalTo(expectedHandledResult),
         )
         assertThat(
             testName + ": The scrollable directions",
             actual.scrollableDirections(),
-            equalTo(expectedScrollableDirections)
+            equalTo(expectedScrollableDirections),
         )
         assertThat(
             testName + ": The overscroll directions",
             actual.overscrollDirections(),
-            equalTo(expectedOverscrollDirections)
+            equalTo(expectedOverscrollDirections),
         )
     }
 
@@ -107,9 +101,9 @@ class InputResultDetailTest : BaseSessionTest() {
                         // Since sendDownEvent() just sends a touch-down, APZ doesn't
                         // yet know the direction, hence it allows scrolling in both
                         // the pan-x and pan-y cases.
-                        var expectedPlace = if (touchAction == "none" || (subframe && scrollable)) {
+                        var expectedPlace = if (touchAction == "none") {
                             PanZoomController.INPUT_RESULT_HANDLED_CONTENT
-                        } else if (scrollable) {
+                        } else if (scrollable && !subframe) {
                             PanZoomController.INPUT_RESULT_HANDLED
                         } else {
                             PanZoomController.INPUT_RESULT_UNHANDLED
@@ -139,7 +133,7 @@ class InputResultDetailTest : BaseSessionTest() {
                             value,
                             expectedPlace,
                             expectedScrollableDirections,
-                            expectedOverscrollDirections
+                            expectedOverscrollDirections,
                         )
                     }
                 }
@@ -164,7 +158,7 @@ class InputResultDetailTest : BaseSessionTest() {
             value,
             PanZoomController.INPUT_RESULT_HANDLED,
             PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL)
+            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL),
         )
 
         // Prepare a resize event listener.
@@ -175,7 +169,7 @@ class InputResultDetailTest : BaseSessionTest() {
                     resolve(true);
                 }, { once: true });
             });
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         // Hide the dynamic toolbar.
@@ -190,7 +184,7 @@ class InputResultDetailTest : BaseSessionTest() {
             value,
             PanZoomController.INPUT_RESULT_HANDLED,
             PanZoomController.SCROLLABLE_FLAG_TOP,
-            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL)
+            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL),
         )
     }
 
@@ -207,7 +201,7 @@ class InputResultDetailTest : BaseSessionTest() {
             value,
             PanZoomController.INPUT_RESULT_HANDLED,
             PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL)
+            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL),
         )
     }
 
@@ -224,7 +218,7 @@ class InputResultDetailTest : BaseSessionTest() {
             value,
             PanZoomController.INPUT_RESULT_HANDLED,
             PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-            PanZoomController.OVERSCROLL_FLAG_HORIZONTAL
+            PanZoomController.OVERSCROLL_FLAG_HORIZONTAL,
         )
     }
 
@@ -241,7 +235,7 @@ class InputResultDetailTest : BaseSessionTest() {
             value,
             PanZoomController.INPUT_RESULT_HANDLED,
             PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-            PanZoomController.OVERSCROLL_FLAG_VERTICAL
+            PanZoomController.OVERSCROLL_FLAG_VERTICAL,
         )
     }
 
@@ -256,7 +250,7 @@ class InputResultDetailTest : BaseSessionTest() {
                     resolve(true);
                 }, { once: true });
             });
-            """.trimIndent()
+            """.trimIndent(),
         )
 
         // Scroll to the bottom edge of the scroll container.
@@ -264,7 +258,7 @@ class InputResultDetailTest : BaseSessionTest() {
             """
             const scroll = document.getElementById('scroll');
             scroll.scrollTo(0, scroll.scrollHeight);
-            """.trimIndent()
+            """.trimIndent(),
         )
         assertThat("scroll", scrollPromise.value as Boolean, equalTo(true))
         mainSession.flushApzRepaints()
@@ -283,8 +277,8 @@ class InputResultDetailTest : BaseSessionTest() {
             "handoff",
             value,
             PanZoomController.INPUT_RESULT_HANDLED_CONTENT,
-            PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-            PanZoomController.OVERSCROLL_FLAG_VERTICAL
+            (PanZoomController.SCROLLABLE_FLAG_BOTTOM or PanZoomController.SCROLLABLE_FLAG_TOP),
+            PanZoomController.OVERSCROLL_FLAG_VERTICAL,
         )
 
         // Scroll to the bottom edge
@@ -298,7 +292,7 @@ class InputResultDetailTest : BaseSessionTest() {
             value,
             PanZoomController.INPUT_RESULT_HANDLED,
             PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL)
+            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL),
         )
     }
 
@@ -306,7 +300,7 @@ class InputResultDetailTest : BaseSessionTest() {
     @Test
     fun testOverscrollBehaviorNoneOnNonRoot() {
         var files = arrayOf(
-            OVERSCROLL_BEHAVIOR_NONE_NON_ROOT_HTML_PATH
+            OVERSCROLL_BEHAVIOR_NONE_NON_ROOT_HTML_PATH,
         )
 
         for (file in files) {
@@ -319,7 +313,7 @@ class InputResultDetailTest : BaseSessionTest() {
                 value,
                 PanZoomController.INPUT_RESULT_HANDLED_CONTENT,
                 PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-                PanZoomController.OVERSCROLL_FLAG_NONE
+                PanZoomController.OVERSCROLL_FLAG_NONE,
             )
 
             // Scroll to the bottom edge so that the container is no longer scrollable downwards.
@@ -333,7 +327,7 @@ class InputResultDetailTest : BaseSessionTest() {
                 value,
                 PanZoomController.INPUT_RESULT_HANDLED_CONTENT,
                 PanZoomController.SCROLLABLE_FLAG_TOP,
-                PanZoomController.OVERSCROLL_FLAG_NONE
+                PanZoomController.OVERSCROLL_FLAG_NONE,
             )
         }
     }
@@ -344,7 +338,7 @@ class InputResultDetailTest : BaseSessionTest() {
         sessionRule.display?.run { setDynamicToolbarMaxHeight(20) }
 
         var files = arrayOf(
-            OVERSCROLL_BEHAVIOR_NONE_NON_ROOT_HTML_PATH
+            OVERSCROLL_BEHAVIOR_NONE_NON_ROOT_HTML_PATH,
         )
 
         for (file in files) {
@@ -357,7 +351,7 @@ class InputResultDetailTest : BaseSessionTest() {
                 value,
                 PanZoomController.INPUT_RESULT_HANDLED_CONTENT,
                 PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-                PanZoomController.OVERSCROLL_FLAG_NONE
+                PanZoomController.OVERSCROLL_FLAG_NONE,
             )
 
             // Scroll to the bottom edge so that the container is no longer scrollable downwards.
@@ -373,7 +367,7 @@ class InputResultDetailTest : BaseSessionTest() {
                 value,
                 PanZoomController.INPUT_RESULT_HANDLED,
                 PanZoomController.SCROLLABLE_FLAG_BOTTOM,
-                (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL)
+                (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL),
             )
         }
     }
@@ -396,8 +390,8 @@ class InputResultDetailTest : BaseSessionTest() {
     fun testFractionalScrollPortSize() {
         sessionRule.setPrefsUntilTestEnd(
             mapOf(
-                "browser.viewport.desktopWidth" to 980
-            )
+                "browser.viewport.desktopWidth" to 980,
+            ),
         )
         sessionRule.display?.run { setDynamicToolbarMaxHeight(59) }
 
@@ -411,7 +405,95 @@ class InputResultDetailTest : BaseSessionTest() {
             value,
             PanZoomController.INPUT_RESULT_UNHANDLED,
             PanZoomController.SCROLLABLE_FLAG_NONE,
-            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL)
+            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL),
         )
+    }
+
+    @WithDisplay(width = 100, height = 100)
+    @Test
+    fun testPreventTouchMoveAfterLongTap() {
+        sessionRule.display?.run { setDynamicToolbarMaxHeight(20) }
+
+        setupDocument(ROOT_100VH_HTML_PATH)
+
+        // Setup a touchmove event listener preventing scrolling.
+        val touchmovePromise = mainSession.evaluatePromiseJS(
+            """
+            new Promise(resolve => {
+                window.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    resolve(true);
+                }, { passive: false });
+            });
+            """.trimIndent(),
+        )
+
+        // Setup a contextmenu event.
+        val contextmenuPromise = mainSession.evaluatePromiseJS(
+            """
+            new Promise(resolve => {
+                window.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    resolve(true);
+                }, { once: true });
+            });
+            """.trimIndent(),
+        )
+
+        // Explicitly call `waitForRoundTrip()` to make sure the above event listners
+        // have set up in the content.
+        mainSession.waitForRoundTrip()
+
+        mainSession.flushApzRepaints()
+
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(
+            downTime,
+            SystemClock.uptimeMillis(),
+            MotionEvent.ACTION_DOWN,
+            50f,
+            50f,
+            0,
+        )
+        val result = mainSession.panZoomController.onTouchEventForDetailResult(down)
+
+        // Wait until a contextmenu event happens.
+        assertThat("contextmenu", contextmenuPromise.value as Boolean, equalTo(true))
+
+        // Start moving.
+        val move = MotionEvent.obtain(
+            downTime,
+            SystemClock.uptimeMillis(),
+            MotionEvent.ACTION_MOVE,
+            50f,
+            70f,
+            0,
+        )
+        mainSession.panZoomController.onTouchEvent(move)
+
+        assertThat("touchmove", touchmovePromise.value as Boolean, equalTo(true))
+
+        val value = sessionRule.waitForResult(result)
+
+        // The input result for the initial touch-start event should have been handled by
+        // the content.
+        assertResultDetail(
+            ROOT_100VH_HTML_PATH,
+            value,
+            PanZoomController.INPUT_RESULT_HANDLED_CONTENT,
+            PanZoomController.SCROLLABLE_FLAG_BOTTOM,
+            (PanZoomController.OVERSCROLL_FLAG_HORIZONTAL or PanZoomController.OVERSCROLL_FLAG_VERTICAL),
+        )
+
+        val up = MotionEvent.obtain(
+            downTime,
+            SystemClock.uptimeMillis(),
+            MotionEvent.ACTION_UP,
+            50f,
+            70f,
+            0,
+        )
+
+        mainSession.panZoomController.onTouchEvent(up)
     }
 }

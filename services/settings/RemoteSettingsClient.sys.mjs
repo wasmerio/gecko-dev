@@ -13,17 +13,17 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ClientEnvironmentBase:
     "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs",
   Database: "resource://services-settings/Database.sys.mjs",
+  IDBHelpers: "resource://services-settings/IDBHelpers.sys.mjs",
+  KintoHttpClient: "resource://services-common/kinto-http-client.sys.mjs",
   RemoteSettingsWorker:
     "resource://services-settings/RemoteSettingsWorker.sys.mjs",
+  SharedUtils: "resource://services-settings/SharedUtils.sys.mjs",
   UptakeTelemetry: "resource://services-common/uptake-telemetry.sys.mjs",
   Utils: "resource://services-settings/Utils.sys.mjs",
 });
 
 XPCOMUtils.defineLazyModuleGetters(lazy, {
-  IDBHelpers: "resource://services-settings/IDBHelpers.jsm",
-  KintoHttpClient: "resource://services-common/kinto-http-client.js",
   ObjectUtils: "resource://gre/modules/ObjectUtils.jsm",
-  SharedUtils: "resource://services-settings/SharedUtils.jsm",
 });
 
 const TELEMETRY_COMPONENT = "remotesettings";
@@ -1051,11 +1051,8 @@ export class RemoteSettingsClient extends EventEmitter {
     lazy.console.debug(
       `${this.identifier} Fetch changes from server (expected=${expectedTimestamp}, since=${since})`
     );
-    const {
-      metadata,
-      remoteTimestamp,
-      remoteRecords,
-    } = await this._fetchChangeset(expectedTimestamp, since);
+    const { metadata, remoteTimestamp, remoteRecords } =
+      await this._fetchChangeset(expectedTimestamp, since);
 
     // We build a sync result, based on remote changes.
     const syncResult = {

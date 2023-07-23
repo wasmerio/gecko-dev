@@ -29,8 +29,9 @@ const FAVICON_URI =
   "/browser/browser/components/originattributes/" +
   "test/browser/file_favicon.png";
 const TEST_THIRD_PARTY_PAGE =
-  "http://example.net/browser/browser/components/" +
-  "originattributes/test/browser/file_favicon_thirdParty.html";
+  TEST_THIRD_PARTY_SITE +
+  "/browser/browser/components/originattributes/" +
+  "test/browser/file_favicon_thirdParty.html";
 const THIRD_PARTY_FAVICON_URI =
   TEST_THIRD_PARTY_SITE +
   "/browser/browser/components/" +
@@ -137,10 +138,10 @@ FaviconObserver.prototype = {
   reset(aUserContextId, aExpectedCookie, aPageURI, aFaviconURL) {
     this._curUserContextId = aUserContextId;
     this._expectedCookie = aExpectedCookie;
-    this._expectedPrincipal = Services.scriptSecurityManager.createContentPrincipal(
-      aPageURI,
-      { userContextId: aUserContextId }
-    );
+    this._expectedPrincipal =
+      Services.scriptSecurityManager.createContentPrincipal(aPageURI, {
+        userContextId: aUserContextId,
+      });
     this._faviconURL = aFaviconURL;
     this._faviconLoaded = PromiseUtils.defer();
   },
@@ -166,17 +167,21 @@ async function generateCookies(aHost) {
   let tabInfoA = await openTabInUserContext(aHost, USER_CONTEXT_ID_PERSONAL);
   let tabInfoB = await openTabInUserContext(aHost, USER_CONTEXT_ID_WORK);
 
-  await SpecialPowers.spawn(tabInfoA.browser, [cookies[0]], async function(
-    value
-  ) {
-    content.document.cookie = value;
-  });
+  await SpecialPowers.spawn(
+    tabInfoA.browser,
+    [cookies[0]],
+    async function (value) {
+      content.document.cookie = value;
+    }
+  );
 
-  await SpecialPowers.spawn(tabInfoB.browser, [cookies[1]], async function(
-    value
-  ) {
-    content.document.cookie = value;
-  });
+  await SpecialPowers.spawn(
+    tabInfoB.browser,
+    [cookies[1]],
+    async function (value) {
+      content.document.cookie = value;
+    }
+  );
 
   BrowserTestUtils.removeTab(tabInfoA.tab);
   BrowserTestUtils.removeTab(tabInfoB.tab);
@@ -320,7 +325,7 @@ async function doTestForAllTabsFavicon(aTestPage, aFaviconHost, aFaviconURL) {
   tabBrowser.removeAttribute("overflow");
 }
 
-add_setup(async function() {
+add_setup(async function () {
   // Make sure userContext is enabled.
   await SpecialPowers.pushPrefEnv({
     set: [["privacy.userContext.enabled", true]],

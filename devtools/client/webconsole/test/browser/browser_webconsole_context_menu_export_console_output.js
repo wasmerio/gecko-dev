@@ -4,7 +4,7 @@
 "use strict";
 
 const httpServer = createTestHTTPServer();
-httpServer.registerPathHandler(`/`, function(request, response) {
+httpServer.registerPathHandler(`/`, function (request, response) {
   response.setStatusLine(request.httpVersion, 200, "OK");
   response.write(`
     <html>
@@ -16,7 +16,7 @@ httpServer.registerPathHandler(`/`, function(request, response) {
     </html>`);
 });
 
-httpServer.registerPathHandler("/test.js", function(request, response) {
+httpServer.registerPathHandler("/test.js", function (request, response) {
   response.setHeader("Content-Type", "application/javascript");
   response.write(`
     window.logStuff = function() {
@@ -60,7 +60,7 @@ add_task(async function testExportToClipboard() {
   await clearOutput(hud);
 
   info("Call the log function defined in the test page");
-  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], function() {
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], function () {
     content.wrappedJSObject.logStuff();
   });
 
@@ -161,9 +161,9 @@ async function exportAllToFile(hud, message) {
   const exportFile = menuPopup.querySelector("#console-menu-export-file");
   ok(exportFile, "copy menu item is enabled");
 
-  const nsiFile = FileUtils.getFile("TmpD", [
-    `export_console_${Date.now()}.log`,
-  ]);
+  const nsiFile = new FileUtils.File(
+    PathUtils.join(PathUtils.tempDir, `export_console_${Date.now()}.log`)
+  );
   MockFilePicker.setFiles([nsiFile]);
   exportFile.click();
   info("Exporting to file");

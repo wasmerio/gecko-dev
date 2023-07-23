@@ -137,7 +137,7 @@ var tags = [
  * to create HTML.
  */
 function makeTagFunc(tagName) {
-  return function(attrs /* rest... */) {
+  return function (attrs /* rest... */) {
     var startChildren = 0;
     var response = "";
 
@@ -332,7 +332,7 @@ function createMochitestServer(serverBasePath) {
   var serverRoot = {
     getFile: function getFile(path) {
       var file = serverBasePath.clone().QueryInterface(Ci.nsIFile);
-      path.split("/").forEach(function(p) {
+      path.split("/").forEach(function (p) {
         file.appendRelativePath(p);
       });
       return file;
@@ -675,7 +675,7 @@ function arrayOfTestFiles(linkArray, fileArray, testPattern) {
 function jsonArrayOfTestFiles(links) {
   var testFiles = [];
   arrayOfTestFiles(links, testFiles);
-  testFiles = testFiles.map(function(file) {
+  testFiles = testFiles.map(function (file) {
     return '"' + file.url + '"';
   });
 
@@ -700,7 +700,9 @@ function regularListing(metadata, response) {
  * it into an object for creating a table of clickable links for each test.
  */
 function convertManifestToTestLinks(root, manifest) {
-  const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+  const { NetUtil } = ChromeUtils.importESModule(
+    "resource://gre/modules/NetUtil.sys.mjs"
+  );
 
   var manifestFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
   manifestFile.initWithFile(serverBasePath);
@@ -717,7 +719,7 @@ function convertManifestToTestLinks(root, manifest) {
   var paths = manifestObj.tests;
   var pathPrefix = "/" + root + "/";
   return [
-    paths.reduce(function(t, p) {
+    paths.reduce(function (t, p) {
       t[pathPrefix + p.path] = true;
       return t;
     }, {}),

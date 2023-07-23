@@ -13,6 +13,22 @@ exclude: true
 
 ⚠️  breaking change and deprecation notices
 
+## v116
+- Added [`GeckoSession.didPrintPageContent`][116.1] to included extra print status for a standard print and new `GeckoPrintException.ERROR_NO_PRINT_DELEGATE`
+- Added [`PromptInstanceDelegate.onSelectIdentityCredentialProvider`][116.2] to allow the user to choose an Identity Credential provider (FedCM) to be used when authenticating.
+  ([bug 1836356]({{bugzilla}}1836356))
+- Changed [`Gecko.CrashHandler`] location to [`GeckoView.CrashHandler`][116.3] ([bug 1550206]({{bugzilla}}1550206))
+- Added [`PromptInstanceDelegate.onSelectIdentityCredentialAccount`][116.4] to allow the user to choose an account on the Identity Credential Provider (FedCM) they previously chose to be used when authenticating.
+    ([bug 1836363]({{bugzilla}}1836363))
+- Added [`PromptInstanceDelegate.onShowPrivacyPolicyIdentityCredential`][116.5] to allow the user to indicate if agrees or not with the privacy policy of the Identity Credential provider.
+  ([bug 1836358]({{bugzilla}}1836358))
+
+[116.1]: {{javadoc_uri}}/GeckoSession.html#didPrintPageContent
+[116.2]:{{javadoc_uri}}/GeckoSession.PromptDelegate.html#onSelectIdentityCredentialProvider(org.mozilla.geckoview.GeckoSession,org.mozilla.geckoview.GeckoSession.PromptDelegate.IdentityCredential.ProviderSelectorPrompt)
+[116.3]:{{javadoc_uri}}/CrashHandler.html
+[116.4]:{{javadoc_uri}}/GeckoSession.PromptDelegate.html#onSelectIdentityCredentialAccount(org.mozilla.geckoview.GeckoSession,org.mozilla.geckoview.GeckoSession.PromptDelegate.IdentityCredential.AccountSelectorPrompt)
+[116.5]:{{javadoc_uri}}/GeckoSession.PromptDelegate.html#onShowPrivacyPolicyIdentityCredential(org.mozilla.geckoview.GeckoSession,org.mozilla.geckoview.GeckoSession.PromptDelegate.IdentityCredential.PrivacyPolicyPrompt)
+
 ## v115
 - Changed [`SessionPdfFileSaver.createResponse`][115.1] to response of saving PDF to accept two additional
   arguments: `skipConfirmation` and `requestExternalApp`.
@@ -20,11 +36,19 @@ exclude: true
   ([bug 1824083]({{bugzilla}}1824083))
 - Add [`onPrintWithStatus`][115.3] to retrieve additional printing status information.
 - Added new [`GeckoPrintException`][115.4] errors of `ERROR_NO_ACTIVITY_CONTEXT` and `ERROR_NO_ACTIVITY_CONTEXT_DELEGATE`
+- Added [`GeckoSession.ContentDelegate.onGetNimbusFeature`][115.5]
+- Added [`textContent`][115.6] to [`ContentDelegate.ContextElement`][65.21] and a new [`constructor`][115.7] to [`ContentDelegate.ContextElement`][65.21]
+- Changed [`SessionPdfFileSaver.createResponse`][115.8] to response of saving PDF to accept an url and return a [`GeckoResult<WebResponse>`].
+- ⚠️ Deprecated [`GeckoSession.PdfSaveResult`][111.7]
 
 [115.1]: {{javadoc_uri}}/SessionPdfFileSaver.html#createResponse(byte[], String, String, boolean, boolean)
 [115.2]: {{javadoc_uri}}/GeckoDisplay.NewSurfaceProvider.html
 [115.3]: {{javadoc_uri}}/GeckoSession.PrintDelegate.html#onPrintWithStatus
 [115.4]: {{javadoc_uri}}/GeckoSession.GeckoPrintException.html
+[115.5]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onGetNimbusFeature(org.mozilla.geckoview.GeckoSession)
+[115.6]: {{javadoc_uri}}/GeckoSession.ContentDelegate.ContextElement.html#textContent
+[115.7]: {{javadoc_uri}}/GeckoSession.ContentDelegate.ContextElement.html#<init>(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String)
+[115.8]: {{javadoc_uri}}/SessionPdfFileSaver.html#createResponse(GeckoSession, String, String, String, boolean, boolean)
 
 ## v114
 - Add [`SessionPdfFileSaver.createResponse`][114.1] to response of saving PDF.
@@ -1368,4 +1392,4 @@ to allow adding gecko profiler markers.
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport(android.content.Context,android.os.Bundle,java.lang.String)
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 206323452b40602d20d42c3e73aa88647da74696
+[api-version]: 2053e425712e404bdc73d605cf7d7162a24329b9

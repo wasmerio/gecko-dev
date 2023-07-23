@@ -2,9 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { CustomizableUI } = ChromeUtils.import(
-  "resource:///modules/CustomizableUI.jsm"
-);
+import { CustomizableUI } from "resource:///modules/CustomizableUI.sys.mjs";
 
 export var Buttons = {
   init(libDir) {
@@ -42,9 +40,8 @@ export var Buttons = {
       },
 
       async verifyConfig() {
-        let browserWindow = Services.wm.getMostRecentWindow(
-          "navigator:browser"
-        );
+        let browserWindow =
+          Services.wm.getMostRecentWindow("navigator:browser");
         if (browserWindow.PanelUI.panel.state == "closed") {
           return "The button isn't shown when the panel isn't open.";
         }
@@ -59,9 +56,8 @@ export var Buttons = {
       },
 
       async verifyConfig() {
-        let browserWindow = Services.wm.getMostRecentWindow(
-          "navigator:browser"
-        );
+        let browserWindow =
+          Services.wm.getMostRecentWindow("navigator:browser");
         if (
           browserWindow.document.documentElement.getAttribute("customizing") !=
           "true"

@@ -50,8 +50,8 @@ std::vector<Spline> DequantizeSplines(const Splines& splines) {
   for (size_t i = 0; i < quantized_splines.size(); ++i) {
     dequantized.emplace_back();
     JXL_CHECK(quantized_splines[i].Dequantize(
-        starting_points[i], kQuantizationAdjustment, kYToX, kYToB, &total,
-        dequantized.back()));
+        starting_points[i], kQuantizationAdjustment, kYToX, kYToB, 2u << 30u,
+        &total, dequantized.back()));
   }
   return dequantized;
 }
@@ -311,7 +311,9 @@ TEST(SplinesTest, Drawing) {
   splines.AddTo(&image, Rect(image), Rect(image));
 
   CodecInOut io_actual;
-  io_actual.SetFromImage(CopyImage(image), ColorEncoding::SRGB());
+  Image3F image2(320, 320);
+  CopyImageTo(image, &image2);
+  io_actual.SetFromImage(std::move(image2), ColorEncoding::SRGB());
   ASSERT_TRUE(io_actual.frames[0].TransformTo(io_expected.Main().c_current(),
                                               GetJxlCms()));
 

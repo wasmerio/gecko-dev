@@ -6,10 +6,6 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
 
-XPCOMUtils.defineLazyModuleGetters(lazy, {
-  GeckoViewAutocomplete: "resource://gre/modules/GeckoViewAutocomplete.jsm",
-});
-
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "DELEGATE_AUTOCOMPLETE",
@@ -18,6 +14,7 @@ XPCOMUtils.defineLazyPreferenceGetter(
 );
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  GeckoViewAutocomplete: "resource://gre/modules/GeckoViewAutocomplete.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
@@ -289,9 +286,8 @@ export class AutoCompleteParent extends JSWindowActorParent {
    * @param {object[]} results - Non-empty array of autocomplete results.
    */
   _maybeRecordTelemetryEvents(results) {
-    let actor = this.browsingContext.currentWindowGlobal.getActor(
-      "LoginManager"
-    );
+    let actor =
+      this.browsingContext.currentWindowGlobal.getActor("LoginManager");
     actor.maybeRecordPasswordGenerationShownTelemetryEvent(results);
 
     // Assume the result with the start time (loginsFooter) is last.
@@ -410,13 +406,8 @@ export class AutoCompleteParent extends JSWindowActorParent {
       }
 
       case "FormAutoComplete:MaybeOpenPopup": {
-        let {
-          results,
-          rect,
-          dir,
-          inputElementIdentifier,
-          formOrigin,
-        } = message.data;
+        let { results, rect, dir, inputElementIdentifier, formOrigin } =
+          message.data;
         if (lazy.DELEGATE_AUTOCOMPLETE) {
           lazy.GeckoViewAutocomplete.delegateSelection({
             browsingContext: this.browsingContext,

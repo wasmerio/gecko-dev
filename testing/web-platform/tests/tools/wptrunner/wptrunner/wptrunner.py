@@ -76,8 +76,8 @@ def get_loader(test_paths, product, debug=None, run_info_extras=None, chunker_kw
     if test_groups:
         include = testloader.update_include_for_groups(test_groups, include)
 
-    if kwargs["tags"]:
-        test_filters.append(testloader.TagFilter(kwargs["tags"]))
+    if kwargs["tags"] or kwargs["exclude_tags"]:
+        test_filters.append(testloader.TagFilter(kwargs["tags"], kwargs["exclude_tags"]))
 
     if include or kwargs["exclude"] or kwargs["include_manifest"] or kwargs["default_exclude"]:
         manifest_filters.append(testloader.TestFilter(include=include,
@@ -252,7 +252,6 @@ def run_test_iteration(test_status, test_loader, test_source_kwargs, test_source
                                extra={"run_by_dir": run_test_kwargs["run_by_dir"]})
 
         with ManagerGroup("web-platform-tests",
-                          run_test_kwargs["processes"],
                           test_source_cls,
                           test_source_kwargs,
                           test_implementation_by_type,
@@ -268,8 +267,11 @@ def run_test_iteration(test_status, test_loader, test_source_kwargs, test_source
                 handle_interrupt_signals()
                 manager_group.run(tests_to_run)
             except KeyboardInterrupt:
-                logger.critical("Main thread got signal")
+                logger.critical(
+                    "Main thread got signal; "
+                    "waiting for TestRunnerManager threads to exit.")
                 manager_group.stop()
+                manager_group.wait(timeout=10)
                 raise
 
             test_status.total_tests += manager_group.test_count()
@@ -278,10 +280,9 @@ def run_test_iteration(test_status, test_loader, test_source_kwargs, test_source
 
     test_status.unexpected += len(unexpected_tests)
     test_status.unexpected_pass += len(unexpected_pass_tests)
-
     logger.suite_end()
-
     return True
+
 
 def handle_interrupt_signals():
     def termination_handler(_signum, _unused_frame):
@@ -375,8 +376,6 @@ def run_tests(config, test_paths, product, **kwargs):
                                            test_groups=test_groups,
                                            **kwargs)
 
-        logger.info("Using %i client processes" % kwargs["processes"])
-
         test_status = TestStatus()
         repeat = kwargs["repeat"]
         test_status.expected_repeated_runs = repeat
@@ -413,7 +412,8 @@ def run_tests(config, test_paths, product, **kwargs):
                                  env_extras,
                                  kwargs["enable_webtransport_h3"],
                                  mojojs_path,
-                                 inject_script) as test_environment:
+                                 inject_script,
+                                 kwargs["suppress_handler_traceback"]) as test_environment:
             recording.set(["startup", "ensure_environment"])
             try:
                 test_environment.ensure_started()

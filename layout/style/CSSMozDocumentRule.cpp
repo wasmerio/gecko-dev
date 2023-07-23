@@ -7,6 +7,7 @@
 #include "mozilla/dom/CSSMozDocumentRule.h"
 #include "mozilla/dom/CSSMozDocumentRuleBinding.h"
 
+#include "js/RegExpFlags.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/ServoBindings.h"
 #include "nsContentUtils.h"
@@ -64,9 +65,12 @@ bool CSSMozDocumentRule::Match(const Document* aDoc, nsIURI* aDocURI,
       return StringEndsWith(host, aPattern) && host.CharAt(lenDiff - 1) == '.';
     }
     case DocumentMatchingFunction::RegExp: {
-      NS_ConvertUTF8toUTF16 spec(aDocURISpec);
-      NS_ConvertUTF8toUTF16 regex(aPattern);
-      return nsContentUtils::IsPatternMatching(spec, regex, aDoc)
+      // Using JS::RegExpFlag::Unicode to allow patterns containing for example
+      // [^/].
+      return nsContentUtils::IsPatternMatching(
+                 NS_ConvertUTF8toUTF16(aDocURISpec),
+                 NS_ConvertUTF8toUTF16(aPattern), aDoc,
+                 /* aHasMultiple = */ false, JS::RegExpFlag::Unicode)
           .valueOr(false);
     }
     case DocumentMatchingFunction::PlainTextDocument:
@@ -80,12 +84,11 @@ bool CSSMozDocumentRule::Match(const Document* aDoc, nsIURI* aDocURI,
   return false;
 }
 
-CSSMozDocumentRule::CSSMozDocumentRule(RefPtr<StyleLockedDocumentRule> aRawRule,
+CSSMozDocumentRule::CSSMozDocumentRule(RefPtr<StyleDocumentRule> aRawRule,
                                        StyleSheet* aSheet,
                                        css::Rule* aParentRule, uint32_t aLine,
                                        uint32_t aColumn)
-    : css::ConditionRule(Servo_DocumentRule_GetRules(aRawRule).Consume(),
-                         aSheet, aParentRule, aLine, aColumn),
+    : css::ConditionRule(aSheet, aParentRule, aLine, aColumn),
       mRawRule(std::move(aRawRule)) {}
 
 NS_IMPL_ADDREF_INHERITED(CSSMozDocumentRule, css::ConditionRule)
@@ -107,11 +110,14 @@ void CSSMozDocumentRule::List(FILE* out, int32_t aIndent) const {
 }
 #endif
 
-void CSSMozDocumentRule::SetRawAfterClone(
-    RefPtr<StyleLockedDocumentRule> aRaw) {
+void CSSMozDocumentRule::SetRawAfterClone(RefPtr<StyleDocumentRule> aRaw) {
   mRawRule = std::move(aRaw);
-  css::ConditionRule::SetRawAfterClone(
-      Servo_DocumentRule_GetRules(mRawRule).Consume());
+  css::ConditionRule::DidSetRawAfterClone();
+}
+
+already_AddRefed<StyleLockedCssRules>
+CSSMozDocumentRule::GetOrCreateRawRules() {
+  return Servo_DocumentRule_GetRules(mRawRule).Consume();
 }
 
 StyleCssRuleType CSSMozDocumentRule::Type() const {

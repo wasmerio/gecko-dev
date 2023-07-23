@@ -2,6 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(lazy, {
+  generateUUID: "chrome://remote/content/shared/UUID.sys.mjs",
+});
+
 /**
  * @typedef {object} NodeReferenceDetails
  * @property {number} browserId
@@ -44,11 +50,14 @@ export class NodeCache {
    *
    * @param {Node} node
    *    The node to be added.
+   * @param {Map<BrowsingContext, Array<string>>} seenNodeIds
+   *     Map of browsing contexts to their seen node ids during the current
+   *     serialization.
    *
    * @returns {string}
    *     The unique node reference for the DOM node.
    */
-  getOrCreateNodeReference(node) {
+  getOrCreateNodeReference(node, seenNodeIds) {
     if (!Node.isInstance(node)) {
       throw new TypeError(`Failed to create node reference for ${node}`);
     }
@@ -64,10 +73,7 @@ export class NodeCache {
       const browsingContext = node.ownerGlobal?.browsingContext;
 
       // For not yet cached nodes generate a unique id without curly braces.
-      nodeId = Services.uuid
-        .generateUUID()
-        .toString()
-        .slice(1, -1);
+      nodeId = lazy.generateUUID();
 
       const details = {
         browserId: browsingContext?.browserId,
@@ -79,6 +85,13 @@ export class NodeCache {
 
       this.#nodeIdMap.set(node, nodeId);
       this.#seenNodesMap.set(nodeId, details);
+
+      // Also add the information for the node id and its correlated browsing
+      // context to allow the parent process to update the seen nodes.
+      if (!seenNodeIds.has(browsingContext)) {
+        seenNodeIds.set(browsingContext, []);
+      }
+      seenNodeIds.get(browsingContext).push(nodeId);
     }
 
     return nodeId;

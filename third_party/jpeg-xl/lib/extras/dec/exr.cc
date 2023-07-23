@@ -62,8 +62,8 @@ class InMemoryIStream : public OpenEXR::IStream {
 }  // namespace
 
 Status DecodeImageEXR(Span<const uint8_t> bytes, const ColorHints& color_hints,
-                      const SizeConstraints& constraints,
-                      PackedPixelFile* ppf) {
+                      PackedPixelFile* ppf,
+                      const SizeConstraints* constraints) {
   InMemoryIStream is(bytes);
 
 #ifdef __EXCEPTIONS
@@ -71,7 +71,8 @@ Status DecodeImageEXR(Span<const uint8_t> bytes, const ColorHints& color_hints,
   try {
     input_ptr.reset(new OpenEXR::RgbaInputFile(is));
   } catch (...) {
-    return JXL_FAILURE("OpenEXR failed to parse input");
+    // silently return false if it is not an EXR file
+    return false;
   }
   OpenEXR::RgbaInputFile& input = *input_ptr;
 #else

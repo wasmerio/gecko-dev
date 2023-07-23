@@ -7,6 +7,7 @@
 //! [length]: https://drafts.csswg.org/css-values/#lengths
 
 use super::{AllowQuirks, Number, Percentage, ToComputedValue};
+use crate::computed_value_flags::ComputedValueFlags;
 use crate::font_metrics::{FontMetrics, FontMetricsOrientation};
 use crate::parser::{Parse, ParserContext};
 use crate::values::computed::{self, CSSPixelLength, Context};
@@ -22,9 +23,9 @@ use crate::{Zero, ZeroNoPercent};
 use app_units::Au;
 use cssparser::{Parser, Token};
 use std::cmp;
-use style_traits::values::specified::AllowedNumericType;
 use std::fmt::{self, Write};
-use style_traits::{ParseError, SpecifiedValueInfo, StyleParseErrorKind, CssWriter, ToCss};
+use style_traits::values::specified::AllowedNumericType;
+use style_traits::{CssWriter, ParseError, SpecifiedValueInfo, StyleParseErrorKind, ToCss};
 
 pub use super::image::Image;
 pub use super::image::{EndingShape as GradientEndingShape, Gradient};
@@ -89,12 +90,9 @@ impl FontRelativeLength {
     /// Return the unitless, raw value.
     fn unitless_value(&self) -> CSSFloat {
         match *self {
-            Self::Em(v) |
-            Self::Ex(v) |
-            Self::Ch(v) |
-            Self::Cap(v) |
-            Self::Ic(v) |
-            Self::Rem(v) => v,
+            Self::Em(v) | Self::Ex(v) | Self::Ch(v) | Self::Cap(v) | Self::Ic(v) | Self::Rem(v) => {
+                v
+            },
         }
     }
 
@@ -183,13 +181,11 @@ impl FontRelativeLength {
         let reference_font_size = base_size.resolve(context);
         match *self {
             Self::Em(length) => {
-                if context.for_non_inherited_property.is_some() {
-                    if base_size == FontBaseSize::CurrentStyle {
-                        context
-                            .rule_cache_conditions
-                            .borrow_mut()
-                            .set_font_size_dependency(reference_font_size.computed_size);
-                    }
+                if context.for_non_inherited_property && base_size == FontBaseSize::CurrentStyle {
+                    context
+                        .rule_cache_conditions
+                        .borrow_mut()
+                        .set_font_size_dependency(reference_font_size.computed_size);
                 }
 
                 (reference_font_size.computed_size(), length)
@@ -574,7 +570,12 @@ impl ViewportPercentageLength {
         // See bug 989802. We truncate so that adding multiple viewport units
         // that add up to 100 does not overflow due to rounding differences
         let trunc_scaled = ((length.0 as f64) * factor as f64 / 100.).trunc();
-        Au::from_f64_au(if trunc_scaled.is_nan() { 0.0f64 } else { trunc_scaled }).into()
+        Au::from_f64_au(if trunc_scaled.is_nan() {
+            0.0f64
+        } else {
+            trunc_scaled
+        })
+        .into()
     }
 }
 
@@ -784,9 +785,11 @@ impl ContainerRelativeLength {
 
     /// Computes the given container-relative length.
     pub fn to_computed_value(&self, context: &Context) -> CSSPixelLength {
-        if context.for_non_inherited_property.is_some() {
+        if context.for_non_inherited_property {
             context.rule_cache_conditions.borrow_mut().set_uncacheable();
         }
+        context.builder.add_flags(ComputedValueFlags::USES_CONTAINER_UNITS);
+
         let size = context.get_container_size_query();
         let (factor, container_length) = match *self {
             Self::Cqw(v) => (v, size.get_container_width(context)),
@@ -901,11 +904,8 @@ impl NoCalcLength {
     /// because the font they're relative to should be zoomed already.
     pub fn should_zoom_text(&self) -> bool {
         match *self {
-            Self::Absolute(..) |
-            Self::ViewportPercentage(..) |
-            Self::ContainerRelative(..) => true,
-            Self::ServoCharacterWidth(..) |
-            Self::FontRelative(..) => false,
+            Self::Absolute(..) | Self::ViewportPercentage(..) | Self::ContainerRelative(..) => true,
+            Self::ServoCharacterWidth(..) | Self::FontRelative(..) => false,
         }
     }
 
@@ -1101,7 +1101,12 @@ impl ToCss for NoCalcLength {
     where
         W: Write,
     {
-        crate::values::serialize_specified_dimension(self.unitless_value(), self.unit(), false, dest)
+        crate::values::serialize_specified_dimension(
+            self.unitless_value(),
+            self.unit(),
+            false,
+            dest,
+        )
     }
 }
 

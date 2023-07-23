@@ -20,11 +20,9 @@ XPCOMUtils.defineLazyServiceGetter(
   "nsIResProtocolHandler"
 );
 
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "NetUtil",
-  "resource://gre/modules/NetUtil.jsm"
-);
+ChromeUtils.defineESModuleGetters(lazy, {
+  NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
+});
 
 // Define some shortcuts.
 function* getOwnIdentifiers(x) {
@@ -431,7 +429,7 @@ export function Require(loader, requirer) {
   }
 
   // Expose the `resolve` function for this `Require` instance
-  require.resolve = _require.resolve = function(id) {
+  require.resolve = _require.resolve = function (id) {
     const { uri } = getRequirements(id);
     return uri;
   };
@@ -613,7 +611,7 @@ function normalize(path) {
   } else {
     absolute = false;
   }
-  path.split("/").forEach(function(v) {
+  path.split("/").forEach(function (v) {
     switch (v) {
       case "":
       case ".": // fallthrough

@@ -5,7 +5,7 @@
 /**
  * Test that the URL Preview can be copied
  */
-add_task(async function() {
+add_task(async function () {
   const { monitor } = await initNetMonitor(SIMPLE_URL, {
     requestCount: 1,
   });
@@ -72,7 +72,7 @@ add_task(async function() {
  * Test that the Headers summary can be copied
  */
 
-add_task(async function() {
+add_task(async function () {
   const { monitor } = await initNetMonitor(SIMPLE_URL, {
     requestCount: 1,
   });
@@ -116,6 +116,7 @@ add_task(async function() {
       Version: "HTTP/1.1",
       Transferred: "650 B (465 B size)",
       "Request Priority": "Highest",
+      "DNS Resolution": "System",
     },
     null,
     "\t"
@@ -133,7 +134,7 @@ add_task(async function() {
  * Test if response JSON in PropertiesView can be copied
  */
 
-add_task(async function() {
+add_task(async function () {
   const { tab, monitor } = await initNetMonitor(
     JSON_BASIC_URL + "?name=nogrip",
     { requestCount: 1 }
@@ -207,7 +208,7 @@ add_task(async function() {
  * Test if response/request Cookies in PropertiesView can be copied
  */
 
-add_task(async function() {
+add_task(async function () {
   const { monitor } = await initNetMonitor(SIMPLE_UNSORTED_COOKIES_SJS, {
     requestCount: 1,
   });

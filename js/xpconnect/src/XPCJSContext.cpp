@@ -782,10 +782,8 @@ static mozilla::Atomic<bool> sShadowRealmsEnabled(false);
 static mozilla::Atomic<bool> sArrayGroupingEnabled(false);
 static mozilla::Atomic<bool> sWellFormedUnicodeStringsEnabled(false);
 #endif
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
 static mozilla::Atomic<bool> sChangeArrayByCopyEnabled(false);
-#endif
-static mozilla::Atomic<bool> sArrayFromAsyncEnabled(false);
+static mozilla::Atomic<bool> sArrayFromAsyncEnabled(true);
 #ifdef ENABLE_NEW_SET_METHODS
 static mozilla::Atomic<bool> sEnableNewSetMethods(false);
 #endif
@@ -808,6 +806,8 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
       .setCoopAndCoepEnabled(
           StaticPrefs::browser_tabs_remote_useCrossOriginOpenerPolicy() &&
           StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy())
+      .setWritableStreamsEnabled(
+          StaticPrefs::javascript_options_writable_streams())
       .setPropertyErrorMessageFixEnabled(sPropertyErrorMessageFixEnabled)
       .setWeakRefsEnabled(GetWeakRefsEnabled())
       .setIteratorHelpersEnabled(sIteratorHelpersEnabled)
@@ -816,9 +816,7 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
       .setArrayGroupingEnabled(sArrayGroupingEnabled)
       .setWellFormedUnicodeStringsEnabled(sWellFormedUnicodeStringsEnabled)
 #endif
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
       .setChangeArrayByCopyEnabled(sChangeArrayByCopyEnabled)
-#endif
       .setArrayFromAsyncEnabled(sArrayFromAsyncEnabled)
 #ifdef ENABLE_NEW_SET_METHODS
       .setNewSetMethodsEnabled(sEnableNewSetMethods)
@@ -952,7 +950,7 @@ static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
 #endif
 
 #if !defined(JS_CODEGEN_MIPS32) && !defined(JS_CODEGEN_MIPS64) && \
-    !defined(JS_CODEGEN_RISCV64)
+    !defined(JS_CODEGEN_RISCV64) && !defined(JS_CODEGEN_LOONG64)
   JS_SetGlobalJitCompilerOption(
       cx, JSJITCOMPILER_SPECTRE_INDEX_MASKING,
       StaticPrefs::javascript_options_spectre_index_masking_DoNotUseDirectly());
@@ -972,6 +970,14 @@ static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
       StaticPrefs::
           javascript_options_spectre_jit_to_cxx_calls_DoNotUseDirectly());
 #endif
+
+  bool writeProtectCode = true;
+  if (XRE_IsContentProcess()) {
+    writeProtectCode =
+        StaticPrefs::javascript_options_content_process_write_protect_code();
+  }
+  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_WRITE_PROTECT_CODE,
+                                writeProtectCode);
 
   JS_SetGlobalJitCompilerOption(
       cx, JSJITCOMPILER_WATCHTOWER_MEGAMORPHIC,
@@ -1014,11 +1020,8 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
   sWellFormedUnicodeStringsEnabled = Preferences::GetBool(
       JS_OPTIONS_DOT_STR "experimental.well_formed_unicode_strings");
 #endif
-
-#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
   sChangeArrayByCopyEnabled = Preferences::GetBool(
       JS_OPTIONS_DOT_STR "experimental.enable_change_array_by_copy");
-#endif
   sArrayFromAsyncEnabled = Preferences::GetBool(
       JS_OPTIONS_DOT_STR "experimental.enable_array_from_async");
 #ifdef ENABLE_NEW_SET_METHODS
@@ -1058,7 +1061,7 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
   }
 
   JS_SetParallelParsingEnabled(
-      cx, Preferences::GetBool(JS_OPTIONS_DOT_STR "parallel_parsing"));
+      cx, StaticPrefs::javascript_options_parallel_parsing());
 }
 
 XPCJSContext::~XPCJSContext() {

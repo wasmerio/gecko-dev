@@ -94,6 +94,8 @@ enum class TextureFlags : uint32_t {
   DRM_SOURCE = 1 << 21,
   // The texture is dummy texture
   DUMMY_TEXTURE = 1 << 22,
+  // Software decoded video
+  SOFTWARE_DECODED_VIDEO = 1 << 22,
 
   // OR union of all valid bits
   ALL_BITS = (1 << 23) - 1,
@@ -166,6 +168,7 @@ struct TextureFactoryIdentifier {
   bool mSupportsTextureBlitting;
   bool mSupportsPartialUploads;
   bool mSupportsComponentAlpha;
+  bool mSupportsD3D11NV12;
   SyncHandle mSyncHandle;
 
   explicit TextureFactoryIdentifier(
@@ -175,7 +178,7 @@ struct TextureFactoryIdentifier {
       bool aCompositorUseDComp = false, bool aUseCompositorWnd = false,
       bool aSupportsTextureBlitting = false,
       bool aSupportsPartialUploads = false, bool aSupportsComponentAlpha = true,
-      SyncHandle aSyncHandle = 0)
+      bool aSupportsD3D11NV12 = false, SyncHandle aSyncHandle = 0)
       : mParentBackend(aLayersBackend),
         mWebRenderBackend(WebRenderBackend::HARDWARE),
         mWebRenderCompositor(WebRenderCompositor::DRAW),
@@ -187,6 +190,7 @@ struct TextureFactoryIdentifier {
         mSupportsTextureBlitting(aSupportsTextureBlitting),
         mSupportsPartialUploads(aSupportsPartialUploads),
         mSupportsComponentAlpha(aSupportsComponentAlpha),
+        mSupportsD3D11NV12(aSupportsD3D11NV12),
         mSyncHandle(aSyncHandle) {}
 
   explicit TextureFactoryIdentifier(
@@ -197,7 +201,7 @@ struct TextureFactoryIdentifier {
       bool aCompositorUseDComp = false, bool aUseCompositorWnd = false,
       bool aSupportsTextureBlitting = false,
       bool aSupportsPartialUploads = false, bool aSupportsComponentAlpha = true,
-      SyncHandle aSyncHandle = 0)
+      bool aSupportsD3D11NV12 = false, SyncHandle aSyncHandle = 0)
       : mParentBackend(LayersBackend::LAYERS_WR),
         mWebRenderBackend(aWebRenderBackend),
         mWebRenderCompositor(aWebRenderCompositor),
@@ -209,6 +213,7 @@ struct TextureFactoryIdentifier {
         mSupportsTextureBlitting(aSupportsTextureBlitting),
         mSupportsPartialUploads(aSupportsPartialUploads),
         mSupportsComponentAlpha(aSupportsComponentAlpha),
+        mSupportsD3D11NV12(aSupportsD3D11NV12),
         mSyncHandle(aSyncHandle) {}
 
   bool operator==(const TextureFactoryIdentifier& aOther) const {
@@ -223,6 +228,7 @@ struct TextureFactoryIdentifier {
            mSupportsTextureBlitting == aOther.mSupportsTextureBlitting &&
            mSupportsPartialUploads == aOther.mSupportsPartialUploads &&
            mSupportsComponentAlpha == aOther.mSupportsComponentAlpha &&
+           mSupportsD3D11NV12 == aOther.mSupportsD3D11NV12 &&
            mSyncHandle == aOther.mSyncHandle;
   }
 };

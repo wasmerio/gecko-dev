@@ -1,4 +1,6 @@
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { NetUtil } = ChromeUtils.importESModule(
+  "resource://gre/modules/NetUtil.sys.mjs"
+);
 const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 
 const ReferrerInfo = Components.Constructor(
@@ -114,10 +116,10 @@ function run_loadImage_tests() {
   function observer() {
     Services.obs.removeObserver(observer, "cacheservice:empty-cache");
     gHits = 0;
-    loadImage(false, function() {
-      loadImage(false, function() {
-        loadImage(true, function() {
-          loadImage(true, function() {
+    loadImage(false, function () {
+      loadImage(false, function () {
+        loadImage(true, function () {
+          loadImage(true, function () {
             Assert.equal(gHits, 2);
             server.stop(do_test_finished);
           });
@@ -153,10 +155,10 @@ function run_test() {
   // and load the same image, and do that a second time to ensure a cache
   // read. In total, we should cause two separate http responses to occur,
   // since the private channels shouldn't be able to use the public cache.
-  setup_chan("/image.png", false, function() {
-    setup_chan("/image.png", false, function() {
-      setup_chan("/image.png", true, function() {
-        setup_chan("/image.png", true, function() {
+  setup_chan("/image.png", false, function () {
+    setup_chan("/image.png", false, function () {
+      setup_chan("/image.png", true, function () {
+        setup_chan("/image.png", true, function () {
           Assert.equal(gHits, 2);
           run_loadImage_tests();
         });

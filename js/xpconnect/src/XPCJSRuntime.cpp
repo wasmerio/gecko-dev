@@ -53,12 +53,14 @@
 #include "js/MemoryMetrics.h"
 #include "js/Object.h"  // JS::GetClass
 #include "js/RealmIterators.h"
+#include "js/Stream.h"  // JS::AbortSignalIsAborted, JS::InitPipeToHandling
 #include "js/SliceBudget.h"
 #include "js/UbiNode.h"
 #include "js/UbiNodeUtils.h"
 #include "js/friend/UsageStatistics.h"  // JSMetric, JS_SetAccumulateTelemetryCallback
 #include "js/friend/WindowProxy.h"  // js::SetWindowProxyClass
 #include "js/friend/XrayJitInfo.h"  // JS::SetXrayJitInfo
+#include "js/Utility.h"             // JS::UniqueTwoByteChars
 #include "mozilla/dom/AbortSignalBinding.h"
 #include "mozilla/dom/GeneratedAtomList.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -632,7 +634,7 @@ nsGlobalWindowInner* WindowGlobalOrNull(JSObject* aObj) {
   return WindowOrNull(glob);
 }
 
-nsGlobalWindowInner* SandboxWindowOrNull(JSObject* aObj, JSContext* aCx) {
+JSObject* SandboxPrototypeOrNull(JSContext* aCx, JSObject* aObj) {
   MOZ_ASSERT(aObj);
 
   if (!IsSandbox(aObj)) {
@@ -645,11 +647,7 @@ nsGlobalWindowInner* SandboxWindowOrNull(JSObject* aObj, JSContext* aCx) {
     return nullptr;
   }
 
-  proto = js::CheckedUnwrapDynamic(proto, aCx, /* stopAtWindowProxy = */ false);
-  if (!proto) {
-    return nullptr;
-  }
-  return WindowOrNull(proto);
+  return js::CheckedUnwrapDynamic(proto, aCx, /* stopAtWindowProxy = */ false);
 }
 
 nsGlobalWindowInner* CurrentWindowOrNull(JSContext* cx) {
@@ -2732,15 +2730,18 @@ static nsresult ReadSourceFromFilename(JSContext* cx, const char* filename,
 
     // |buf| can't be directly returned -- convert it to UTF-16.
 
-    // On success this overwrites |*twoByteSource| and |*len|.
+    // On success this overwrites |chars| and |*len|.
+    JS::UniqueTwoByteChars chars;
     rv = ScriptLoader::ConvertToUTF16(
         scriptChannel, reinterpret_cast<const unsigned char*>(buf.get()),
-        rawLen, u"UTF-8"_ns, nullptr, *twoByteSource, *len);
+        rawLen, u"UTF-8"_ns, nullptr, chars, *len);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (!*twoByteSource) {
+    if (!chars) {
       return NS_ERROR_FAILURE;
     }
+
+    *twoByteSource = chars.release();
   }
 
   return NS_OK;

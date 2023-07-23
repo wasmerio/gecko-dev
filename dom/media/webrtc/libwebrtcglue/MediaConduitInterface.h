@@ -184,6 +184,8 @@ class MediaSessionConduit {
 
   void GetRtpSources(nsTArray<dom::RTCRtpSourceEntry>& outSources) const;
 
+  virtual void SetJitterBufferTarget(DOMHighResTimeStamp aTargetMs) = 0;
+
   // test-only: inserts fake CSRCs and audio level data.
   // NB: fake data is only valid during the current main thread task.
   void InsertAudioLevelForContributingSource(const uint32_t aCsrcSource,
@@ -404,6 +406,12 @@ class VideoSessionConduit : public MediaSessionConduit {
       dom::Sequence<dom::RTCVideoFrameHistoryInternal>* outHistories) const = 0;
 
   virtual Maybe<Ssrc> GetAssociatedLocalRtxSSRC(Ssrc aSsrc) const = 0;
+
+  struct Resolution {
+    size_t width;
+    size_t height;
+  };
+  virtual Maybe<Resolution> GetLastResolution() const = 0;
 
  protected:
   /* RTCP feedback settings, for unit testing purposes */

@@ -400,9 +400,11 @@ nsresult nsHttpChannel::AddSecurityMessage(const nsAString& aMessageTag,
 
 NS_IMETHODIMP
 nsHttpChannel::LogBlockedCORSRequest(const nsAString& aMessage,
-                                     const nsACString& aCategory) {
+                                     const nsACString& aCategory,
+                                     bool aIsWarning) {
   if (mWarningReporter) {
-    return mWarningReporter->LogBlockedCORSRequest(aMessage, aCategory);
+    return mWarningReporter->LogBlockedCORSRequest(aMessage, aCategory,
+                                                   aIsWarning);
   }
   return NS_ERROR_UNEXPECTED;
 }
@@ -1211,7 +1213,8 @@ nsresult nsHttpChannel::SetupTransaction() {
     mCaps |= NS_HTTP_LOAD_ANONYMOUS_CONNECT_ALLOW_CLIENT_CERT;
   }
 
-  if (nsContentUtils::ShouldResistFingerprinting(this)) {
+  if (nsContentUtils::ShouldResistFingerprinting(this,
+                                                 RFPTarget::HttpUserAgent)) {
     mCaps |= NS_HTTP_USE_RFP;
   }
 
@@ -4011,12 +4014,12 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
     // the request method MUST be either GET or HEAD (see bug 175641) and
     // the cached response code must be < 400
     //
-    // the cached content must not be weakly framed or marked immutable
+    // the cached content must not be weakly framed
     //
     // do not override conditional headers when consumer has defined its own
     if (!mCachedResponseHead->NoStore() &&
         (mRequestHead.IsGet() || mRequestHead.IsHead()) &&
-        !LoadCustomConditionalRequest() && !weaklyFramed && !isImmutable &&
+        !LoadCustomConditionalRequest() && !weaklyFramed &&
         (mCachedResponseHead->Status() < 400)) {
       if (LoadConcurrentCacheAccess()) {
         // In case of concurrent read and also validation request we
@@ -7027,17 +7030,7 @@ static void RecordOnStartTelemetry(nsresult aStatus,
     Others = 2,
   };
 
-  if (StaticPrefs::network_trr_odoh_enabled()) {
-    nsCOMPtr<nsIDNSService> dns = do_GetService(NS_DNSSERVICE_CONTRACTID);
-    if (!dns) {
-      return;
-    }
-    bool ODoHActivated = false;
-    if (NS_SUCCEEDED(dns->GetODoHActivated(&ODoHActivated)) && ODoHActivated) {
-      Telemetry::Accumulate(Telemetry::HTTP_CHANNEL_ONSTART_SUCCESS_ODOH,
-                            NS_SUCCEEDED(aStatus));
-    }
-  } else if (TRRService::Get() && TRRService::Get()->IsConfirmed()) {
+  if (TRRService::Get() && TRRService::Get()->IsConfirmed()) {
     // Note this telemetry probe is not working when DNS resolution is done in
     // the socket process.
     HttpOnStartState state = HttpOnStartState::Others;
@@ -8156,7 +8149,7 @@ nsHttpChannel::OnDataAvailable(nsIRequest* request, nsIInputStream* input,
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsHttpChannel::RetargetDeliveryTo(nsIEventTarget* aNewTarget) {
+nsHttpChannel::RetargetDeliveryTo(nsISerialEventTarget* aNewTarget) {
   MOZ_ASSERT(NS_IsMainThread(), "Should be called on main thread only");
 
   NS_ENSURE_ARG(aNewTarget);
@@ -8189,7 +8182,7 @@ nsHttpChannel::RetargetDeliveryTo(nsIEventTarget* aNewTarget) {
 
     // If retarget fails for transaction pump, we must restore mCachePump.
     if (NS_FAILED(rv) && retargetableCachePump) {
-      nsCOMPtr<nsIEventTarget> main = GetMainThreadSerialEventTarget();
+      nsCOMPtr<nsISerialEventTarget> main = GetMainThreadSerialEventTarget();
       NS_ENSURE_TRUE(main, NS_ERROR_UNEXPECTED);
       rv = retargetableCachePump->RetargetDeliveryTo(main);
     }
@@ -8198,7 +8191,7 @@ nsHttpChannel::RetargetDeliveryTo(nsIEventTarget* aNewTarget) {
 }
 
 NS_IMETHODIMP
-nsHttpChannel::GetDeliveryTarget(nsIEventTarget** aEventTarget) {
+nsHttpChannel::GetDeliveryTarget(nsISerialEventTarget** aEventTarget) {
   if (mCachePump) {
     return mCachePump->GetDeliveryTarget(aEventTarget);
   }
@@ -9215,7 +9208,7 @@ void nsHttpChannel::SetOriginHeader() {
     } else if (HasNullRequestOrigin(this, uri, isAddonRequest)) {
       serializedOrigin.AssignLiteral("null");
     } else {
-      nsContentUtils::GetASCIIOrigin(uri, serializedOrigin);
+      nsContentUtils::GetWebExposedOriginSerialization(uri, serializedOrigin);
     }
   }
 
@@ -9242,7 +9235,7 @@ void nsHttpChannel::SetOriginHeader() {
     } else if (StaticPrefs::network_http_sendOriginHeader() == 1) {
       // Non-standard: Restrict Origin to same-origin loads if requested by user
       nsAutoCString currentOrigin;
-      nsContentUtils::GetASCIIOrigin(mURI, currentOrigin);
+      nsContentUtils::GetWebExposedOriginSerialization(mURI, currentOrigin);
       if (!serializedOrigin.EqualsIgnoreCase(currentOrigin.get())) {
         // Origin header suppressed by user setting.
         serializedOrigin.AssignLiteral("null");
@@ -9854,14 +9847,16 @@ void nsHttpChannel::DisableIsOpaqueResponseAllowedAfterSniffCheck(
         if (!isInitialRequest) {
           // Step 8.1
           BlockOpaqueResponseAfterSniff(
-              u"media request after sniffing, but not initial request"_ns);
+              u"media request after sniffing, but not initial request"_ns,
+              OpaqueResponseBlockedTelemetryReason::MEDIA_NOT_INITIAL);
           return;
         }
 
         if (mResponseHead->Status() != 200 && mResponseHead->Status() != 206) {
           // Step 8.2
           BlockOpaqueResponseAfterSniff(
-              u"media request's response status is neither 200 nor 206"_ns);
+              u"media request's response status is neither 200 nor 206"_ns,
+              OpaqueResponseBlockedTelemetryReason::MEDIA_INCORRECT_RESP);
           return;
         }
       }

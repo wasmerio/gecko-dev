@@ -11,7 +11,6 @@
 #ifdef ACCESSIBILITY
 #  include "mozilla/a11y/DocAccessibleParent.h"
 #  include "mozilla/a11y/Platform.h"
-#  include "mozilla/a11y/RemoteAccessibleBase.h"
 #  include "nsAccessibilityService.h"
 #  if defined(XP_WIN)
 #    include "mozilla/a11y/AccessibleWrap.h"
@@ -73,6 +72,7 @@
 #include "nsDocShellLoadState.h"
 #include "nsFocusManager.h"
 #include "nsGlobalWindowOuter.h"
+#include "PresShell.h"
 #include "nsIObserverService.h"
 #include "nsISHistory.h"
 #include "nsContentUtils.h"
@@ -1930,6 +1930,7 @@ nsresult BrowsingContext::LoadURI(nsDocShellLoadState* aLoadState,
 
   MOZ_DIAGNOSTIC_ASSERT(aLoadState->TargetBrowsingContext().IsNull(),
                         "Targeting occurs in InternalLoad");
+  aLoadState->AssertProcessCouldTriggerLoadIfSystem();
 
   if (mDocShell) {
     return mDocShell->LoadURI(aLoadState, aSetNavigating);
@@ -2026,6 +2027,7 @@ nsresult BrowsingContext::InternalLoad(nsDocShellLoadState* aLoadState) {
                         "should have target bc set");
   MOZ_DIAGNOSTIC_ASSERT(aLoadState->TargetBrowsingContext() == this,
                         "must be targeting this BrowsingContext");
+  aLoadState->AssertProcessCouldTriggerLoadIfSystem();
 
   if (mDocShell) {
     return nsDocShell::Cast(mDocShell)->InternalLoad(aLoadState);
@@ -3485,6 +3487,52 @@ bool BrowsingContext::CanSet(FieldIndex<IDX_PendingInitialization>,
 bool BrowsingContext::CanSet(FieldIndex<IDX_HasRestoreData>, bool aNewValue,
                              ContentParent* aSource) {
   return IsTop();
+}
+
+bool BrowsingContext::CanSet(FieldIndex<IDX_IsUnderHiddenEmbedderElement>,
+                             const bool& aIsUnderHiddenEmbedderElement,
+                             ContentParent* aSource) {
+  return true;
+}
+
+void BrowsingContext::DidSet(FieldIndex<IDX_IsUnderHiddenEmbedderElement>,
+                             bool aOldValue) {
+  nsIDocShell* shell = GetDocShell();
+  if (!shell) {
+    return;
+  }
+
+  const bool newValue = IsUnderHiddenEmbedderElement();
+  if (NS_WARN_IF(aOldValue == newValue)) {
+    return;
+  }
+  if (PresShell* presShell = shell->GetPresShell()) {
+    presShell->SetIsUnderHiddenEmbedderElement(newValue);
+  }
+
+  // Propagate to children.
+  for (BrowsingContext* child : Children()) {
+    Element* embedderElement = child->GetEmbedderElement();
+    if (!embedderElement) {
+      // TODO: We shouldn't need to null check here since `child` and the
+      // element returned by `child->GetEmbedderElement()` are in our
+      // process (the actual browsing context represented by `child` may not
+      // be, but that doesn't matter).  However, there are currently a very
+      // small number of crashes due to `embedderElement` being null, somehow
+      // - see bug 1551241.  For now we wallpaper the crash.
+      continue;
+    }
+
+    bool embedderFrameIsHidden = true;
+    if (auto embedderFrame = embedderElement->GetPrimaryFrame()) {
+      embedderFrameIsHidden = !embedderFrame->StyleVisibility()->IsVisible();
+    }
+
+    bool hidden = IsUnderHiddenEmbedderElement() || embedderFrameIsHidden;
+    if (child->IsUnderHiddenEmbedderElement() != hidden) {
+      Unused << child->SetIsUnderHiddenEmbedderElement(hidden);
+    }
+  }
 }
 
 bool BrowsingContext::IsPopupAllowed() {

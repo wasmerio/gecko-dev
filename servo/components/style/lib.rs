@@ -109,6 +109,7 @@ pub mod media_queries;
 pub mod parallel;
 pub mod parser;
 pub mod piecewise_linear;
+pub mod properties_and_values;
 #[macro_use]
 pub mod queries;
 pub mod rule_cache;
@@ -203,6 +204,7 @@ pub trait CaseSensitivityExt {
 }
 
 impl CaseSensitivityExt for selectors::attr::CaseSensitivity {
+    #[inline]
     fn eq_atom(self, a: &WeakAtom, b: &WeakAtom) -> bool {
         match self {
             selectors::attr::CaseSensitivity::CaseSensitive => a == b,

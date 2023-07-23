@@ -329,6 +329,9 @@ void CanonicalBrowsingContext::ReplacedBy(
   txn.SetSuspendMediaWhenInactive(GetSuspendMediaWhenInactive());
   txn.SetDisplayMode(GetDisplayMode());
   txn.SetForceDesktopViewport(GetForceDesktopViewport());
+  txn.SetIsUnderHiddenEmbedderElement(GetIsUnderHiddenEmbedderElement());
+  txn.SetFullZoom(GetFullZoom());
+  txn.SetTextZoom(GetTextZoom());
 
   // Propagate the default load flags so that the TRR mode flags are forwarded
   // to the new browsing context. See bug 1828643.
@@ -443,12 +446,10 @@ CanonicalBrowsingContext::GetParentProcessWidgetContaining() {
 already_AddRefed<nsIBrowserDOMWindow>
 CanonicalBrowsingContext::GetBrowserDOMWindow() {
   RefPtr<CanonicalBrowsingContext> chromeTop = TopCrossChromeBoundary();
-  if (nsCOMPtr<nsIDOMChromeWindow> chromeWin =
-          do_QueryInterface(chromeTop->GetDOMWindow())) {
-    nsCOMPtr<nsIBrowserDOMWindow> bdw;
-    if (NS_SUCCEEDED(chromeWin->GetBrowserDOMWindow(getter_AddRefs(bdw)))) {
-      return bdw.forget();
-    }
+  nsGlobalWindowOuter* topWin;
+  if ((topWin = nsGlobalWindowOuter::Cast(chromeTop->GetDOMWindow())) &&
+      topWin->IsChromeWindow()) {
+    return do_AddRef(topWin->GetBrowserDOMWindow());
   }
   return nullptr;
 }
@@ -1046,12 +1047,13 @@ void CanonicalBrowsingContext::NotifyOnHistoryReload(
   } else if (!mLoadingEntries.IsEmpty()) {
     const LoadingSessionHistoryEntry& loadingEntry =
         mLoadingEntries.LastElement();
+    uint64_t loadId = loadingEntry.mLoadId;
     aLoadState.emplace(
         WrapMovingNotNull(RefPtr{CreateLoadInfo(loadingEntry.mEntry)}));
     aReloadActiveEntry.emplace(false);
     if (aForceReload) {
       SessionHistoryEntry::LoadingEntry* entry =
-          SessionHistoryEntry::GetByLoadId(loadingEntry.mLoadId);
+          SessionHistoryEntry::GetByLoadId(loadId);
       if (entry) {
         shistory->RemoveFrameEntries(entry->mEntry);
       }

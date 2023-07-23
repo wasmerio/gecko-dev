@@ -6,7 +6,9 @@
 #ifndef nsBaseClipboard_h__
 #define nsBaseClipboard_h__
 
+#include "mozilla/dom/PContent.h"
 #include "mozilla/Logging.h"
+#include "mozilla/Result.h"
 #include "nsIClipboard.h"
 #include "nsITransferable.h"
 #include "nsCOMPtr.h"
@@ -36,10 +38,6 @@ class ClipboardSetDataHelper : public nsIClipboard {
   ClipboardSetDataHelper() = default;
 
   // nsIClipboard
-  // XXX the Cocoa widget currently overrides `SetData` for `kSelectionCache`
-  // type, so it cannot be marked as final. Once the Cocoa widget handles
-  // `kSelectionCache` type more generic after bug 1812078, it can be marked
-  // as final, too.
   NS_IMETHOD SetData(nsITransferable* aTransferable, nsIClipboardOwner* aOwner,
                      int32_t aWhichClipboard) override;
   NS_IMETHOD AsyncSetData(int32_t aWhichClipboard,
@@ -98,41 +96,78 @@ class ClipboardSetDataHelper : public nsIClipboard {
  */
 class nsBaseClipboard : public ClipboardSetDataHelper {
  public:
-  nsBaseClipboard();
+  explicit nsBaseClipboard(
+      const mozilla::dom::ClipboardCapabilities& aClipboardCaps);
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIClipboard
   NS_IMETHOD SetData(nsITransferable* aTransferable, nsIClipboardOwner* anOwner,
-                     int32_t aWhichClipboard) override;
+                     int32_t aWhichClipboard) override final;
   NS_IMETHOD GetData(nsITransferable* aTransferable,
-                     int32_t aWhichClipboard) override;
-  NS_IMETHOD EmptyClipboard(int32_t aWhichClipboard) override;
+                     int32_t aWhichClipboard) override final;
+  NS_IMETHOD EmptyClipboard(int32_t aWhichClipboard) override final;
   NS_IMETHOD HasDataMatchingFlavors(const nsTArray<nsCString>& aFlavorList,
                                     int32_t aWhichClipboard,
-                                    bool* _retval) override;
+                                    bool* aOutResult) override final;
   NS_IMETHOD IsClipboardTypeSupported(int32_t aWhichClipboard,
-                                      bool* _retval) override;
+                                      bool* aRetval) override final;
   RefPtr<mozilla::GenericPromise> AsyncGetData(
-      nsITransferable* aTransferable, int32_t aWhichClipboard) override;
+      nsITransferable* aTransferable, int32_t aWhichClipboard) override final;
   RefPtr<DataFlavorsPromise> AsyncHasDataMatchingFlavors(
-      const nsTArray<nsCString>& aFlavorList, int32_t aWhichClipboard) override;
+      const nsTArray<nsCString>& aFlavorList,
+      int32_t aWhichClipboard) override final;
 
  protected:
-  virtual ~nsBaseClipboard();
+  virtual ~nsBaseClipboard() = default;
 
   // Implement the native clipboard behavior.
   NS_IMETHOD GetNativeClipboardData(nsITransferable* aTransferable,
                                     int32_t aWhichClipboard) = 0;
-
-  void ClearClipboardCache();
-
-  bool mEmptyingForSetData;
-  nsCOMPtr<nsIClipboardOwner> mClipboardOwner;
-  nsCOMPtr<nsITransferable> mTransferable;
+  virtual nsresult EmptyNativeClipboardData(int32_t aWhichClipboard) = 0;
+  virtual mozilla::Result<int32_t, nsresult> GetNativeClipboardSequenceNumber(
+      int32_t aWhichClipboard) = 0;
+  virtual mozilla::Result<bool, nsresult> HasNativeClipboardDataMatchingFlavors(
+      const nsTArray<nsCString>& aFlavorList, int32_t aWhichClipboard) = 0;
 
  private:
+  class ClipboardCache final {
+   public:
+    ~ClipboardCache() {
+      // In order to notify the old clipboard owner.
+      Clear();
+    }
+
+    /**
+     * Clear the cached transferable and notify the original clipboard owner
+     * that it has lost ownership.
+     */
+    void Clear();
+    void Update(nsITransferable* aTransferable,
+                nsIClipboardOwner* aClipboardOwner, int32_t aSequenceNumber) {
+      // Clear first to notify the old clipboard owner.
+      Clear();
+      mTransferable = aTransferable;
+      mClipboardOwner = aClipboardOwner;
+      mSequenceNumber = aSequenceNumber;
+    }
+    nsITransferable* GetTransferable() const { return mTransferable; }
+    nsIClipboardOwner* GetClipboardOwner() const { return mClipboardOwner; }
+    int32_t GetSequenceNumber() const { return mSequenceNumber; }
+
+   private:
+    nsCOMPtr<nsITransferable> mTransferable;
+    nsCOMPtr<nsIClipboardOwner> mClipboardOwner;
+    int32_t mSequenceNumber = -1;
+  };
+
+  // Return clipboard cache if the cached data is valid, otherwise clear the
+  // cached data and returns null.
+  ClipboardCache* GetClipboardCacheIfValid(int32_t aClipboardType);
+
+  mozilla::UniquePtr<ClipboardCache> mCaches[nsIClipboard::kClipboardTypeCount];
+  const mozilla::dom::ClipboardCapabilities mClipboardCaps;
   bool mIgnoreEmptyNotification = false;
 };
 

@@ -1,19 +1,18 @@
 "use strict";
 
-const { ExperimentFakes } = ChromeUtils.importESModule(
+const { ExperimentFakes, ExperimentTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/NimbusTestUtils.sys.mjs"
 );
 const { FirstStartup } = ChromeUtils.importESModule(
   "resource://gre/modules/FirstStartup.sys.mjs"
 );
-const { NimbusFeatures } = ChromeUtils.importESModule(
-  "resource://nimbus/ExperimentAPI.sys.mjs"
-);
+const { NimbusFeatures, _ExperimentFeature: ExperimentFeature } =
+  ChromeUtils.importESModule("resource://nimbus/ExperimentAPI.sys.mjs");
 const { EnrollmentsContext } = ChromeUtils.importESModule(
   "resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs"
 );
-const { PanelTestProvider } = ChromeUtils.import(
-  "resource://activity-stream/lib/PanelTestProvider.jsm"
+const { PanelTestProvider } = ChromeUtils.importESModule(
+  "resource://activity-stream/lib/PanelTestProvider.sys.mjs"
 );
 const { TelemetryTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/TelemetryTestUtils.sys.mjs"
@@ -44,6 +43,8 @@ add_task(async function test_updateRecipes_activeExperiments() {
   await loader.init();
 
   ok(onRecipe.calledOnce, "Should match active experiments");
+
+  await assertEmptyStore(manager.store);
 });
 
 add_task(async function test_updateRecipes_isFirstRun() {
@@ -63,6 +64,8 @@ add_task(async function test_updateRecipes_isFirstRun() {
   await loader.init();
 
   Assert.ok(onRecipe.calledOnce, "Should match first run");
+
+  await assertEmptyStore(manager.store);
 });
 
 add_task(async function test_updateRecipes_invalidFeatureId() {
@@ -103,6 +106,8 @@ add_task(async function test_updateRecipes_invalidFeatureId() {
 
   await loader.init();
   ok(onRecipe.notCalled, "No recipes");
+
+  await assertEmptyStore(manager.store);
 });
 
 add_task(async function test_updateRecipes_invalidFeatureValue() {
@@ -147,6 +152,8 @@ add_task(async function test_updateRecipes_invalidFeatureValue() {
 
   await loader.init();
   ok(onRecipe.notCalled, "No recipes");
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_invalidRecipe() {
@@ -165,6 +172,8 @@ add_task(async function test_updateRecipes_invalidRecipe() {
 
   await loader.init();
   ok(onRecipe.notCalled, "No recipes");
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_invalidRecipeAfterUpdate() {
@@ -239,6 +248,8 @@ add_task(async function test_updateRecipes_invalidRecipeAfterUpdate() {
     }),
     "should call .onFinalize with an invalid recipe"
   );
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_invalidBranchAfterUpdate() {
@@ -352,6 +363,8 @@ add_task(async function test_updateRecipes_invalidBranchAfterUpdate() {
     }),
     "should call .onFinalize with an invalid branch"
   );
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_simpleFeatureInvalidAfterUpdate() {
@@ -474,6 +487,8 @@ add_task(async function test_updateRecipes_simpleFeatureInvalidAfterUpdate() {
   );
 
   EnrollmentsContext.prototype._generateVariablesOnlySchema.restore();
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_validationTelemetry() {
@@ -602,6 +617,8 @@ add_task(async function test_updateRecipes_validationTelemetry() {
     });
 
     Services.fog.testResetFOG();
+
+    await assertEmptyStore(manager.store, { cleanup: true });
   }
 });
 
@@ -669,7 +686,10 @@ add_task(async function test_updateRecipes_validationDisabled() {
       }),
       "should call .onFinalize with no validation issues"
     );
+
+    await assertEmptyStore(manager.store, { cleanup: true });
   }
+
   Services.prefs.clearUserPref("nimbus.validation.enabled");
 });
 
@@ -745,6 +765,8 @@ add_task(async function test_updateRecipes_appId() {
   );
 
   Services.prefs.clearUserPref("nimbus.appId");
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_withPropNotInManifest() {
@@ -787,6 +809,8 @@ add_task(async function test_updateRecipes_withPropNotInManifest() {
     "should call .onRecipe with this recipe"
   );
   equal(loader.manager.onRecipe.callCount, 1, "should only call onRecipe once");
+
+  await assertEmptyStore(loader.manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_recipeAppId() {
@@ -834,6 +858,8 @@ add_task(async function test_updateRecipes_recipeAppId() {
     }),
     "Should call .onFinalize with no validation issues"
   );
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_featureValidationOptOut() {
@@ -916,6 +942,8 @@ add_task(async function test_updateRecipes_featureValidationOptOut() {
         }),
       "should call .onFinalize with only one invalid recipe"
     );
+
+    await assertEmptyStore(manager.store, { cleanup: true });
   }
 });
 
@@ -972,6 +1000,8 @@ add_task(async function test_updateRecipes_invalidFeature_mismatch() {
   );
 
   targetingSpy.restore();
+
+  await assertEmptyStore(manager.store, { cleanup: true });
 });
 
 add_task(async function test_updateRecipes_rollout_bucketing() {
@@ -1097,4 +1127,511 @@ add_task(async function test_updateRecipes_rollout_bucketing() {
       object: "nimbus_experiment",
     }
   );
+
+  manager.unenroll(experiment.slug);
+  await assertEmptyStore(manager.store, { cleanup: true });
+});
+
+add_task(async function test_reenroll_rollout_resized() {
+  const loader = ExperimentFakes.rsLoader();
+  const manager = loader.manager;
+
+  await loader.init();
+  await manager.onStartup();
+  await manager.store.ready();
+
+  const rollout = ExperimentFakes.recipe("rollout", {
+    isRollout: true,
+  });
+  rollout.bucketConfig = {
+    ...rollout.bucketConfig,
+    start: 0,
+    count: 1000,
+    total: 1000,
+  };
+
+  sinon.stub(loader.remoteSettingsClient, "get").resolves([rollout]);
+
+  await loader.updateRecipes();
+  Assert.equal(
+    manager.store.getRolloutForFeature("testFeature")?.slug,
+    rollout.slug,
+    "Should enroll in rollout"
+  );
+
+  rollout.bucketConfig.count = 0;
+  await loader.updateRecipes();
+
+  Assert.ok(
+    !manager.store.getRolloutForFeature("testFeature"),
+    "Should unenroll from rollout"
+  );
+
+  const enrollment = manager.store.get(rollout.slug);
+  Assert.equal(enrollment.unenrollReason, "bucketing");
+
+  rollout.bucketConfig.count = 1000;
+  await loader.updateRecipes();
+
+  Assert.equal(
+    manager.store.getRolloutForFeature("testFeature")?.slug,
+    rollout.slug,
+    "Should re-enroll in rollout"
+  );
+
+  const newEnrollment = manager.store.get(rollout.slug);
+  Assert.ok(
+    !Object.is(enrollment, newEnrollment),
+    "Should have new enrollment object"
+  );
+  Assert.ok(
+    !("unenrollReason" in newEnrollment),
+    "New enrollment should not have unenroll reason"
+  );
+
+  manager.unenroll(rollout.slug);
+  await assertEmptyStore(manager.store, { cleanup: true });
+});
+
+add_task(async function test_experiment_reenroll() {
+  const loader = ExperimentFakes.rsLoader();
+  const manager = loader.manager;
+
+  await loader.init();
+  await manager.onStartup();
+  await manager.store.ready();
+
+  const experiment = ExperimentFakes.recipe("experiment");
+  experiment.bucketConfig = {
+    ...experiment.bucketConfig,
+    start: 0,
+    count: 1000,
+    total: 1000,
+  };
+
+  await manager.enroll(experiment, "test");
+  Assert.equal(
+    manager.store.getExperimentForFeature("testFeature")?.slug,
+    experiment.slug,
+    "Should enroll in experiment"
+  );
+
+  manager.unenroll(experiment.slug);
+  Assert.ok(
+    !manager.store.getExperimentForFeature("testFeature"),
+    "Should unenroll from experiment"
+  );
+
+  sinon.stub(loader.remoteSettingsClient, "get").resolves([experiment]);
+
+  await loader.updateRecipes();
+  Assert.ok(
+    !manager.store.getExperimentForFeature("testFeature"),
+    "Should not re-enroll in experiment"
+  );
+
+  await assertEmptyStore(manager.store, { cleanup: true });
+});
+
+add_task(async function test_rollout_reenroll_optout() {
+  const loader = ExperimentFakes.rsLoader();
+  const manager = loader.manager;
+
+  await loader.init();
+  await manager.onStartup();
+  await manager.store.ready();
+
+  const rollout = ExperimentFakes.recipe("experiment", { isRollout: true });
+  rollout.bucketConfig = {
+    ...rollout.bucketConfig,
+    start: 0,
+    count: 1000,
+    total: 1000,
+  };
+
+  sinon.stub(loader.remoteSettingsClient, "get").resolves([rollout]);
+  await loader.updateRecipes();
+
+  Assert.ok(
+    manager.store.getRolloutForFeature("testFeature"),
+    "Should enroll in rollout"
+  );
+
+  manager.unenroll(rollout.slug, "individual-opt-out");
+
+  await loader.updateRecipes();
+
+  Assert.ok(
+    !manager.store.getRolloutForFeature("testFeature"),
+    "Should not re-enroll in rollout"
+  );
+
+  await assertEmptyStore(manager.store, { cleanup: true });
+});
+
+add_task(async function test_active_and_past_experiment_targeting() {
+  const loader = ExperimentFakes.rsLoader();
+  const manager = loader.manager;
+
+  await loader.init();
+  await manager.onStartup();
+  await manager.store.ready();
+
+  const cleanupFeatures = ExperimentTestUtils.addTestFeatures(
+    new ExperimentFeature("feature-a", {
+      isEarlyStartup: false,
+      variables: {},
+    }),
+    new ExperimentFeature("feature-b", {
+      isEarlyStartup: false,
+      variables: {},
+    }),
+    new ExperimentFeature("feature-c", { isEarlyStartup: false, variables: {} })
+  );
+
+  const experimentA = ExperimentFakes.recipe("experiment-a", {
+    branches: [
+      {
+        ...ExperimentFakes.recipe.branches[0],
+        features: [{ featureId: "feature-a", value: {} }],
+      },
+    ],
+    bucketConfig: {
+      ...ExperimentFakes.recipe.bucketConfig,
+      count: 1000,
+    },
+  });
+  const experimentB = ExperimentFakes.recipe("experiment-b", {
+    branches: [
+      {
+        ...ExperimentFakes.recipe.branches[0],
+        features: [{ featureId: "feature-b", value: {} }],
+      },
+    ],
+    bucketConfig: experimentA.bucketConfig,
+    targeting: "'experiment-a' in activeExperiments",
+  });
+  const experimentC = ExperimentFakes.recipe("experiment-c", {
+    branches: [
+      {
+        ...ExperimentFakes.recipe.branches[0],
+        features: [{ featureId: "feature-c", value: {} }],
+      },
+    ],
+    bucketConfig: experimentA.bucketConfig,
+    targeting: "'experiment-a' in previousExperiments",
+  });
+
+  const rolloutA = ExperimentFakes.recipe("rollout-a", {
+    branches: [
+      {
+        ...ExperimentFakes.recipe.branches[0],
+        features: [{ featureId: "feature-a", value: {} }],
+      },
+    ],
+    bucketConfig: experimentA.bucketConfig,
+    isRollout: true,
+  });
+  const rolloutB = ExperimentFakes.recipe("rollout-b", {
+    branches: [
+      {
+        ...ExperimentFakes.recipe.branches[0],
+        features: [{ featureId: "feature-b", value: {} }],
+      },
+    ],
+    bucketConfig: experimentA.bucketConfig,
+    targeting: "'rollout-a' in activeRollouts",
+    isRollout: true,
+  });
+  const rolloutC = ExperimentFakes.recipe("rollout-c", {
+    branches: [
+      {
+        ...ExperimentFakes.recipe.branches[0],
+        features: [{ featureId: "feature-c", value: {} }],
+      },
+    ],
+    bucketConfig: experimentA.bucketConfig,
+    targeting: "'rollout-a' in previousRollouts",
+    isRollout: true,
+  });
+
+  sinon
+    .stub(loader.remoteSettingsClient, "get")
+    .resolves([experimentA, rolloutA]);
+
+  // Enroll in A.
+  await loader.updateRecipes();
+  Assert.equal(
+    manager.store.getExperimentForFeature("feature-a")?.slug,
+    "experiment-a"
+  );
+  Assert.ok(!manager.store.getExperimentForFeature("feature-b"));
+  Assert.ok(!manager.store.getExperimentForFeature("feature-c"));
+  Assert.equal(
+    manager.store.getRolloutForFeature("feature-a")?.slug,
+    "rollout-a"
+  );
+  Assert.ok(!manager.store.getRolloutForFeature("feature-b"));
+  Assert.ok(!manager.store.getRolloutForFeature("feature-c"));
+
+  loader.remoteSettingsClient.get.resolves([
+    experimentA,
+    experimentB,
+    experimentC,
+    rolloutA,
+    rolloutB,
+    rolloutC,
+  ]);
+
+  // B will enroll becuase A is enrolled.
+  await loader.updateRecipes();
+  Assert.equal(
+    manager.store.getExperimentForFeature("feature-a")?.slug,
+    "experiment-a"
+  );
+  Assert.equal(
+    manager.store.getExperimentForFeature("feature-b")?.slug,
+    "experiment-b"
+  );
+  Assert.ok(!manager.store.getExperimentForFeature("feature-c"));
+  Assert.equal(
+    manager.store.getRolloutForFeature("feature-a")?.slug,
+    "rollout-a"
+  );
+  Assert.equal(
+    manager.store.getRolloutForFeature("feature-b")?.slug,
+    "rollout-b"
+  );
+  Assert.ok(!manager.store.getRolloutForFeature("feature-c"));
+
+  // Remove experiment A and rollout A to cause them to unenroll. A will still
+  // be enrolled while B and C are evaluating targeting, so their enrollment
+  // won't change.
+  loader.remoteSettingsClient.get.resolves([
+    experimentB,
+    experimentC,
+    rolloutB,
+    rolloutC,
+  ]);
+  await loader.updateRecipes();
+  Assert.ok(!manager.store.getExperimentForFeature("feature-a"));
+  Assert.equal(
+    manager.store.getExperimentForFeature("feature-b")?.slug,
+    "experiment-b"
+  );
+  Assert.ok(!manager.store.getExperimentForFeature("feature-c"));
+  Assert.ok(!manager.store.getRolloutForFeature("feature-a"));
+  Assert.equal(
+    manager.store.getRolloutForFeature("feature-b")?.slug,
+    "rollout-b"
+  );
+  Assert.ok(!manager.store.getRolloutForFeature("feature-c"));
+
+  // Now A will be marked as unenrolled while evaluating B and C's targeting, so
+  // their enrollment will change.
+  await loader.updateRecipes();
+  Assert.ok(!manager.store.getExperimentForFeature("feature-a"));
+  Assert.ok(!manager.store.getExperimentForFeature("feature-b"));
+  Assert.equal(
+    manager.store.getExperimentForFeature("feature-c")?.slug,
+    "experiment-c"
+  );
+  Assert.ok(!manager.store.getRolloutForFeature("feature-a"));
+  Assert.ok(!manager.store.getRolloutForFeature("feature-b"));
+  Assert.equal(
+    manager.store.getRolloutForFeature("feature-c")?.slug,
+    "rollout-c"
+  );
+
+  manager.unenroll("experiment-c");
+  manager.unenroll("rollout-c");
+
+  await assertEmptyStore(manager.store, { cleanup: true });
+  cleanupFeatures();
+});
+
+add_task(async function test_enrollment_targeting() {
+  const loader = ExperimentFakes.rsLoader();
+  const manager = loader.manager;
+
+  await loader.init();
+  await manager.onStartup();
+  await manager.store.ready();
+
+  const cleanupFeatures = ExperimentTestUtils.addTestFeatures(
+    new ExperimentFeature("feature-a", {
+      isEarlyStartup: false,
+      variables: {},
+    }),
+    new ExperimentFeature("feature-b", {
+      isEarlyStartup: false,
+      variables: {},
+    }),
+    new ExperimentFeature("feature-c", {
+      isEarlyStartup: false,
+      variables: {},
+    }),
+    new ExperimentFeature("feature-d", {
+      isEarlyStartup: false,
+      variables: {},
+    })
+  );
+
+  function recipe(
+    name,
+    featureId,
+    { targeting = "true", isRollout = false } = {}
+  ) {
+    return ExperimentFakes.recipe(name, {
+      branches: [
+        {
+          ...ExperimentFakes.recipe.branches[0],
+          features: [{ featureId, value: {} }],
+        },
+      ],
+      bucketConfig: {
+        ...ExperimentFakes.recipe.bucketConfig,
+        count: 1000,
+      },
+      targeting,
+      isRollout,
+    });
+  }
+
+  const experimentA = recipe("experiment-a", "feature-a", {
+    targeting: "!('rollout-c' in enrollments)",
+  });
+  const experimentB = recipe("experiment-b", "feature-b", {
+    targeting: "'rollout-a' in enrollments",
+  });
+  const experimentC = recipe("experiment-c", "feature-c");
+
+  const rolloutA = recipe("rollout-a", "feature-a", {
+    targeting: "!('experiment-c' in enrollments)",
+    isRollout: true,
+  });
+  const rolloutB = recipe("rollout-b", "feature-b", {
+    targeting: "'experiment-a' in enrollments",
+    isRollout: true,
+  });
+  const rolloutC = recipe("rollout-c", "feature-c", { isRollout: true });
+
+  async function check(current, past, unenrolled) {
+    await loader.updateRecipes();
+
+    for (const slug of current) {
+      const enrollment = manager.store.get(slug);
+      Assert.equal(
+        enrollment?.active,
+        true,
+        `Enrollment exists for ${slug} and is active`
+      );
+    }
+
+    for (const slug of past) {
+      const enrollment = manager.store.get(slug);
+      Assert.equal(
+        enrollment?.active,
+        false,
+        `Enrollment exists for ${slug} and is inactive`
+      );
+    }
+
+    for (const slug of unenrolled) {
+      Assert.ok(
+        !manager.store.get(slug),
+        `Enrollment does not exist for ${slug}`
+      );
+    }
+  }
+
+  sinon
+    .stub(loader.remoteSettingsClient, "get")
+    .resolves([experimentB, rolloutB]);
+  await check(
+    [],
+    [],
+    [
+      "experiment-a",
+      "experiment-b",
+      "experiment-c",
+      "rollout-a",
+      "rollout-b",
+      "rollout-c",
+    ]
+  );
+
+  // Order matters -- B will be checked before A.
+  loader.remoteSettingsClient.get.resolves([
+    experimentB,
+    rolloutB,
+    experimentA,
+    rolloutA,
+  ]);
+  await check(
+    ["experiment-a", "rollout-a"],
+    [],
+    ["experiment-b", "experiment-c", "rollout-b", "rollout-c"]
+  );
+
+  // B will see A enrolled.
+  loader.remoteSettingsClient.get.resolves([
+    experimentB,
+    rolloutB,
+    experimentA,
+    rolloutA,
+  ]);
+  await check(
+    ["experiment-a", "experiment-b", "rollout-a", "rollout-b"],
+    [],
+    ["experiment-c", "rollout-c"]
+  );
+
+  // Order matters -- A will be checked before C.
+  loader.remoteSettingsClient.get.resolves([
+    experimentB,
+    rolloutB,
+    experimentA,
+    rolloutA,
+    experimentC,
+    rolloutC,
+  ]);
+  await check(
+    [
+      "experiment-a",
+      "experiment-b",
+      "experiment-c",
+      "rollout-a",
+      "rollout-b",
+      "rollout-c",
+    ],
+    [],
+    []
+  );
+
+  // A will see C has enrolled and unenroll. B will stay enrolled.
+  await check(
+    ["experiment-b", "experiment-c", "rollout-b", "rollout-c"],
+    ["experiment-a", "rollout-a"],
+    []
+  );
+
+  // A being unenrolled does not affect B. Rollout A will not re-enroll due to targeting.
+  await check(
+    ["experiment-b", "experiment-c", "rollout-b", "rollout-c"],
+    ["experiment-a", "rollout-a"],
+    []
+  );
+
+  for (const slug of [
+    "experiment-b",
+    "experiment-c",
+    "rollout-b",
+    "rollout-c",
+  ]) {
+    manager.unenroll(slug);
+  }
+
+  await assertEmptyStore(manager.store, { cleanup: true });
+  cleanupFeatures();
 });

@@ -111,7 +111,7 @@ class WebSocketImpl final : public nsIInterfaceRequestor,
                             public nsIWebSocketListener,
                             public nsIObserver,
                             public nsIRequest,
-                            public nsIEventTarget,
+                            public nsISerialEventTarget,
                             public nsIWebSocketImpl {
  public:
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -255,7 +255,7 @@ class WebSocketImpl final : public nsIInterfaceRequestor,
   nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
 
   // For dispatching runnables to main thread.
-  nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
+  nsCOMPtr<nsISerialEventTarget> mMainThreadEventTarget;
 
   RefPtr<WebSocketImplProxy> mImplProxy;
 
@@ -294,7 +294,8 @@ WebSocketImplProxy::SendMessage(const nsAString& aMessage) {
 }
 
 NS_IMPL_ISUPPORTS(WebSocketImpl, nsIInterfaceRequestor, nsIWebSocketListener,
-                  nsIObserver, nsIRequest, nsIEventTarget, nsIWebSocketImpl)
+                  nsIObserver, nsIRequest, nsIEventTarget, nsISerialEventTarget,
+                  nsIWebSocketImpl)
 
 class CallDispatchConnectionCloseEvents final : public DiscardableRunnable {
  public:
@@ -1770,10 +1771,11 @@ nsresult WebSocketImpl::AsyncOpen(
   MOZ_ASSERT(NS_IsMainThread(), "Not running on main thread");
   MOZ_ASSERT_IF(!aTransportProvider, aNegotiatedExtensions.IsEmpty());
 
-  nsCString asciiOrigin;
-  nsresult rv = aPrincipal->GetAsciiOrigin(asciiOrigin);
+  nsCString webExposedOriginSerialization;
+  nsresult rv = aPrincipal->GetWebExposedOriginSerialization(
+      webExposedOriginSerialization);
   if (NS_FAILED(rv)) {
-    asciiOrigin.AssignLiteral("null");
+    webExposedOriginSerialization.AssignLiteral("null");
   }
 
   if (aTransportProvider) {
@@ -1782,7 +1784,7 @@ nsresult WebSocketImpl::AsyncOpen(
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  ToLowerCase(asciiOrigin);
+  ToLowerCase(webExposedOriginSerialization);
 
   nsCOMPtr<nsIURI> uri;
   if (!aTransportProvider) {
@@ -1790,7 +1792,7 @@ nsresult WebSocketImpl::AsyncOpen(
     MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
-  rv = mChannel->AsyncOpenNative(uri, asciiOrigin,
+  rv = mChannel->AsyncOpenNative(uri, webExposedOriginSerialization,
                                  aPrincipal->OriginAttributesRef(),
                                  aInnerWindowID, this, nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -2119,7 +2121,8 @@ nsresult WebSocketImpl::ParseURL(const nsAString& aURL) {
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
 
-  rv = nsContentUtils::GetUTFOrigin(parsedURL, mUTF16Origin);
+  rv =
+      nsContentUtils::GetWebExposedOriginSerialization(parsedURL, mUTF16Origin);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_SYNTAX_ERR);
 
   mAsciiHost = host;
@@ -2826,6 +2829,8 @@ NS_IMETHODIMP_(bool)
 WebSocketImpl::IsOnCurrentThreadInfallible() { return IsTargetThread(); }
 
 bool WebSocketImpl::IsTargetThread() const {
+  // FIXME: This should also check if we're on the worker thread. Code using
+  // `IsOnCurrentThread` could easily misbehave here!
   return NS_IsMainThread() == mIsMainThread;
 }
 

@@ -77,7 +77,19 @@ strong {
 
 /* Tooltip: CSS variables tooltip */
 
-.devtools-tooltip-css-variable,
+.devtools-tooltip-css-variable {
+  color: var(--theme-body-color);
+  padding: 2px 8px;
+  direction: ltr;
+  /* Try to show the content of the tooltip on a single line */
+  inline-size: max-content;
+  word-break: break-word;
+  max-inline-size: 100vw;
+}
+
+
+/* Tooltip: Compatibility tooltip */
+
 .devtools-tooltip-css-compatibility {
   color: var(--theme-body-color);
   padding: 2px;
@@ -596,6 +608,12 @@ strong {
   border-radius: var(--theme-arrowpanel-border-radius);
   height: 100%;
   overflow-y: auto;
+}
+
+@media (-moz-overlay-scrollbars) {
+  .devtools-tooltip-events-container {
+    padding-inline: calc(env(scrollbar-inline-size) / 2);
+  }
 }
 
 .devtools-tooltip-events-container .event-header {

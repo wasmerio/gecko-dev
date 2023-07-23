@@ -11,6 +11,7 @@
 ChromeUtils.defineESModuleGetters(this, {
   BackgroundUpdate: "resource://gre/modules/BackgroundUpdate.sys.mjs",
   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  TranslationsParent: "resource://gre/actors/TranslationsParent.sys.mjs",
 });
 
 // Constants & Enumeration Values
@@ -98,7 +99,6 @@ Preferences.addAll([
   { id: "font.language.group", type: "wstring" },
 
   // Languages
-  { id: "browser.translation.detectLanguage", type: "bool" },
   { id: "intl.regional_prefs.use_os_locales", type: "bool" },
 
   // General tab
@@ -269,16 +269,7 @@ var gMainPane = {
       // Exponential backoff mechanism will delay the polling times if user doesn't
       // trigger SetDefaultBrowser for a long time.
       let backoffTimes = [
-        1000,
-        1000,
-        1000,
-        1000,
-        2000,
-        2000,
-        2000,
-        5000,
-        5000,
-        10000,
+        1000, 1000, 1000, 1000, 2000, 2000, 2000, 5000, 5000, 10000,
       ];
 
       let pollForDefaultBrowser = () => {
@@ -335,17 +326,19 @@ var gMainPane = {
       )
     ) {
       document.getElementById("pictureInPictureBox").hidden = false;
-      setEventListener("pictureInPictureToggleEnabled", "command", function(
-        event
-      ) {
-        if (!event.target.checked) {
-          Services.telemetry.recordEvent(
-            "pictureinpicture.settings",
-            "disable",
-            "settings"
-          );
+      setEventListener(
+        "pictureInPictureToggleEnabled",
+        "command",
+        function (event) {
+          if (!event.target.checked) {
+            Services.telemetry.recordEvent(
+              "pictureinpicture.settings",
+              "disable",
+              "settings"
+            );
+          }
         }
-      });
+      );
     }
 
     if (AppConstants.platform == "win") {
@@ -365,9 +358,10 @@ var gMainPane = {
     }
 
     if (AppConstants.platform != "win") {
-      let quitKeyElement = window.browsingContext.topChromeWindow.document.getElementById(
-        "key_quitApplication"
-      );
+      let quitKeyElement =
+        window.browsingContext.topChromeWindow.document.getElementById(
+          "key_quitApplication"
+        );
       if (quitKeyElement) {
         let quitKey = ShortcutUtils.prettifyShortcut(quitKeyElement);
         document.l10n.setAttributes(
@@ -382,30 +376,30 @@ var gMainPane = {
       }
     }
 
-    setEventListener("ctrlTabRecentlyUsedOrder", "command", function() {
+    setEventListener("ctrlTabRecentlyUsedOrder", "command", function () {
       Services.prefs.clearUserPref("browser.ctrlTab.migrated");
     });
-    setEventListener("manageBrowserLanguagesButton", "command", function() {
+    setEventListener("manageBrowserLanguagesButton", "command", function () {
       gMainPane.showBrowserLanguagesSubDialog({ search: false });
     });
     if (AppConstants.MOZ_UPDATER) {
       // These elements are only compiled in when the updater is enabled
-      setEventListener("checkForUpdatesButton", "command", function() {
+      setEventListener("checkForUpdatesButton", "command", function () {
         gAppUpdater.checkForUpdates();
       });
-      setEventListener("downloadAndInstallButton", "command", function() {
+      setEventListener("downloadAndInstallButton", "command", function () {
         gAppUpdater.startDownload();
       });
-      setEventListener("updateButton", "command", function() {
+      setEventListener("updateButton", "command", function () {
         gAppUpdater.buttonRestartAfterDownload();
       });
-      setEventListener("checkForUpdatesButton2", "command", function() {
+      setEventListener("checkForUpdatesButton2", "command", function () {
         gAppUpdater.checkForUpdates();
       });
-      setEventListener("checkForUpdatesButton3", "command", function() {
+      setEventListener("checkForUpdatesButton3", "command", function () {
         gAppUpdater.checkForUpdates();
       });
-      setEventListener("checkForUpdatesButton4", "command", function() {
+      setEventListener("checkForUpdatesButton4", "command", function () {
         gAppUpdater.checkForUpdates();
       });
     }
@@ -416,9 +410,8 @@ var gMainPane = {
       "command",
       gMainPane.onBrowserRestoreSessionChange
     );
-    gMainPane.updateBrowserStartupUI = gMainPane.updateBrowserStartupUI.bind(
-      gMainPane
-    );
+    gMainPane.updateBrowserStartupUI =
+      gMainPane.updateBrowserStartupUI.bind(gMainPane);
     Preferences.get("browser.privatebrowsing.autostart").on(
       "change",
       gMainPane.updateBrowserStartupUI
@@ -446,16 +439,7 @@ var gMainPane = {
       makeDisableControllingExtension(PREF_SETTING_TYPE, CONTAINERS_KEY)
     );
     setEventListener("chooseLanguage", "command", gMainPane.showLanguages);
-    setEventListener(
-      "translationAttributionImage",
-      "click",
-      gMainPane.openTranslationProviderAttribution
-    );
-    setEventListener(
-      "translateButton",
-      "command",
-      gMainPane.showTranslationExceptions
-    );
+    // TODO (Bug 1817084) Remove this code when we disable the extension
     setEventListener(
       "fxtranslateButton",
       "command",
@@ -494,7 +478,7 @@ var gMainPane = {
 
     document
       .getElementById("migrationWizardDialog")
-      .addEventListener("MigrationWizard:Close", function(e) {
+      .addEventListener("MigrationWizard:Close", function (e) {
         e.currentTarget.close();
       });
 
@@ -518,21 +502,8 @@ var gMainPane = {
 
     this.updateOnScreenKeyboardVisibility();
 
-    // Show translation preferences if we may:
-    const translationsPrefName = "browser.translation.ui.show";
-    if (Services.prefs.getBoolPref(translationsPrefName)) {
-      let row = document.getElementById("translationBox");
-      row.removeAttribute("hidden");
-      // Showing attribution only for Bing Translator.
-      var { Translation } = ChromeUtils.import(
-        "resource:///modules/translation/TranslationParent.jsm"
-      );
-      if (Translation.translationEngine == "Bing") {
-        document.getElementById("bingAttribution").removeAttribute("hidden");
-      }
-    }
-
     // Firefox Translations settings panel
+    // TODO (Bug 1817084) Remove this code when we disable the extension
     const fxtranslationsDisabledPrefName = "extensions.translations.disabled";
     if (!Services.prefs.getBoolPref(fxtranslationsDisabledPrefName, true)) {
       let fxtranslationRow = document.getElementById("fxtranslationsBox");
@@ -755,14 +726,6 @@ var gMainPane = {
       element => FontBuilder.readFontSelection(element)
     );
     Preferences.addSyncFromPrefListener(
-      document.getElementById("translate"),
-      () =>
-        this.updateButtons(
-          "translateButton",
-          "browser.translation.detectLanguage"
-        )
-    );
-    Preferences.addSyncFromPrefListener(
       document.getElementById("checkSpelling"),
       () => this.readCheckSpelling()
     );
@@ -969,7 +932,7 @@ var gMainPane = {
       gMainPane.handleDefaultZoomChange(parsedZoom);
     });
 
-    setEventListener("zoomText", "command", function() {
+    setEventListener("zoomText", "command", function () {
       win.ZoomManager.toggleZoom();
     });
 
@@ -1019,18 +982,11 @@ var gMainPane = {
       /**
        * The fully initialized state.
        *
-       * @param {TranslationsActor} translationsActor
        * @param {Object} supportedLanguages
        * @param {Array<{ langTag: string, displayName: string}} languageList
        * @param {Map<string, DownloadPhase>} downloadPhases
        */
-      constructor(
-        translationsActor,
-        supportedLanguages,
-        languageList,
-        downloadPhases
-      ) {
-        this.translationsActor = translationsActor;
+      constructor(supportedLanguages, languageList, downloadPhases) {
         this.supportedLanguages = supportedLanguages;
         this.languageList = languageList;
         this.downloadPhases = downloadPhases;
@@ -1040,15 +996,11 @@ var gMainPane = {
        * Handles all of the async initialization logic.
        */
       static async create() {
-        const translationsActor = window.windowGlobalChild.getActor(
-          "Translations"
-        );
-        const supportedLanguages = await translationsActor.getSupportedLanguages();
-        const languageList = TranslationsState.getLanguageList(
-          supportedLanguages
-        );
+        const supportedLanguages =
+          await TranslationsParent.getSupportedLanguages();
+        const languageList =
+          TranslationsState.getLanguageList(supportedLanguages);
         const downloadPhases = await TranslationsState.createDownloadPhases(
-          translationsActor,
           languageList
         );
 
@@ -1059,7 +1011,6 @@ var gMainPane = {
         }
 
         return new TranslationsState(
-          translationsActor,
           supportedLanguages,
           languageList,
           downloadPhases
@@ -1101,16 +1052,15 @@ var gMainPane = {
       /**
        * Determine the download phase of each language file.
        *
-       * @param {TranslationsChild} translationsActor
        * @param {Array<{ langTag: string, displayName: string}} languageList.
        * @returns {Map<string, DownloadPhase>} Map the language tag to whether it is downloaded.
        */
-      static async createDownloadPhases(translationsActor, languageList) {
+      static async createDownloadPhases(languageList) {
         const downloadPhases = new Map();
         for (const { langTag } of languageList) {
           downloadPhases.set(
             langTag,
-            (await translationsActor.hasAllFilesForLanguage(langTag))
+            (await TranslationsParent.hasAllFilesForLanguage(langTag))
               ? "downloaded"
               : "uninstalled"
           );
@@ -1131,6 +1081,9 @@ var gMainPane = {
       constructor(state) {
         this.state = state;
         this.elements = {
+          settingsButton: document.getElementById(
+            "translations-manage-settings-button"
+          ),
           installList: document.getElementById(
             "translations-manage-install-list"
           ),
@@ -1146,6 +1099,10 @@ var gMainPane = {
       setup() {
         this.buildLanguageList();
 
+        this.elements.settingsButton.addEventListener(
+          "command",
+          gMainPane.showTranslationsSettings
+        );
         this.elements.installAll.addEventListener(
           "command",
           this.handleInstallAll
@@ -1160,7 +1117,7 @@ var gMainPane = {
         this.hideError();
         this.disableButtons(true);
         try {
-          await this.state.translationsActor.downloadAllFiles();
+          await TranslationsParent.downloadAllFiles();
           this.markAllDownloadPhases("downloaded");
         } catch (error) {
           TranslationsView.showError(
@@ -1177,7 +1134,7 @@ var gMainPane = {
         this.hideError();
         this.disableButtons(true);
         try {
-          await this.state.translationsActor.deleteAllLanguageFiles();
+          await TranslationsParent.deleteAllLanguageFiles();
           this.markAllDownloadPhases("uninstalled");
         } catch (error) {
           TranslationsView.showError("translations-manage-error-delete", error);
@@ -1197,7 +1154,7 @@ var gMainPane = {
           this.hideError();
           this.updateDownloadPhase(langTag, "loading");
           try {
-            await this.state.translationsActor.downloadLanguageFiles(langTag);
+            await TranslationsParent.downloadLanguageFiles(langTag);
             this.updateDownloadPhase(langTag, "downloaded");
           } catch (error) {
             TranslationsView.showError(
@@ -1218,7 +1175,7 @@ var gMainPane = {
           this.hideError();
           this.updateDownloadPhase(langTag, "loading");
           try {
-            await this.state.translationsActor.deleteLanguageFiles(langTag);
+            await TranslationsParent.deleteLanguageFiles(langTag);
             this.updateDownloadPhase(langTag, "uninstalled");
           } catch (error) {
             TranslationsView.showError(
@@ -1255,11 +1212,11 @@ var gMainPane = {
 
           document.l10n.setAttributes(
             downloadButton,
-            "translations-manage-download-button"
+            "translations-manage-language-download-button"
           );
           document.l10n.setAttributes(
             deleteButton,
-            "translations-manage-delete-button"
+            "translations-manage-language-delete-button"
           );
 
           downloadButton.hidden = true;
@@ -1293,10 +1250,8 @@ var gMainPane = {
        * Recreates the download map when the state is invalidated.
        */
       async reloadDownloadPhases() {
-        this.state.downloadPhases = await TranslationsState.createDownloadPhases(
-          this.state.translationsActor,
-          this.state.languageList
-        );
+        this.state.downloadPhases =
+          await TranslationsState.createDownloadPhases(this.state.languageList);
         this.updateAllButtons();
       }
 
@@ -1916,17 +1871,17 @@ var gMainPane = {
    * Displays the translation exceptions dialog where specific site and language
    * translation preferences can be set.
    */
+  // TODO (Bug 1817084) Remove this code when we disable the extension
   showTranslationExceptions() {
     gSubDialog.open(
-      "chrome://browser/content/preferences/dialogs/translation.xhtml"
+      "chrome://browser/content/preferences/dialogs/translationExceptions.xhtml"
     );
   },
 
-  openTranslationProviderAttribution() {
-    var { Translation } = ChromeUtils.import(
-      "resource:///modules/translation/TranslationParent.jsm"
+  showTranslationsSettings() {
+    gSubDialog.open(
+      "chrome://browser/content/preferences/dialogs/translations.xhtml"
     );
-    Translation.openProviderAttribution();
   },
 
   /**
@@ -1999,17 +1954,13 @@ var gMainPane = {
       return;
     }
 
-    let [
-      title,
-      message,
-      okButton,
-      cancelButton,
-    ] = await document.l10n.formatValues([
-      { id: "containers-disable-alert-title" },
-      { id: "containers-disable-alert-desc", args: { tabCount: count } },
-      { id: "containers-disable-alert-ok-button", args: { tabCount: count } },
-      { id: "containers-disable-alert-cancel-button" },
-    ]);
+    let [title, message, okButton, cancelButton] =
+      await document.l10n.formatValues([
+        { id: "containers-disable-alert-title" },
+        { id: "containers-disable-alert-desc", args: { tabCount: count } },
+        { id: "containers-disable-alert-ok-button", args: { tabCount: count } },
+        { id: "containers-disable-alert-cancel-button" },
+      ]);
 
     let buttonFlags =
       Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_0 +
@@ -2323,7 +2274,8 @@ var gMainPane = {
       let processCountPref = Preferences.get("dom.ipc.processCount");
       let defaultProcessCount = processCountPref.defaultValue;
 
-      let contentProcessCount = document.querySelector(`#contentProcessCount > menupopup >
+      let contentProcessCount =
+        document.querySelector(`#contentProcessCount > menupopup >
                                 menuitem[value="${defaultProcessCount}"]`);
 
       document.l10n.setAttributes(
@@ -2519,17 +2471,13 @@ var gMainPane = {
       return;
     }
 
-    let [
-      title,
-      message,
-      okButton,
-      cancelButton,
-    ] = await document.l10n.formatValues([
-      { id: "update-in-progress-title" },
-      { id: "update-in-progress-message" },
-      { id: "update-in-progress-ok-button" },
-      { id: "update-in-progress-cancel-button" },
-    ]);
+    let [title, message, okButton, cancelButton] =
+      await document.l10n.formatValues([
+        { id: "update-in-progress-title" },
+        { id: "update-in-progress-message" },
+        { id: "update-in-progress-ok-button" },
+        { id: "update-in-progress-cancel-button" },
+      ]);
 
     // Continue is the cancel button which is BUTTON_POS_1 and is set as the
     // default so pressing escape or using a platform standard method of closing
@@ -3010,7 +2958,7 @@ var gMainPane = {
     if (canOpenWithOtherApp) {
       let menuItem = document.createXULElement("menuitem");
       menuItem.className = "choose-app-item";
-      menuItem.addEventListener("command", function(e) {
+      menuItem.addEventListener("command", function (e) {
         gMainPane.chooseApp(e);
       });
       document.l10n.setAttributes(menuItem, "applications-use-other");
@@ -3023,7 +2971,7 @@ var gMainPane = {
       menuPopup.appendChild(menuItem);
       menuItem = document.createXULElement("menuitem");
       menuItem.className = "manage-app-item";
-      menuItem.addEventListener("command", function(e) {
+      menuItem.addEventListener("command", function (e) {
         gMainPane.manageApp(e);
       });
       document.l10n.setAttributes(menuItem, "applications-manage-app");
@@ -3151,8 +3099,8 @@ var gMainPane = {
   _filterView(frag = this._list) {
     const filterValue = this._filter.value.toLowerCase();
     for (let elem of frag.children) {
-      const typeDescription = elem.querySelector(".typeDescription")
-        .textContent;
+      const typeDescription =
+        elem.querySelector(".typeDescription").textContent;
       const actionDescription = elem
         .querySelector(".actionDescription")
         .getAttribute("value");
@@ -3430,13 +3378,11 @@ var gMainPane = {
    * DefaultDownloadDirectory policies)
    */
   readUseDownloadDir() {
-    document.getElementById(
-      "downloadFolder"
-    ).disabled = document.getElementById(
-      "chooseFolder"
-    ).disabled = document.getElementById("saveTo").disabled =
-      Preferences.get("browser.download.dir").locked ||
-      Preferences.get("browser.download.folderList").locked;
+    document.getElementById("downloadFolder").disabled =
+      document.getElementById("chooseFolder").disabled =
+      document.getElementById("saveTo").disabled =
+        Preferences.get("browser.download.dir").locked ||
+        Preferences.get("browser.download.folderList").locked;
     // don't override the preference's value in UI
     return undefined;
   },
@@ -3522,10 +3468,8 @@ var gMainPane = {
     }
 
     // Display a 'pretty' label or the path in the UI.
-    let {
-      folderDisplayName,
-      file,
-    } = await this._getSystemDownloadFolderDetails(folderIndex);
+    let { folderDisplayName, file } =
+      await this._getSystemDownloadFolderDetails(folderIndex);
     // Figure out an icon url:
     let fph = Services.io
       .getProtocolHandler("file")
@@ -4179,14 +4123,14 @@ const AppearanceChooser = {
     // Forward the click to the "colors" button.
     document
       .getElementById("web-appearance-manage-colors-link")
-      .addEventListener("click", function(e) {
+      .addEventListener("click", function (e) {
         document.getElementById("colors").click();
         e.preventDefault();
       });
 
     document
       .getElementById("web-appearance-manage-themes-link")
-      .addEventListener("click", function(e) {
+      .addEventListener("click", function (e) {
         window.browsingContext.topChromeWindow.BrowserOpenAddonsMgr(
           "addons://list/theme"
         );

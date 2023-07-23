@@ -14,7 +14,7 @@
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "mozilla/a11y/RemoteAccessible.h"
 #include "mozilla/dom/BrowserParent.h"
-#include "mozilla/StaticPrefs_accessibility.h"
+#include "nsAccessibilityService.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -77,7 +77,7 @@ static gboolean scrollToPointCB(AtkComponent* aComponent, AtkCoordType coords,
 AtkObject* refAccessibleAtPointHelper(AtkObject* aAtkObj, gint aX, gint aY,
                                       AtkCoordType aCoordType) {
   Accessible* acc = GetInternalObj(aAtkObj);
-  if (!acc || (acc->IsLocal() && acc->AsLocal()->IsDefunct())) {
+  if (!acc) {
     return nullptr;
   }
 
@@ -112,14 +112,7 @@ void getExtentsHelper(AtkObject* aAtkObj, gint* aX, gint* aY, gint* aWidth,
   *aX = *aY = *aWidth = *aHeight = -1;
 
   Accessible* acc = GetInternalObj(aAtkObj);
-  if (!acc || (acc->IsLocal() && acc->AsLocal()->IsDefunct())) {
-    return;
-  }
-
-  if (!StaticPrefs::accessibility_cache_enabled_AtStartup() &&
-      acc->IsRemote()) {
-    acc->AsRemote()->Extents(aCoordType == ATK_XY_WINDOW, aX, aY, aWidth,
-                             aHeight);
+  if (!acc) {
     return;
   }
 

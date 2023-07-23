@@ -10,13 +10,9 @@ const {
 } = require("resource://devtools/shared/specs/network-content.js");
 
 const lazy = {};
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "NetUtil",
-  "resource://gre/modules/NetUtil.jsm"
-);
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   NetworkUtils:
     "resource://devtools/shared/network-observer/NetworkUtils.sys.mjs",
 });
@@ -135,9 +131,8 @@ class NetworkContentActor extends Actor {
     if (!this.networkEventStackTraceWatcher) {
       throw new Error("Not listening for network event stacktraces");
     }
-    const stacktrace = this.networkEventStackTraceWatcher.getStackTrace(
-      resourceId
-    );
+    const stacktrace =
+      this.networkEventStackTraceWatcher.getStackTrace(resourceId);
     return WebConsoleUtils.removeFramesAboveDebuggerEval(stacktrace);
   }
 }

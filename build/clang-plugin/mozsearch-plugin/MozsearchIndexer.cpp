@@ -37,6 +37,7 @@
 
 #include "FileOperations.h"
 #include "StringOperations.h"
+#include "from-clangd/HeuristicResolver.h"
 
 #if CLANG_VERSION_MAJOR < 8
 // Starting with Clang 8.0 some basic functions have been renamed
@@ -207,49 +208,6 @@ public:
                       const MacroDefinition &Md) override;
 };
 
-// Performs heuristic resolution of entities in template code.
-class HeuristicResolver {
-public:
-  // Try to heuristically resolve certain types of expressions to one or more
-  // likely-referenced declarations.
-  static std::vector<const NamedDecl *>
-  resolveMemberExpr(const CXXDependentScopeMemberExpr *ME) {
-    const Type *BaseType = ME->getBaseType().getTypePtrOrNull();
-    return resolveDependentMember(BaseType, ME->getMember());
-  }
-
-private:
-  // Given a dependent class type and a member name, heuristically resolve the
-  // name to one or more declarations. The current heuristic is simply to look
-  // up the name in the primary template. This is a heuristic because the
-  // template could potentially have specializations that declare different
-  // members. Multiple declarations could be returned if the name is overloaded
-  // (e.g. an overloaded method in the primary template).
-  static std::vector<const NamedDecl *>
-  resolveDependentMember(const Type *T, DeclarationName Name) {
-    if (!T)
-      return {};
-
-    const auto *TST = T->getAs<TemplateSpecializationType>();
-    if (!TST) {
-      return {};
-    }
-
-    const ClassTemplateDecl *TD = dyn_cast_or_null<ClassTemplateDecl>(
-        TST->getTemplateName().getAsTemplateDecl());
-    if (!TD)
-      return {};
-
-    CXXRecordDecl *RD = TD->getTemplatedDecl();
-    if (!RD->hasDefinition())
-      return {};
-
-    RD = RD->getDefinition();
-    return RD->lookupDependentName(Name,
-                                   [](const NamedDecl *) { return true; });
-  }
-};
-
 class IndexConsumer : public ASTConsumer,
                       public RecursiveASTVisitor<IndexConsumer>,
                       public DiagnosticConsumer {
@@ -260,6 +218,7 @@ private:
   std::map<FileID, std::unique_ptr<FileInfo>> FileMap;
   MangleContext *CurMangleContext;
   ASTContext *AstContext;
+  std::unique_ptr<clangd::HeuristicResolver> Resolver;
 
   typedef RecursiveASTVisitor<IndexConsumer> Super;
 
@@ -642,6 +601,7 @@ public:
       clang::ItaniumMangleContext::create(Ctx, CI.getDiagnostics());
 
     AstContext = &Ctx;
+    Resolver = std::make_unique<clangd::HeuristicResolver>(Ctx);
     TraverseDecl(Ctx.getTranslationUnitDecl());
 
     // Emit the JSON data for all files now.
@@ -1943,6 +1903,20 @@ public:
     return true;
   }
 
+  bool VisitDependentNameTypeLoc(DependentNameTypeLoc L) {
+    SourceLocation Loc = L.getNameLoc();
+    normalizeLocation(&Loc);
+    if (!isInterestingLocation(Loc)) {
+      return true;
+    }
+
+    for (const NamedDecl *D :
+         Resolver->resolveDependentNameType(L.getTypePtr())) {
+      visitHeuristicResult(Loc, D);
+    }
+    return true;
+  }
+
   bool VisitDeclRefExpr(DeclRefExpr *E) {
     SourceLocation Loc = E->getExprLoc();
     normalizeLocation(&Loc);
@@ -2025,6 +1999,42 @@ public:
     return true;
   }
 
+  // Helper function for producing heuristic results for usages in dependent
+  // code. These should be distinguished from concrete results (obtained for
+  // dependent code using the AutoTemplateContext machinery) once bug 1833552 is
+  // fixed.
+  // We don't expect this method to be intentionally called multiple times for
+  // a given (Loc, NamedDecl) pair because our callers should be mutually
+  // exclusive AST node types. However, it's fine if this method is called
+  // multiple time for a given pair because we explicitly de-duplicate records
+  // with an identical string representation (which is a good reason to have
+  // this helper, as it ensures identical representations).
+  void visitHeuristicResult(SourceLocation Loc, const NamedDecl *ND) {
+    if (const TemplateDecl *TD = dyn_cast<TemplateDecl>(ND)) {
+      ND = TD->getTemplatedDecl();
+    }
+    QualType MaybeType;
+    const char *SyntaxKind = nullptr;
+    if (const FunctionDecl *F = dyn_cast<FunctionDecl>(ND)) {
+      MaybeType = F->getType();
+      SyntaxKind = "function";
+    } else if (const FieldDecl *F = dyn_cast<FieldDecl>(ND)) {
+      MaybeType = F->getType();
+      SyntaxKind = "field";
+    } else if (const EnumConstantDecl *E = dyn_cast<EnumConstantDecl>(ND)) {
+      MaybeType = E->getType();
+      SyntaxKind = "enum";
+    } else if (const TypedefNameDecl *T = dyn_cast<TypedefNameDecl>(ND)) {
+      MaybeType = T->getUnderlyingType();
+      SyntaxKind = "type";
+    }
+    if (SyntaxKind) {
+      std::string Mangled = getMangledName(CurMangleContext, ND);
+      visitIdentifier("use", SyntaxKind, getQualifiedName(ND), Loc, Mangled,
+                      MaybeType, getContext(Loc));
+    }
+  }
+
   bool VisitOverloadExpr(OverloadExpr *E) {
     SourceLocation Loc = E->getExprLoc();
     normalizeLocation(&Loc);
@@ -2033,14 +2043,7 @@ public:
     }
 
     for (auto *Candidate : E->decls()) {
-      if (TemplateDecl *TD = dyn_cast<TemplateDecl>(Candidate)) {
-        Candidate = TD->getTemplatedDecl();
-      }
-      if (FunctionDecl *F = dyn_cast<FunctionDecl>(Candidate)) {
-        std::string Mangled = getMangledName(CurMangleContext, F);
-        visitIdentifier("use", "function", getQualifiedName(F), Loc, Mangled,
-                        F->getType(), getContext(Loc));
-      }
+      visitHeuristicResult(Loc, Candidate);
     }
     return true;
   }
@@ -2053,18 +2056,27 @@ public:
     }
 
     // If possible, provide a heuristic result without instantiation.
-    for (const NamedDecl *D : HeuristicResolver::resolveMemberExpr(E)) {
-      if (const FunctionDecl *F = dyn_cast<FunctionDecl>(D)) {
-        std::string Mangled = getMangledName(CurMangleContext, F);
-        visitIdentifier("use", "function", getQualifiedName(F), Loc, Mangled,
-                        F->getType(), getContext(Loc));
-      }
+    for (const NamedDecl *D : Resolver->resolveMemberExpr(E)) {
+      visitHeuristicResult(Loc, D);
     }
 
-    // Alsoo record this location so that if we have instantiations, we can
+    // Also record this location so that if we have instantiations, we can
     // gather more accurate results from them.
     if (TemplateStack) {
       TemplateStack->visitDependent(Loc);
+    }
+    return true;
+  }
+
+  bool VisitDependentScopeDeclRefExpr(DependentScopeDeclRefExpr *E) {
+    SourceLocation Loc = E->getLocation();
+    normalizeLocation(&Loc);
+    if (!isInterestingLocation(Loc)) {
+      return true;
+    }
+
+    for (const NamedDecl *D : Resolver->resolveDeclRefExpr(E)) {
+      visitHeuristicResult(Loc, D);
     }
     return true;
   }

@@ -31,7 +31,10 @@
 namespace js {
 
 class PropertyResult;
+
+namespace gc {
 class TenuringTracer;
+}  // namespace gc
 
 #ifdef ENABLE_RECORD_TUPLE
 // Defined in vm/RecordTupleShared.{h,cpp}. We cannot include that file
@@ -252,7 +255,7 @@ class ObjectElements {
   friend class ::JSObject;
   friend class ArrayObject;
   friend class NativeObject;
-  friend class TenuringTracer;
+  friend class gc::TenuringTracer;
 #ifdef ENABLE_RECORD_TUPLE
   friend class TupleType;
 #endif
@@ -726,8 +729,7 @@ class NativeObject : public JSObject {
   inline bool isInWholeCellBuffer() const;
 
   static inline NativeObject* create(JSContext* cx, gc::AllocKind kind,
-                                     gc::InitialHeap heap,
-                                     Handle<SharedShape*> shape,
+                                     gc::Heap heap, Handle<SharedShape*> shape,
                                      gc::AllocSite* site = nullptr);
 
 #ifdef DEBUG
@@ -753,7 +755,7 @@ class NativeObject : public JSObject {
 
   inline void setDictionaryModeSlotSpan(uint32_t span);
 
-  friend class TenuringTracer;
+  friend class gc::TenuringTracer;
 
   // Given a slot range from |start| to |end| exclusive, call |fun| with
   // pointers to the corresponding fixed slot and/or dynamic slot ranges.
@@ -1463,6 +1465,8 @@ class NativeObject : public JSObject {
   inline void ensureDenseInitializedLength(uint32_t index, uint32_t extra);
 
   void setDenseElement(uint32_t index, const Value& val) {
+    // Note: Streams code can call this for the internal ListObject type with
+    // MagicValue(JS_WRITABLESTREAM_CLOSE_RECORD).
     MOZ_ASSERT_IF(val.isMagic(), val.whyMagic() != JS_ELEMENTS_HOLE);
     setDenseElementUnchecked(index, val);
   }
@@ -1500,6 +1504,7 @@ class NativeObject : public JSObject {
                                 uint32_t count);
 
   inline void initDenseElements(const Value* src, uint32_t count);
+  inline void initDenseElements(JSLinearString** src, uint32_t count);
   inline void initDenseElements(NativeObject* src, uint32_t srcStart,
                                 uint32_t count);
 

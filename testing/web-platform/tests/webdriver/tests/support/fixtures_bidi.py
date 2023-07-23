@@ -1,7 +1,7 @@
 import base64
 
+from tests.support.asserts import assert_pdf
 from tests.support.image import cm_to_px, png_dimensions, ImageDifference
-from tests.support.pdf import assert_pdf
 from typing import Any, Mapping
 
 import pytest
@@ -60,9 +60,13 @@ async def subscribe_events(bidi_session):
 async def new_tab(bidi_session):
     """Open and focus a new tab to run the test in a foreground tab."""
     new_tab = await bidi_session.browsing_context.create(type_hint='tab')
+
     yield new_tab
-    # Close the tab.
-    await bidi_session.browsing_context.close(context=new_tab["context"])
+
+    try:
+        await bidi_session.browsing_context.close(context=new_tab["context"])
+    except NoSuchFrameException:
+        print(f"Tab with id {new_tab['context']} has already been closed")
 
 
 @pytest.fixture
@@ -208,8 +212,8 @@ def assert_pdf_dimensions(render_pdf_to_png_bidi):
         png = await render_pdf_to_png_bidi(pdf)
         width, height = png_dimensions(png)
 
-        assert cm_to_px(expected_dimensions["height"]) == height
-        assert cm_to_px(expected_dimensions["width"]) == width
+        assert (height - 1) <= cm_to_px(expected_dimensions["height"]) <= (height + 1)
+        assert (width - 1) <= cm_to_px(expected_dimensions["width"]) <= (width + 1)
 
     return assert_pdf_dimensions
 

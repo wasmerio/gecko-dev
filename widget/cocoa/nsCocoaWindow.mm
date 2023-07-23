@@ -168,6 +168,44 @@ void nsCocoaWindow::DestroyNativeWindow() {
 
   if (!mWindow) return;
 
+  // Define a helper function for checking our fullscreen window status.
+  bool (^inNativeFullscreen)(void) = ^{
+    return ((mWindow.styleMask & NSFullScreenWindowMask) == NSFullScreenWindowMask);
+  };
+
+  // If we are in native fullscreen, or we are in the middle of a native
+  // fullscreen transition, spin our run loop until both those things
+  // are false. This ensures that we've completed all our native
+  // fullscreen transitions and updated our class state before we close
+  // the window. We need to do this here (rather than in some other
+  // nsCocoaWindow trying to do a native fullscreen transition) because
+  // part of closing our window is clearing out our delegate, and the
+  // delegate callback is the only other way to clear our class state.
+  //
+  // While spinning this run loop, check to see if we are still in native
+  // fullscreen. If we are, request that we leave fullscreen (only once)
+  // and continue to spin the run loop until we're out of fullscreen.
+  //
+  // However, it's possible that we are *already* in a run loop inside of
+  // ProcessTransitions(), waiting on a native fullscreen transition to
+  // complete. In such a case, we can't spin the run loop again, so we
+  // don't even enter this loop if mInProcessTransitions is true.
+  bool haveRequestedFullscreenExit = false;
+  NSRunLoop* localRunLoop = [NSRunLoop currentRunLoop];
+  while (!mInProcessTransitions && (inNativeFullscreen() || WeAreInNativeTransition()) &&
+         [localRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]]) {
+    // This loop continues to process events until mWindow is fully out
+    // of native fullscreen.
+
+    // Check to see if we should one-time request an exit from fullscreen.
+    // We do this if we are in native fullscreen and no window is in a
+    // native fullscreen transition.
+    if (!haveRequestedFullscreenExit && inNativeFullscreen() && CanStartNativeTransition()) {
+      [mWindow toggleFullScreen:nil];
+      haveRequestedFullscreenExit = true;
+    }
+  }
+
   [mWindow releaseJSObjects];
   // We want to unhook the delegate here because we don't want events
   // sent to it after this object has been destroyed.
@@ -175,6 +213,12 @@ void nsCocoaWindow::DestroyNativeWindow() {
   [mWindow close];
   mWindow = nil;
   [mDelegate autorelease];
+
+  // We've lost access to our delegate. If we are still in a native
+  // fullscreen transition, we have to give up on it now even if it
+  // isn't finished, because the delegate is the only way that the
+  // class state would ever be cleared.
+  EndOurNativeTransition();
 
   NS_OBJC_END_TRY_IGNORE_BLOCK;
 }
@@ -1141,9 +1185,7 @@ void nsCocoaWindow::Enable(bool aState) {}
 
 bool nsCocoaWindow::IsEnabled() const { return true; }
 
-#define kWindowPositionSlop 20
-
-void nsCocoaWindow::ConstrainPosition(bool aAllowSlop, int32_t* aX, int32_t* aY) {
+void nsCocoaWindow::ConstrainPosition(DesktopIntPoint& aPoint) {
   NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
 
   if (!mWindow || ![mWindow screen]) {
@@ -1163,7 +1205,7 @@ void nsCocoaWindow::ConstrainPosition(bool aAllowSlop, int32_t* aX, int32_t* aY)
   nsCOMPtr<nsIScreenManager> screenMgr = do_GetService("@mozilla.org/gfx/screenmanager;1");
   if (screenMgr) {
     nsCOMPtr<nsIScreen> screen;
-    screenMgr->ScreenForRect(*aX, *aY, width, height, getter_AddRefs(screen));
+    screenMgr->ScreenForRect(aPoint.x, aPoint.y, width, height, getter_AddRefs(screen));
 
     if (screen) {
       screen->GetRectDisplayPix(&(screenBounds.x), &(screenBounds.y), &(screenBounds.width),
@@ -1171,30 +1213,16 @@ void nsCocoaWindow::ConstrainPosition(bool aAllowSlop, int32_t* aX, int32_t* aY)
     }
   }
 
-  if (aAllowSlop) {
-    if (*aX < screenBounds.x - width + kWindowPositionSlop) {
-      *aX = screenBounds.x - width + kWindowPositionSlop;
-    } else if (*aX >= screenBounds.x + screenBounds.width - kWindowPositionSlop) {
-      *aX = screenBounds.x + screenBounds.width - kWindowPositionSlop;
-    }
+  if (aPoint.x < screenBounds.x) {
+    aPoint.x = screenBounds.x;
+  } else if (aPoint.x >= screenBounds.x + screenBounds.width - width) {
+    aPoint.x = screenBounds.x + screenBounds.width - width;
+  }
 
-    if (*aY < screenBounds.y - height + kWindowPositionSlop) {
-      *aY = screenBounds.y - height + kWindowPositionSlop;
-    } else if (*aY >= screenBounds.y + screenBounds.height - kWindowPositionSlop) {
-      *aY = screenBounds.y + screenBounds.height - kWindowPositionSlop;
-    }
-  } else {
-    if (*aX < screenBounds.x) {
-      *aX = screenBounds.x;
-    } else if (*aX >= screenBounds.x + screenBounds.width - width) {
-      *aX = screenBounds.x + screenBounds.width - width;
-    }
-
-    if (*aY < screenBounds.y) {
-      *aY = screenBounds.y;
-    } else if (*aY >= screenBounds.y + screenBounds.height - height) {
-      *aY = screenBounds.y + screenBounds.height - height;
-    }
+  if (aPoint.y < screenBounds.y) {
+    aPoint.y = screenBounds.y;
+  } else if (aPoint.y >= screenBounds.y + screenBounds.height - height) {
+    aPoint.y = screenBounds.y + screenBounds.height - height;
   }
 
   NS_OBJC_END_TRY_IGNORE_BLOCK;
@@ -1641,6 +1669,7 @@ void nsCocoaWindow::CocoaWindowWillEnterFullscreen(bool aFullscreen) {
 
 void nsCocoaWindow::CocoaWindowDidEnterFullscreen(bool aFullscreen) {
   mHasStartedNativeFullscreen = false;
+  EndOurNativeTransition();
   DispatchOcclusionEvent();
   HandleUpdateFullscreenOnResize();
   FinishCurrentTransitionIfMatching(aFullscreen ? TransitionType::Fullscreen
@@ -1649,6 +1678,7 @@ void nsCocoaWindow::CocoaWindowDidEnterFullscreen(bool aFullscreen) {
 
 void nsCocoaWindow::CocoaWindowDidFailFullscreen(bool aAttemptedFullscreen) {
   mHasStartedNativeFullscreen = false;
+  EndOurNativeTransition();
   DispatchOcclusionEvent();
 
   // If we already updated our fullscreen state due to a resize, we need to update it again.
@@ -1766,6 +1796,17 @@ void nsCocoaWindow::ProcessTransitions() {
     switch (*mTransitionCurrent) {
       case TransitionType::Fullscreen: {
         if (!mInFullScreenMode) {
+          // Check our global state to see if it is safe to start a native
+          // fullscreen transition. While that is false, run our own event loop.
+          // Eventually, the native fullscreen transition will finish, and we can
+          // safely continue.
+          NSRunLoop* localRunLoop = [NSRunLoop currentRunLoop];
+          while (mWindow && !CanStartNativeTransition() &&
+                 [localRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]]) {
+            // This loop continues to process events until CanStartNativeTransition()
+            // returns true.
+          }
+
           // This triggers an async animation, so continue.
           [mWindow toggleFullScreen:nil];
           continue;
@@ -1792,6 +1833,17 @@ void nsCocoaWindow::ProcessTransitions() {
       case TransitionType::Windowed: {
         if (mInFullScreenMode) {
           if (mInNativeFullScreenMode) {
+            // Check our global state to see if it is safe to start a native
+            // fullscreen transition. While that is false, run our own event loop.
+            // Eventually, the native fullscreen transition will finish, and we can
+            // safely continue.
+            NSRunLoop* localRunLoop = [NSRunLoop currentRunLoop];
+            while (mWindow && !CanStartNativeTransition() &&
+                   [localRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]]) {
+              // This loop continues to process events until CanStartNativeTransition()
+              // returns true.
+            }
+
             // This triggers an async animation, so continue.
             [mWindow toggleFullScreen:nil];
             continue;
@@ -1889,7 +1941,7 @@ void nsCocoaWindow::FinishCurrentTransitionIfMatching(const TransitionType& aTra
     // nsWindowDelegate transition callbacks, we want to make sure those callbacks are
     // all the way done before we start processing more transitions. To accomplish this,
     // we dispatch our cleanup to happen on the next event loop. Doing this will ensure
-    // that any async native transition methods we call (like toggleFullscreen) will
+    // that any async native transition methods we call (like toggleFullScreen) will
     // succeed.
     NS_DispatchToCurrentThread(NewRunnableMethod("FinishCurrentTransition", this,
                                                  &nsCocoaWindow::FinishCurrentTransition));
@@ -1906,6 +1958,32 @@ bool nsCocoaWindow::HandleUpdateFullscreenOnResize() {
   UpdateFullscreenState(toFullscreen, true);
 
   return true;
+}
+
+/* static */ mozilla::StaticDataMutex<nsCocoaWindow*> nsCocoaWindow::sWindowInNativeTransition(
+    nullptr);
+
+bool nsCocoaWindow::CanStartNativeTransition() {
+  auto window = sWindowInNativeTransition.Lock();
+  if (*window == nullptr) {
+    // Claim it and return true, indicating that the caller has permission to start
+    // the native fullscreen transition.
+    *window = this;
+    return true;
+  }
+  return false;
+}
+
+bool nsCocoaWindow::WeAreInNativeTransition() {
+  auto window = sWindowInNativeTransition.Lock();
+  return (*window == this);
+}
+
+void nsCocoaWindow::EndOurNativeTransition() {
+  auto window = sWindowInNativeTransition.Lock();
+  if (*window == this) {
+    *window = nullptr;
+  }
 }
 
 // Coordinates are desktop pixels

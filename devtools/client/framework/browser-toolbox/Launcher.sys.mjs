@@ -20,13 +20,8 @@ import { Subprocess } from "resource://gre/modules/Subprocess.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
-ChromeUtils.defineModuleGetter(
-  lazy,
-  "BackgroundTasksUtils",
-  "resource://gre/modules/BackgroundTasksUtils.jsm"
-);
 ChromeUtils.defineESModuleGetters(lazy, {
-  FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+  BackgroundTasksUtils: "resource://gre/modules/BackgroundTasksUtils.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetters(lazy, {
@@ -293,11 +288,7 @@ export class BrowserToolboxLauncher extends EventEmitter {
     const customBinaryPath = Services.env.get("MOZ_BROWSER_TOOLBOX_BINARY");
     if (customBinaryPath) {
       command = customBinaryPath;
-      profilePath = lazy.FileUtils.getDir(
-        "TmpD",
-        ["browserToolboxProfile"],
-        true
-      ).path;
+      profilePath = PathUtils.join(PathUtils.tempDir, "browserToolboxProfile");
     }
 
     dumpn("Running chrome debugging process.");
@@ -357,14 +348,17 @@ export class BrowserToolboxLauncher extends EventEmitter {
     }
 
     dump(`Starting Browser Toolbox ${command} ${args.join(" ")}\n`);
-    Subprocess.call({
-      command,
-      arguments: args,
-      environmentAppend: true,
-      stderr: "stdout",
-      environment,
-    }).then(
-      proc => {
+    IOUtils.makeDirectory(profilePath, { ignoreExisting: true })
+      .then(() =>
+        Subprocess.call({
+          command,
+          arguments: args,
+          environmentAppend: true,
+          stderr: "stdout",
+          environment,
+        })
+      )
+      .then(proc => {
         this.#dbgProcess = proc;
 
         this.#telemetry.toolOpened("jsbrowserdebugger", this);
@@ -396,14 +390,13 @@ export class BrowserToolboxLauncher extends EventEmitter {
         proc.wait().then(() => this.close());
 
         return proc;
-      },
-      err => {
+      })
+      .catch(err => {
         console.log(
           `Error loading Browser Toolbox: ${command} ${args.join(" ")}`,
           err
         );
-      }
-    );
+      });
   }
 
   /**
@@ -465,7 +458,7 @@ const prefObserver = {
   },
 };
 Services.prefs.addObserver("devtools.debugger.log", prefObserver);
-const unloadObserver = function(subject) {
+const unloadObserver = function (subject) {
   if (subject.wrappedJSObject == require("@loader/unload")) {
     Services.prefs.removeObserver("devtools.debugger.log", prefObserver);
     Services.obs.removeObserver(unloadObserver, "devtools:loader:destroy");

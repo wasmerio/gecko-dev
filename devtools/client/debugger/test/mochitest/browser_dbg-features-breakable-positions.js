@@ -30,7 +30,7 @@ add_task(async function testBreakableLinesOverReloads() {
   );
 
   info("Assert breakable lines of the first html page load");
-  await assertBreakablePositions(dbg, "index.html", 75, [
+  await assertBreakablePositions(dbg, "index.html", 78, [
     { line: 16, columns: [6, 14] },
     { line: 17, columns: [] },
     { line: 21, columns: [12, 20, 48] },
@@ -42,7 +42,7 @@ add_task(async function testBreakableLinesOverReloads() {
 
   info("Pretty print first html page load and assert breakable lines");
   await prettyPrint(dbg);
-  await assertBreakablePositions(dbg, "index.html:formatted", 84, [
+  await assertBreakablePositions(dbg, "index.html:formatted", 87, [
     { line: 16, columns: [0, 8] },
     { line: 22, columns: [0, 8, 35] },
     { line: 27, columns: [0, 8] },
@@ -186,7 +186,7 @@ async function assertBreakablePositions(
     // one breakable column, but, we don't report any available column breakpoint for them.
     if (!columns.length) {
       // So, only ensure that the really is no marker on this line
-      const lineElement = await getTokenFromPosition(dbg, { line, ch: -1 });
+      const lineElement = await getTokenFromPosition(dbg, { line });
       const columnMarkers = lineElement.querySelectorAll(".column-breakpoint");
       is(
         columnMarkers.length,
@@ -221,18 +221,18 @@ async function assertBreakablePositions(
         } in ${JSON.stringify(columns)}) for line ${line}`
       );
       is(
-        selPos.location.sourceId,
+        selPos.location.source.id,
         source.id,
-        "Selector breakable column has the right sourceId"
+        "Selector breakable column has the right source id"
       );
       is(
-        selPos.location.sourceUrl,
+        selPos.location.source.url,
         source.url,
-        "Selector breakable column has the right sourceUrl"
+        "Selector breakable column has the right source url"
       );
     }
 
-    const tokenElement = await getTokenFromPosition(dbg, { line, ch: -1 });
+    const tokenElement = await getTokenFromPosition(dbg, { line });
     const lineElement = tokenElement.closest(".CodeMirror-line");
     // Those are the breakpoint chevron we click on to set a breakpoint on a given column
     const columnMarkers = [

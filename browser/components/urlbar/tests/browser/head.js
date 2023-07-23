@@ -8,6 +8,7 @@
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
+  AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   ExperimentFakes: "resource://testing-common/NimbusTestUtils.sys.mjs",
   PromiseUtils: "resource://gre/modules/PromiseUtils.sys.mjs",
@@ -25,7 +26,6 @@ ChromeUtils.defineESModuleGetters(this, {
 });
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  AboutNewTab: "resource:///modules/AboutNewTab.jsm",
   ObjectUtils: "resource://gre/modules/ObjectUtils.jsm",
 });
 
@@ -99,7 +99,6 @@ async function waitForLoadOrTimeout(win = window, timeoutMs = 1000) {
  * @param {string} anonid - Identifier of a menu item of the url bar context menu.
  * @returns {string} - The element that has the corresponding identifier.
  */
-
 async function promiseContextualMenuitem(anonid) {
   let textBox = gURLBar.querySelector("moz-input-box");
   let cxmenu = textBox.menupopup;
@@ -110,4 +109,17 @@ async function promiseContextualMenuitem(anonid) {
   });
   await cxmenuPromise;
   return textBox.getMenuItem(anonid);
+}
+
+/**
+ * Puts all CustomizableUI widgetry back to their default locations, and
+ * then fires the `aftercustomization` toolbox event so that UrlbarInput
+ * knows to reinitialize itself.
+ *
+ * @param {window} [win=window]
+ *   The top-level browser window to fire the `aftercustomization` event in.
+ */
+function resetCUIAndReinitUrlbarInput(win = window) {
+  CustomizableUI.reset();
+  CustomizableUI.dispatchToolboxEvent("aftercustomization", {}, win);
 }

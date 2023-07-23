@@ -67,7 +67,7 @@ avoid-blacklist-and-whitelist:
         - browser/components/urlbar/tests/unit/test_tokenizer.js
         - browser/extensions/screenshots/background/main.js
         - browser/extensions/webcompat/shims/nielsen.js
-        - browser/modules/SitePermissions.jsm
+        - browser/modules/SitePermissions.sys.mjs
         - browser/tools/mozscreenshots/mozscreenshots/extension/configurations/PermissionPrompts.sys.mjs
         - build/clang-plugin/CustomMatchers.h
         - build/clang-plugin/FopenUsageChecker.cpp
@@ -227,7 +227,6 @@ avoid-blacklist-and-whitelist:
         - testing/mozharness/configs/unittests/win_unittest.py
         - testing/profiles/unittest-required/user.js
         - testing/raptor/browsertime/browsertime_scenario.js
-        - testing/raptor/raptor/control_server.py
         - testing/talos/talos/tests/devtools/addon/content/pages/custom/debugger/static/js/main.js
         - testing/web-platform/tests/tools/manifest/tests/test_manifest.py
         - toolkit/actors/RemotePageChild.sys.mjs
@@ -245,7 +244,7 @@ avoid-blacklist-and-whitelist:
         - toolkit/components/satchel/test/test_form_autocomplete.html
         - toolkit/components/telemetry/docs/data/environment.rst
         - toolkit/components/url-classifier/nsUrlClassifierUtils.cpp
-        - toolkit/components/url-classifier/SafeBrowsing.jsm
+        - toolkit/components/url-classifier/SafeBrowsing.sys.mjs
         - toolkit/components/url-classifier/tests/mochitest/features.js
         - toolkit/components/url-classifier/tests/mochitest/good.js
         - toolkit/components/url-classifier/tests/mochitest/test_annotation_vs_TP.html
@@ -264,14 +263,14 @@ avoid-blacklist-and-whitelist:
         - toolkit/components/url-classifier/tests/unit/head_urlclassifier.js
         - toolkit/components/url-classifier/tests/unit/test_digest256.js
         - toolkit/components/url-classifier/tests/unit/test_platform_specific_threats.js
-        - toolkit/components/url-classifier/tests/UrlClassifierTestUtils.jsm
+        - toolkit/components/url-classifier/tests/UrlClassifierTestUtils.sys.mjs
         - toolkit/content/aboutTelemetry.js
         - toolkit/content/tests/browser/browser_delay_autoplay_webAudio.js
         - toolkit/modules/PermissionsUtils.sys.mjs
         - toolkit/modules/tests/browser/browser_AsyncPrefs.js
         - toolkit/modules/tests/browser/browser_web_channel.js
         - toolkit/modules/tests/xpcshell/test_PermissionsUtils.js
-        - toolkit/modules/third_party/jsesc/jsesc.js
+        - toolkit/modules/third_party/jsesc/jsesc.mjs
         - toolkit/modules/Troubleshoot.sys.mjs
         - toolkit/mozapps/extensions/internal/XPIInstall.jsm
         - toolkit/mozapps/extensions/test/browser/browser_html_discover_view.js

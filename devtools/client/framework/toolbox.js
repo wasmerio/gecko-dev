@@ -205,8 +205,6 @@ loader.lazyRequireGetter(
   true
 );
 
-const DEVTOOLS_F12_DISABLED_PREF = "devtools.experiment.f12.shortcut_disabled";
-
 /**
  * A "Toolbox" is the component that holds all the tools for one specific
  * target. Visually, it's a document that includes the tools tabs and all
@@ -238,14 +236,6 @@ function Toolbox(commands, selectedTool, hostType, contentWindow, frameId) {
   // See devtools/shared/commands/README.md
   this.commands = commands;
   this._descriptorFront = commands.descriptorFront;
-
-  // If the user opened the toolbox, we can now enable the F12 shortcut.
-  if (Services.prefs.getBoolPref(DEVTOOLS_F12_DISABLED_PREF, false)) {
-    // If the toolbox is opening while F12 was disabled, the user might have
-    // pressed F12 and seen the "enable devtools" notification.
-    // Flip the preference.
-    Services.prefs.setBoolPref(DEVTOOLS_F12_DISABLED_PREF, false);
-  }
 
   // Map of the available DevTools WebExtensions:
   //   Map<extensionUUID, extensionName>
@@ -284,15 +274,12 @@ function Toolbox(commands, selectedTool, hostType, contentWindow, frameId) {
   this.closeToolbox = this.closeToolbox.bind(this);
   this.destroy = this.destroy.bind(this);
   this._applyCacheSettings = this._applyCacheSettings.bind(this);
-  this._applyCustomFormatterSetting = this._applyCustomFormatterSetting.bind(
-    this
-  );
-  this._applyServiceWorkersTestingSettings = this._applyServiceWorkersTestingSettings.bind(
-    this
-  );
-  this._applySimpleHighlightersSettings = this._applySimpleHighlightersSettings.bind(
-    this
-  );
+  this._applyCustomFormatterSetting =
+    this._applyCustomFormatterSetting.bind(this);
+  this._applyServiceWorkersTestingSettings =
+    this._applyServiceWorkersTestingSettings.bind(this);
+  this._applySimpleHighlightersSettings =
+    this._applySimpleHighlightersSettings.bind(this);
   this._saveSplitConsoleHeight = this._saveSplitConsoleHeight.bind(this);
   this._onFocus = this._onFocus.bind(this);
   this._onBlur = this._onBlur.bind(this);
@@ -313,9 +300,8 @@ function Toolbox(commands, selectedTool, hostType, contentWindow, frameId) {
   this._onToolSelected = this._onToolSelected.bind(this);
   this._onContextMenu = this._onContextMenu.bind(this);
   this._onMouseDown = this._onMouseDown.bind(this);
-  this.updateToolboxButtonsVisibility = this.updateToolboxButtonsVisibility.bind(
-    this
-  );
+  this.updateToolboxButtonsVisibility =
+    this.updateToolboxButtonsVisibility.bind(this);
   this.updateToolboxButtons = this.updateToolboxButtons.bind(this);
   this.selectTool = this.selectTool.bind(this);
   this._pingTelemetrySelectTool = this._pingTelemetrySelectTool.bind(this);
@@ -351,7 +337,7 @@ function Toolbox(commands, selectedTool, hostType, contentWindow, frameId) {
   this._hostType = hostType;
 
   this.isOpen = new Promise(
-    function(resolve) {
+    function (resolve) {
       this._resolveIsOpen = resolve;
     }.bind(this)
   );
@@ -690,7 +676,8 @@ Toolbox.prototype = {
       reason === "breakpoint" ||
       reason === "exception" ||
       reason === "resumeLimit" ||
-      reason === "XHR"
+      reason === "XHR" ||
+      reason === "breakpointConditionThrown"
     ) {
       this.raise();
       this.selectTool("jsdebugger", reason);
@@ -825,7 +812,7 @@ Toolbox.prototype = {
    * Open the toolbox
    */
   open() {
-    return async function() {
+    return async function () {
       // Kick off async loading the Fluent bundles.
       const fluentL10n = new FluentL10n();
       const fluentInitPromise = fluentL10n.init([
@@ -1332,9 +1319,8 @@ Toolbox.prototype = {
     const url = new URL(this.win.location);
     const remoteId = url.searchParams.get("remoteId");
     const runtimeInfo = remoteClientManager.getRuntimeInfoByRemoteId(remoteId);
-    const connectionType = remoteClientManager.getConnectionTypeByRemoteId(
-      remoteId
-    );
+    const connectionType =
+      remoteClientManager.getConnectionTypeByRemoteId(remoteId);
 
     return {
       connectionType,
@@ -2185,9 +2171,10 @@ Toolbox.prototype = {
       return;
     }
 
-    const customFormatters =
-      Services.prefs.getBoolPref("devtools.custom-formatters", false) &&
-      Services.prefs.getBoolPref("devtools.custom-formatters.enabled", false);
+    const customFormatters = Services.prefs.getBoolPref(
+      "devtools.custom-formatters.enabled",
+      false
+    );
 
     await this.commands.targetConfigurationCommand.updateConfiguration({
       customFormatters,
@@ -3237,9 +3224,8 @@ Toolbox.prototype = {
     if (!this._preferenceFrontRequest) {
       // Set the _preferenceFrontRequest property to allow the resetPreference toolbox
       // method to cleanup the preference set when the toolbox is closed.
-      this._preferenceFrontRequest = this.commands.client.mainRoot.getFront(
-        "preference"
-      );
+      this._preferenceFrontRequest =
+        this.commands.client.mainRoot.getFront("preference");
     }
     return this._preferenceFrontRequest;
   },
@@ -4672,6 +4658,12 @@ Toolbox.prototype = {
         // the host title a bit in order for the event listener in targetCommand to be
         // executed.
         setTimeout(() => {
+          if (resource.targetFront.isDestroyed()) {
+            // The resource's target might have been destroyed in between and
+            // would no longer have a valid actorID available.
+            return;
+          }
+
           this._updateFrames({
             frameData: {
               id: resource.targetFront.actorID,

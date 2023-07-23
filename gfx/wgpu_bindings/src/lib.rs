@@ -100,8 +100,8 @@ pub struct AdapterInformation<S> {
     limits: wgt::Limits,
     features: wgt::Features,
     name: S,
-    vendor: usize,
-    device: usize,
+    vendor: u32,
+    device: u32,
     device_type: wgt::DeviceType,
     driver: S,
     driver_info: S,
@@ -146,6 +146,10 @@ enum DeviceAction<'a> {
         id::RenderBundleId,
         wgc::command::RenderBundleEncoder,
         wgc::command::RenderBundleDescriptor<'a>,
+    ),
+    CreateRenderBundleError(
+        id::RenderBundleId,
+        wgc::Label<'a>,
     ),
     CreateCommandEncoder(
         id::CommandEncoderId,

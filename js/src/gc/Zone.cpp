@@ -37,7 +37,7 @@ Zone* const Zone::NotOnList = reinterpret_cast<Zone*>(1);
 
 ZoneAllocator::ZoneAllocator(JSRuntime* rt, Kind kind)
     : JS::shadow::Zone(rt, rt->gc.marker().tracer(), kind),
-      jitHeapThreshold(jit::MaxCodeBytesPerProcess * 0.8) {}
+      jitHeapThreshold(size_t(jit::MaxCodeBytesPerProcess * 0.8)) {}
 
 ZoneAllocator::~ZoneAllocator() {
 #ifdef DEBUG
@@ -58,7 +58,7 @@ void js::ZoneAllocator::updateSchedulingStateOnGCStart() {
   gcHeapSize.updateOnGCStart();
   mallocHeapSize.updateOnGCStart();
   jitHeapSize.updateOnGCStart();
-  perZoneGCTime = mozilla::TimeDuration();
+  perZoneGCTime = mozilla::TimeDuration::Zero();
 }
 
 void js::ZoneAllocator::updateGCStartThresholds(GCRuntime& gc) {
@@ -161,10 +161,10 @@ JS::Zone::Zone(JSRuntime* rt, Kind kind)
       tenuredBigInts(0),
       markedStrings(0),
       finalizedStrings(0),
+      suppressAllocationMetadataBuilder(false),
       allocNurseryObjects_(true),
       allocNurseryStrings_(true),
       allocNurseryBigInts_(true),
-      suppressAllocationMetadataBuilder(false),
       pretenuring(this),
       compartments_(),
       crossZoneStringWrappers_(this),
@@ -185,7 +185,7 @@ JS::Zone::Zone(JSRuntime* rt, Kind kind)
   MOZ_ASSERT_IF(isAtomsZone(), rt->gc.zones().empty());
 
   updateGCStartThresholds(rt->gc);
-  updateNurseryAllocFlags(rt->gc.nursery());
+  rt->gc.nursery().setAllocFlagsForZone(this);
 }
 
 Zone::~Zone() {

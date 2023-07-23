@@ -26,7 +26,7 @@
   --arrowpanel-dimmed: color-mix(in srgb, currentColor 17%, transparent);
   --arrowpanel-dimmed-further: color-mix(in srgb, currentColor 30%, transparent);
 
-  --panel-description-color: var(--text-color-deemphasized);
+  --panel-separator-color: color-mix(in srgb, currentColor 25%, transparent);
   --panel-disabled-color: color-mix(in srgb, currentColor 40%, transparent);
 
   --popup-notification-body-width: calc(31em - calc(2 * var(--arrowpanel-padding)));
@@ -50,9 +50,15 @@
 }
 
 @media (prefers-contrast) {
-  :root:not(:-moz-lwtheme) {
+  :root {
+    /* Reduce the opacity of disabled toolbar buttons in order to increase
+       contrast with the enabled state. */
     --toolbarbutton-disabled-opacity: 0.3;
 
+    --panel-separator-color: currentColor;
+  }
+
+  :root:not(:-moz-lwtheme) {
     --panel-disabled-color: GrayText;
   }
 }
@@ -300,4 +306,8 @@ button.text-link .button-text {
 /* Indent options in optgroups */
 .contentSelectDropdown-ingroup .menu-iconic-text {
   padding-inline-start: 2em;
+}
+
+.deemphasized {
+  color: var(--text-color-deemphasized);
 }

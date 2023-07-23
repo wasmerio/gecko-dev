@@ -26,7 +26,6 @@
 #include "nsStringStream.h"
 #include "nsThreadUtils.h"
 #include "nsURLHelper.h"
-#include "ODoH.h"
 #include "ObliviousHttpChannel.h"
 #include "TRR.h"
 #include "TRRService.h"
@@ -668,8 +667,16 @@ void TRR::SaveAdditionalRecords(
   }
   nsresult rv;
   for (const auto& recordEntry : aRecords) {
-    if (recordEntry.GetData() && recordEntry.GetData()->mAddresses.IsEmpty()) {
+    if (!recordEntry.GetData() || recordEntry.GetData()->mAddresses.IsEmpty()) {
       // no point in adding empty records.
+      continue;
+    }
+    // If IPv6 is disabled don't add anything else than IPv4.
+    if (StaticPrefs::network_dns_disableIPv6() &&
+        std::find_if(recordEntry.GetData()->mAddresses.begin(),
+                     recordEntry.GetData()->mAddresses.end(),
+                     [](const NetAddr& addr) { return !addr.IsIPAddrV4(); }) !=
+            recordEntry.GetData()->mAddresses.end()) {
       continue;
     }
     RefPtr<nsHostRecord> hostRecord;
@@ -708,6 +715,12 @@ void TRR::StoreIPHintAsDNSRecord(const struct SVCB& aSVCBRecord) {
        aSVCBRecord.mSvcDomainName.get()));
   CopyableTArray<NetAddr> addresses;
   aSVCBRecord.GetIPHints(addresses);
+
+  if (StaticPrefs::network_dns_disableIPv6()) {
+    addresses.RemoveElementsBy(
+        [](const NetAddr& addr) { return !addr.IsIPAddrV4(); });
+  }
+
   if (addresses.IsEmpty()) {
     return;
   }
@@ -881,9 +894,7 @@ nsresult TRR::FollowCname(nsIChannel* aChannel) {
   LOG(("TRR::On200Response CNAME %s => %s (%u)\n", mHost.get(), mCname.get(),
        mCnameLoop));
   RefPtr<TRR> trr =
-      ResolverType() == DNSResolverType::ODoH
-          ? new ODoH(mHostResolver, mRec, mCname, mType, mCnameLoop, mPB)
-          : new TRR(mHostResolver, mRec, mCname, mType, mCnameLoop, mPB);
+      new TRR(mHostResolver, mRec, mCname, mType, mCnameLoop, mPB);
   if (!TRRService::Get()) {
     return NS_ERROR_FAILURE;
   }
@@ -905,7 +916,9 @@ nsresult TRR::On200Response(nsIChannel* aChannel) {
     HandleDecodeError(rv);
     return rv;
   }
-  SaveAdditionalRecords(additionalRecords);
+  if (StaticPrefs::network_trr_add_additional_records()) {
+    SaveAdditionalRecords(additionalRecords);
+  }
 
   if (mResult.is<TypeRecordHTTPSSVC>()) {
     auto& results = mResult.as<TypeRecordHTTPSSVC>();

@@ -482,7 +482,7 @@ static void PrintSingleError(FILE* file, JS::ConstUTF8CharsZ toStringResult,
                              T* report, PrintErrorKind kind) {
   UniqueChars prefix;
   if (report->filename) {
-    prefix = JS_smprintf("%s:", report->filename);
+    prefix = JS_smprintf("%s:", report->filename.c_str());
   }
 
   if (report->lineno) {
@@ -696,8 +696,9 @@ JSObject* js::CreateErrorNotesArray(JSContext* cx, JSErrorReport* report) {
     }
 
     RootedValue filenameVal(cx);
-    if (note->filename) {
-      RootedString filenameStr(cx, NewStringCopyZ<CanGC>(cx, note->filename));
+    if (const char* filename = note->filename.c_str()) {
+      JS::UTF8Chars utf8chars(filename, strlen(filename));
+      Rooted<JSString*> filenameStr(cx, NewStringCopyUTF8N(cx, utf8chars));
       if (!filenameStr) {
         return nullptr;
       }
@@ -815,6 +816,11 @@ JS_PUBLIC_API void js::StopDrainingJobQueue(JSContext* cx) {
   cx->internalJobQueue->interrupt();
 }
 
+JS_PUBLIC_API bool js::HasJobsPending(JSContext* cx) {
+  MOZ_ASSERT(cx->jobQueue);
+  return !cx->jobQueue->empty();
+}
+
 JS_PUBLIC_API void js::RunJobs(JSContext* cx) {
   MOZ_ASSERT(cx->jobQueue);
   cx->jobQueue->runJobs(cx);
@@ -826,6 +832,11 @@ JSObject* InternalJobQueue::getIncumbentGlobal(JSContext* cx) {
     return nullptr;
   }
   return cx->global();
+}
+
+JS_PUBLIC_API void js::ResetMathRandomSeed(JSContext* cx) {
+  MOZ_ASSERT(cx->realm());
+  cx->realm()->resetRandomNumberGenerator();
 }
 
 bool InternalJobQueue::enqueuePromiseJob(JSContext* cx,
@@ -981,7 +992,8 @@ mozilla::GenericErrorResult<JS::Error> JSContext::alreadyReportedError() {
 }
 
 JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
-    : runtime_(runtime),
+    : RootingContext(runtime ? &runtime->gc.nursery() : nullptr),
+      runtime_(runtime),
       kind_(ContextKind::Uninitialized),
       options_(this, options),
       freeUnusedMemory(false),

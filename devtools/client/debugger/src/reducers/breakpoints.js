@@ -13,7 +13,6 @@ export function initialBreakpointsState(xhrBreakpoints = []) {
   return {
     breakpoints: {},
     xhrBreakpoints,
-    breakpointsDisabled: false,
   };
 }
 
@@ -35,10 +34,6 @@ function update(state = initialBreakpointsState(), action) {
 
     case "CLEAR_BREAKPOINTS": {
       return { ...state, breakpoints: {} };
-    }
-
-    case "NAVIGATE": {
-      return initialBreakpointsState(state.xhrBreakpoints);
     }
 
     case "REMOVE_THREAD": {

@@ -11,8 +11,8 @@
 
 // Put any other stuff relative to this test folder below.
 
-var { CanonicalJSON } = ChromeUtils.import(
-  "resource://gre/modules/CanonicalJSON.jsm"
+var { CanonicalJSON } = ChromeUtils.importESModule(
+  "resource://gre/modules/CanonicalJSON.sys.mjs"
 );
 var { Log } = ChromeUtils.importESModule("resource://gre/modules/Log.sys.mjs");
 
@@ -84,12 +84,12 @@ function run_test() {
 // A test helper to insert local roots directly into Places, since the public
 // bookmarks APIs no longer support custom roots.
 async function insertLocalRoot({ guid, title }) {
-  await PlacesUtils.withConnectionWrapper("insertLocalRoot", async function(
-    db
-  ) {
-    let dateAdded = PlacesUtils.toPRTime(new Date());
-    await db.execute(
-      `
+  await PlacesUtils.withConnectionWrapper(
+    "insertLocalRoot",
+    async function (db) {
+      let dateAdded = PlacesUtils.toPRTime(new Date());
+      await db.execute(
+        `
         INSERT INTO moz_bookmarks(guid, type, parent, position, title,
                                   dateAdded, lastModified)
         VALUES(:guid, :type, (SELECT id FROM moz_bookmarks
@@ -98,15 +98,16 @@ async function insertLocalRoot({ guid, title }) {
                 WHERE parent = (SELECT id FROM moz_bookmarks
                                 WHERE guid = :parentGuid)),
                :title, :dateAdded, :dateAdded)`,
-      {
-        guid,
-        type: PlacesUtils.bookmarks.TYPE_FOLDER,
-        parentGuid: PlacesUtils.bookmarks.rootGuid,
-        title,
-        dateAdded,
-      }
-    );
-  });
+        {
+          guid,
+          type: PlacesUtils.bookmarks.TYPE_FOLDER,
+          parentGuid: PlacesUtils.bookmarks.rootGuid,
+          title,
+          dateAdded,
+        }
+      );
+    }
+  );
 }
 
 // Returns a `CryptoWrapper`-like object that wraps the Sync record cleartext.
@@ -309,9 +310,14 @@ BookmarkObserver.prototype = {
             guid: event.guid,
             parentGuid: event.parentGuid,
             source: event.source,
+            tags: event.tags,
+            frecency: event.frecency,
+            hidden: event.hidden,
+            visitCount: event.visitCount,
           };
           if (!this.ignoreDates) {
             params.dateAdded = event.dateAdded;
+            params.lastVisitDate = event.lastVisitDate;
           }
           this.notifications.push({ name: "bookmark-added", params });
           break;
@@ -355,6 +361,12 @@ BookmarkObserver.prototype = {
             oldIndex: event.oldIndex,
             oldParentGuid: event.oldParentGuid,
             isTagging: event.isTagging,
+            title: event.title,
+            tags: event.tags,
+            frecency: event.frecency,
+            hidden: event.hidden,
+            visitCount: event.visitCount,
+            lastVisitDate: event.lastVisitDate,
           };
           this.notifications.push({ name: "bookmark-moved", params });
           break;
