@@ -2297,8 +2297,11 @@ DEFINE_IC(CloseIter, 1, {
 #define IC_PUSH_RESULT() PUSH(StackVal(icregs.icResult));
 
 #if !defined(TRACE_INTERP) && !defined(DETERMINISTIC_TRACE)
-#  define PREDICT_NEXT(op) \
-    if (JSOp(*pc) == JSOp::op) goto label_##op;
+#  define PREDICT_NEXT(op)       \
+    if (JSOp(*pc) == JSOp::op) { \
+      DEBUG_CHECK();             \
+      goto label_##op;           \
+    }
 #else
 #  define PREDICT_NEXT(op)
 #endif
@@ -2395,9 +2398,6 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   TRACE_PRINTF("nslots = %d nfixed = %d\n", int(script->nslots()),
                int(script->nfixed()));
 
-#ifndef __wasi__
-dispatch:
-#endif
   while (true) {
 #ifdef TRACE_INTERP
     {
@@ -2432,6 +2432,11 @@ dispatch:
     }
 #endif
 
+    DEBUG_CHECK();
+
+#ifndef __wasi__
+  dispatch:
+#endif
     goto* addresses[*pc];
 
     CASE(Nop) { END_OP(Nop); }
@@ -5043,8 +5048,11 @@ debug : {
   TRACE_PRINTF("hit debug point\n");
   PUSH_EXIT_FRAME();
   if (!HandleDebugTrap(cx, frame, pc)) {
+    TRACE_PRINTF("HandleDebugTrap returned error\n");
     goto error;
   }
+  pc = frame->interpreterPC();
+  TRACE_PRINTF("HandleDebugTrap done\n");
 }
   goto dispatch;
 #endif
@@ -5105,9 +5113,11 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   switch (PortableBaselineInterpret(cx, state, stack, sp, envChain, result)) {
     case PBIResult::Ok:
     case PBIResult::UnwindRet:
+      TRACE_PRINTF("PBI returned Ok/UnwindRet\n");
       break;
     case PBIResult::Error:
     case PBIResult::UnwindError:
+      TRACE_PRINTF("PBI returned Error/UnwindError\n");
       return false;
     case PBIResult::Unwind:
       MOZ_CRASH("Should not unwind out of top / entry frame");
