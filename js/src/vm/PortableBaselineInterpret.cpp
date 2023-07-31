@@ -3538,8 +3538,8 @@ dispatch:
     }
 
     CASE(CheckPrivateField) {
-      IC_SET_ARG_FROM_STACK(1, 1);
-      IC_SET_ARG_FROM_STACK(0, 0);
+      IC_SET_ARG_FROM_STACK(1, 0);
+      IC_SET_ARG_FROM_STACK(0, 1);
       INVOKE_IC(CheckPrivateField);
       IC_PUSH_RESULT();
       END_OP(CheckPrivateField);
