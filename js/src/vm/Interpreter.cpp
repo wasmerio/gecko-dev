@@ -80,7 +80,7 @@
 #include "vm/Probes-inl.h"
 #include "vm/Stack-inl.h"
 
-// #define DETERMINISTIC_TRACE
+#define DETERMINISTIC_TRACE
 
 using namespace js;
 
