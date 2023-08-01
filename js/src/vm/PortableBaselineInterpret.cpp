@@ -4589,14 +4589,13 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(GetImport) {
       state.obj0 = frame->environmentChain();
-      state.value0 = sp[0].asValue();
       {
         PUSH_EXIT_FRAME();
         if (!GetImportOperation(cx, state.obj0, script, pc, &state.value0)) {
           goto error;
         }
       }
-      sp[0] = StackVal(state.value0);
+      PUSH(StackVal(state.value0));
       END_OP(GetImport);
     }
 
