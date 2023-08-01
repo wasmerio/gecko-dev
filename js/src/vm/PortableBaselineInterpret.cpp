@@ -4407,18 +4407,15 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(CheckReturn) {
       Value thisval = POP().asValue();
-      // inlined version of frame->checkReturn(thisval, result) (js/src/vm/Stack.cpp)
-      // except we call PUSH_EXIT_FRAME before any function call to report an error
-      // and if checkReturn would return false then we `goto error`
-      // and otherwise we PUSH(StackVal(result))
+      // inlined version of frame->checkReturn(thisval, result)
+      // (js/src/vm/Stack.cpp).
       HandleValue retVal = frame->returnValue();
       if (retVal.isObject()) {
         PUSH(StackVal(retVal));
       } else if (!retVal.isUndefined()) {
         PUSH_EXIT_FRAME();
-        state.value0 = retVal; // is this necessary?
-        ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK, retVal,
-                         nullptr);
+        MOZ_ALWAYS_FALSE(ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN,
+                                          JSDVG_IGNORE_STACK, retVal, nullptr));
         goto error;
       } else if (thisval.isMagic(JS_UNINITIALIZED_LEXICAL)) {
         PUSH_EXIT_FRAME();
