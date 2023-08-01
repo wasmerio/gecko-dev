@@ -27,6 +27,8 @@ bool PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
                                 JSObject* envChain, Value* result);
 jit::MethodStatus CanEnterPortableBaselineInterpreter(JSContext* cx,
                                                       RunState& state);
+bool PortablebaselineInterpreterStackCheck(JSContext* cx, RunState& state,
+                                           size_t numActualArgs);
 
 } /* namespace js */
 
