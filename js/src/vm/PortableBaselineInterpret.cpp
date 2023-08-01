@@ -66,6 +66,9 @@ using namespace js::jit;
 
 static const bool kHybridICs = true;
 
+// Large enough for an exit frame.
+static const size_t kStackMargin = 1024;
+
 struct StackVal {
   uint64_t value;
 
@@ -113,14 +116,15 @@ struct Stack {
         top(reinterpret_cast<StackVal*>(pbs.top)),
         unwindingSP(nullptr) {}
 
-  MOZ_ALWAYS_INLINE bool check(StackVal* sp, size_t size) {
-    return reinterpret_cast<uintptr_t>(base) + size <=
+  MOZ_ALWAYS_INLINE bool check(StackVal* sp, size_t size, bool margin = true) {
+    return reinterpret_cast<uintptr_t>(base) + size +
+               (margin ? kStackMargin : 0) <=
            reinterpret_cast<uintptr_t>(sp);
   }
 
   [[nodiscard]] MOZ_ALWAYS_INLINE StackVal* allocate(StackVal* sp,
                                                      size_t size) {
-    if (!check(sp, size)) {
+    if (!check(sp, size, false)) {
       return nullptr;
     }
     sp = reinterpret_cast<StackVal*>(reinterpret_cast<uintptr_t>(sp) - size);
@@ -190,7 +194,7 @@ struct Stack {
     MOZ_ASSERT(reinterpret_cast<StackVal*>(prevFP) == fp);
     setFrameSize(sp, prevFrame);
 
-    if (!check(sp, sizeof(StackVal) * 4)) {
+    if (!check(sp, sizeof(StackVal) * 4, false)) {
       return nullptr;
     }
 
@@ -359,9 +363,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
 #define PUSH_EXIT_FRAME_OR_RET(value)                           \
   VMFrame cx(frameMgr, stack, sp, pc);                          \
-  if (!cx.success()) {                                          \
-    return value;                                               \
-  }                                                             \
+  MOZ_ASSERT(cx.success());         /* safety: stack margin */  \
   StackVal* sp = cx.spBelowFrame(); /* shadow the definition */ \
   (void)sp;                         /* avoid unused-variable warnings */
 
@@ -1288,15 +1290,16 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
 
     {
       PUSH_IC_FRAME();
-      // This will not be an Exit frame but a BaselinStub frame, so
-      // replace the ExitFrameType with the ICStub pointer.
-      POPNNATIVE(1);
-      PUSHNATIVE(StackValNative(cstub));
 
       if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 6))) {
         ReportOverRecursed(frameMgr.cxForLocalUseOnly());
         return ICInterpretOpResult::Error;
       }
+
+      // This will not be an Exit frame but a BaselinStub frame, so
+      // replace the ExitFrameType with the ICStub pointer.
+      POPNNATIVE(1);
+      PUSHNATIVE(StackValNative(cstub));
 
       // Push args.
       for (uint32_t i = 0; i < totalArgs; i++) {
@@ -2306,9 +2309,6 @@ DEFINE_IC(CloseIter, 1, {
 #  define PREDICT_NEXT(op)
 #endif
 
-// Large enough for an exit frame.
-static const size_t kStackMargin = 1024;
-
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
                                            Stack& stack, StackVal* sp,
                                            JSObject* envChain, Value* ret) {
@@ -2324,9 +2324,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
   PUSHNATIVE(StackValNative(nullptr));  // Fake return address.
   BaselineFrame* frame = stack.pushFrame(sp, cx_, envChain);
-  if (!frame) {
-    return PBIResult::Error;
-  }
+  MOZ_ASSERT(frame);  // safety: stack margin.
   sp = reinterpret_cast<StackVal*>(frame);
 
   // Save the entry frame so that when unwinding, we know when to
@@ -2349,7 +2347,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   // Check max stack depth once, so we don't need to check it
   // otherwise below for ordinary stack-manipulation opcodes (just for
   // exit frames).
-  if (!stack.check(sp, sizeof(StackVal) * script->nslots() + kStackMargin)) {
+  if (!stack.check(sp, sizeof(StackVal) * script->nslots())) {
     PUSH_EXIT_FRAME();
     ReportOverRecursed(frameMgr.cxForLocalUseOnly());
     return PBIResult::Error;
@@ -3888,6 +3886,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
               "Call fastpath: argc = %d origArgs = %p callee = %" PRIx64 "\n",
               argc, origArgs, callee.get().asRawBits());
 
+          if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 3))) {
+            break;
+          }
+
           // 0. Save current PC in current frame, so we can retrieve
           // it later. Update to next IC in this frame as well; we're
           // skipping the IC-using slowpath.
@@ -3899,9 +3901,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
           // -- we don't want the frame to be auto-freed when we leave
           // this scope, and we don't want to shadow `sp`.
           StackVal* exitFP = stack.pushExitFrame(sp, frame);
-          if (!exitFP) {
-            goto error;
-          }
+          MOZ_ASSERT(exitFP);  // safety: stack margin.
           sp = exitFP;
           TRACE_PRINTF("exit frame at %p\n", exitFP);
 
@@ -3912,12 +3912,6 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
           // 3. Push args in proper order (they are reversed in our
           // downward-growth stack compared to what the calling
           // convention expects).
-          if (!stack.check(sp,
-                           sizeof(StackVal) * (totalArgs + 3) + kStackMargin)) {
-            PUSH_EXIT_FRAME();
-            ReportOverRecursed(frameMgr.cxForLocalUseOnly());
-            goto error;
-          }
           for (uint32_t i = 0; i < totalArgs; i++) {
             PUSH(origArgs[i]);
           }
@@ -3935,9 +3929,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
           BaselineFrame* newFrame =
               stack.pushFrame(sp, frameMgr.cxForLocalUseOnly(),
                               /* envChain = */ func->environment());
-          if (!newFrame) {
-            goto error;
-          }
+          MOZ_ASSERT(newFrame);  // safety: stack margin.
           TRACE_PRINTF("callee frame at %p\n", newFrame);
           frame = newFrame;
           frameMgr.switchToFrame(frame);
@@ -3946,6 +3938,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
           pc = calleeScript->code();
           // 7. Check callee stack space for max stack depth.
           if (!stack.check(sp, sizeof(StackVal) * calleeScript->nslots())) {
+            PUSH_EXIT_FRAME();
+            ReportOverRecursed(frameMgr.cxForLocalUseOnly());
             goto error;
           }
           // 8. Push local slots, and set return value to `undefined` by
@@ -5092,12 +5086,13 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
 
   bool constructing = CalleeTokenIsConstructing(calleeToken);
   size_t numCalleeActuals = std::max(numActuals, numFormals);
-  size_t totalArgs = numCalleeActuals + 1 + constructing;
   size_t numUndefs = numCalleeActuals - numActuals;
 
-  if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 3))) {
-    return false;
-  }
+  // N.B.: we already checked the stack in
+  // PortableBaselineInterpreterStackCheck; we don't do it here
+  // because we can't push an exit frame if we don't have an entry
+  // frame, and we need a full activation to produce the backtrace
+  // from ReportOverRecursed.
 
   if (constructing) {
     PUSH(StackVal(argv[argc]));
@@ -5139,9 +5134,7 @@ MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
   if (state.script()->hasForceInterpreterOp()) {
     return MethodStatus::Method_CantCompile;
   }
-  if (state.script()->nslots() > BaselineMaxScriptSlots) {
-    return MethodStatus::Method_CantCompile;
-  }
+
   if (state.isInvoke()) {
     InvokeState& invoke = *state.asInvoke();
     if (TooManyActualArguments(invoke.args().length())) {
@@ -5166,4 +5159,14 @@ MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
   }
   state.script()->updateJitCodeRaw(cx->runtime());
   return MethodStatus::Method_Compiled;
+}
+
+bool js::PortablebaselineInterpreterStackCheck(JSContext* cx, RunState& state,
+                                               size_t numActualArgs) {
+  auto& pbs = cx->portableBaselineStack();
+  StackVal* base = reinterpret_cast<StackVal*>(pbs.base);
+  StackVal* top = reinterpret_cast<StackVal*>(pbs.top);
+  ssize_t margin = kStackMargin / sizeof(StackVal);
+  ssize_t needed = numActualArgs + state.script()->nslots() + margin;
+  return (top - base) >= needed;
 }
