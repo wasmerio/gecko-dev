@@ -2412,6 +2412,12 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       fflush(stdout);
     }
 #endif
+
+    DEBUG_CHECK();
+
+#ifndef __wasi__
+  dispatch:
+#endif
 #ifdef DETERMINISTIC_TRACE
     {
       static int traceSeq = 1;
@@ -2430,11 +2436,6 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 #endif
 
-    DEBUG_CHECK();
-
-#ifndef __wasi__
-  dispatch:
-#endif
     goto* addresses[*pc];
 
     CASE(Nop) { END_OP(Nop); }
@@ -4357,12 +4358,11 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     CASE(RetRval) {
       uint32_t argc = frame->numActualArgs();
 
+      bool ok = true;
       if (frame->isDebuggee()) {
         TRACE_PRINTF("doing DebugEpilogueOnBaselineReturn\n");
         PUSH_EXIT_FRAME();
-        if (!DebugEpilogueOnBaselineReturn(cx, frame, pc)) {
-          goto error;
-        }
+        ok = DebugEpilogueOnBaselineReturn(cx, frame, pc);
       }
 
       sp = stack.popFrame();
@@ -4371,7 +4371,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       // do an inline state update.
       if (stack.fp > entryFrame) {
         *ret = frame->returnValue();
-        return PBIResult::Ok;
+        return ok ? PBIResult::Ok : PBIResult::Error;
       } else {
         TRACE_PRINTF("Return fastpath\n");
         Value ret = frame->returnValue();
@@ -4394,6 +4394,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         frameMgr.switchToFrame(frame);
         pc = frame->interpreterPC();
         script.set(frame->script());
+
+        if (!ok) {
+          goto error;
+        }
 
         DISPATCH();
       }
