@@ -2329,6 +2329,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
   ICRegs icregs;
   RootedScript script(cx_, frame->script());
   jsbytecode* pc = frame->interpreterPC();
+  bool from_unwind = false;
 
   VMFrameManager frameMgr(cx_, frame);
 
@@ -4414,15 +4415,15 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
   do_return:
     CASE(RetRval) {
-      uint32_t argc = frame->numActualArgs();
-
       bool ok = true;
-      if (frame->isDebuggee()) {
+      if (frame->isDebuggee() && !from_unwind) {
         TRACE_PRINTF("doing DebugEpilogueOnBaselineReturn\n");
         PUSH_EXIT_FRAME();
         ok = DebugEpilogueOnBaselineReturn(cx, frame, pc);
       }
+      from_unwind = false;
 
+      uint32_t argc = frame->numActualArgs();
       sp = stack.popFrame();
 
       // If FP is higher than the entry frame now, return; otherwise,
@@ -5103,6 +5104,7 @@ unwind_ret:
   frameMgr.switchToFrame(frame);
   pc = frame->interpreterPC();
   script.set(frame->script());
+  from_unwind = true;
   goto do_return;
 
 #ifndef __wasi__
