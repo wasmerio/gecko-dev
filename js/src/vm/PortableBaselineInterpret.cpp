@@ -1303,7 +1303,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
         return ICInterpretOpResult::Error;
       }
 
-      // This will not be an Exit frame but a BaselinStub frame, so
+      // This will not be an Exit frame but a BaselineStub frame, so
       // replace the ExitFrameType with the ICStub pointer.
       POPNNATIVE(1);
       PUSHNATIVE(StackValNative(cstub));
@@ -1317,17 +1317,19 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
       TRACE_PRINTF("pushing callee: %p\n", callee);
       PUSHNATIVE(
           StackValNative(CalleeToToken(callee, /* isConstructing = */ false)));
-      PUSHNATIVE(StackValNative(
-          MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
 
       if (isNative) {
+        PUSHNATIVE(StackValNative(argc));
+        PUSHNATIVE(StackValNative(
+            MakeFrameDescriptorForJitCall(FrameType::BaselineStub, 0)));
+
         // We *also* need an exit frame (the native baseline
         // execution would invoke a trampoline here).
         StackVal* trampolinePrevFP = stack.fp;
         PUSHNATIVE(StackValNative(nullptr));  // fake return address.
         PUSHNATIVE(StackValNative(stack.fp));
         stack.fp = sp;
-        PUSHNATIVE(StackValNative(uint32_t(ExitFrameType::Bare)));
+        PUSHNATIVE(StackValNative(uint32_t(ExitFrameType::CallNative)));
         cx.getCx()->activation()->asJit()->setJSExitFP(
             reinterpret_cast<uint8_t*>(stack.fp));
         cx.getCx()->portableBaselineStack().top = reinterpret_cast<void*>(sp);
@@ -1338,13 +1340,16 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
         bool success = native(cx, argc, args);
 
         stack.fp = trampolinePrevFP;
-        POPNNATIVE(3);
+        POPNNATIVE(4);
 
         if (!success) {
           return ICInterpretOpResult::Error;
         }
         icregs.icResult = args[0].asRawBits();
       } else {
+        PUSHNATIVE(StackValNative(
+            MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
+
         switch (PortableBaselineInterpret(
             cx, state, stack, sp, /* envChain = */ nullptr,
             reinterpret_cast<Value*>(&icregs.icResult))) {
