@@ -1589,42 +1589,6 @@ static MOZ_ALWAYS_INLINE bool SetObjectElementOperation(
          result.checkStrictModeError(cx, obj, id, strict);
 }
 
-/*
- * As an optimization, the interpreter creates a handful of reserved Rooted<T>
- * variables at the beginning, thus inserting them into the Rooted list once
- * upon entry. ReservedRooted "borrows" a reserved Rooted variable and uses it
- * within a local scope, resetting the value to nullptr (or the appropriate
- * equivalent for T) at scope end. This avoids inserting/removing the Rooted
- * from the rooter list, while preventing stale values from being kept alive
- * unnecessarily.
- */
-
-template <typename T>
-class ReservedRooted : public RootedOperations<T, ReservedRooted<T>> {
-  Rooted<T>* savedRoot;
-
- public:
-  ReservedRooted(Rooted<T>* root, const T& ptr) : savedRoot(root) {
-    *root = ptr;
-  }
-
-  explicit ReservedRooted(Rooted<T>* root) : savedRoot(root) {
-    *root = JS::SafelyInitialized<T>::create();
-  }
-
-  ~ReservedRooted() { *savedRoot = JS::SafelyInitialized<T>::create(); }
-
-  void set(const T& p) const { *savedRoot = p; }
-  operator Handle<T>() { return *savedRoot; }
-  operator Rooted<T> &() { return *savedRoot; }
-  MutableHandle<T> operator&() { return &*savedRoot; }
-
-  DECLARE_NONPOINTER_ACCESSOR_METHODS(savedRoot->get())
-  DECLARE_NONPOINTER_MUTABLE_ACCESSOR_METHODS(savedRoot->get())
-  DECLARE_POINTER_CONSTREF_OPS(T)
-  DECLARE_POINTER_ASSIGN_OPS(ReservedRooted, T)
-};
-
 void js::ReportInNotObjectError(JSContext* cx, HandleValue lref,
                                 HandleValue rref) {
   auto uniqueCharsFromString = [](JSContext* cx,

@@ -1094,47 +1094,47 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     JSOp op = icregs.cacheIRReader.jsop();
     StringOperandId lhsId = icregs.cacheIRReader.stringOperandId();
     StringOperandId rhsId = icregs.cacheIRReader.stringOperandId();
-    state.str0 = reinterpret_cast<JSString*>(icregs.icVals[lhsId.id()]);
-    state.str1 = reinterpret_cast<JSString*>(icregs.icVals[rhsId.id()]);
     {
       PUSH_IC_FRAME();
+      ReservedRooted<JSString*> lhs(
+          &state.str0, reinterpret_cast<JSString*>(icregs.icVals[lhsId.id()]));
+      ReservedRooted<JSString*> rhs(
+          &state.str1, reinterpret_cast<JSString*>(icregs.icVals[rhsId.id()]));
       bool result;
       switch (op) {
         case JSOp::Eq:
         case JSOp::StrictEq:
-          if (!StringsEqual<EqualityKind::Equal>(cx, state.str0, state.str1,
-                                                 &result)) {
+          if (!StringsEqual<EqualityKind::Equal>(cx, lhs, rhs, &result)) {
             return ICInterpretOpResult::Error;
           }
           break;
         case JSOp::Ne:
         case JSOp::StrictNe:
-          if (!StringsEqual<EqualityKind::NotEqual>(cx, state.str0, state.str1,
-                                                    &result)) {
+          if (!StringsEqual<EqualityKind::NotEqual>(cx, lhs, rhs, &result)) {
             return ICInterpretOpResult::Error;
           }
           break;
         case JSOp::Lt:
-          if (!StringsCompare<ComparisonKind::LessThan>(cx, state.str0,
-                                                        state.str1, &result)) {
+          if (!StringsCompare<ComparisonKind::LessThan>(cx, lhs, rhs,
+                                                        &result)) {
             return ICInterpretOpResult::Error;
           }
           break;
         case JSOp::Ge:
-          if (!StringsCompare<ComparisonKind::GreaterThanOrEqual>(
-                  cx, state.str0, state.str1, &result)) {
+          if (!StringsCompare<ComparisonKind::GreaterThanOrEqual>(cx, lhs, rhs,
+                                                                  &result)) {
             return ICInterpretOpResult::Error;
           }
           break;
         case JSOp::Le:
           if (!StringsCompare<ComparisonKind::GreaterThanOrEqual>(
-                  cx, state.str1, state.str0, &result)) {
+                  cx, /* N.B. swapped order */ rhs, lhs, &result)) {
             return ICInterpretOpResult::Error;
           }
           break;
         case JSOp::Gt:
-          if (!StringsCompare<ComparisonKind::LessThan>(cx, state.str1,
-                                                        state.str0, &result)) {
+          if (!StringsCompare<ComparisonKind::LessThan>(
+                  cx, /* N.B. swapped order */ rhs, lhs, &result)) {
             return ICInterpretOpResult::Error;
           }
           break;
@@ -1970,6 +1970,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
         ICFallbackStub* fallback = stub->toFallbackStub();                    \
         fallback_body;                                                        \
         icregs.icResult = state.res.asRawBits();                              \
+        state.res = UndefinedValue();                                         \
         return PBIResult::Ok;                                                 \
       error:                                                                  \
         return PBIResult::Error;                                              \
@@ -1998,17 +1999,19 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     }                                                                         \
   }
 
-#define IC_LOAD_VAL(state_elem, index) \
-  state.state_elem = Value::fromRawBits(icregs.icVals[(index)]);
-#define IC_LOAD_OBJ(state_elem, index) \
-  state.state_elem = reinterpret_cast<JSObject*>(icregs.icVals[(index)]);
+#define IC_LOAD_VAL(state_elem, index)                \
+  ReservedRooted<Value> state_elem(&state.state_elem, \
+                                   Value::fromRawBits(icregs.icVals[(index)]))
+#define IC_LOAD_OBJ(state_elem, index)  \
+  ReservedRooted<JSObject*> state_elem( \
+      &state.state_elem, reinterpret_cast<JSObject*>(icregs.icVals[(index)]))
 
 #define PUSH_FALLBACK_IC_FRAME() PUSH_EXIT_FRAME_OR_RET(PBIResult::Error);
 
 DEFINE_IC(Typeof, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoTypeOfFallback(cx, frame, fallback, state.value0, &state.res)) {
+  if (!DoTypeOfFallback(cx, frame, fallback, value0, &state.res)) {
     goto error;
   }
 });
@@ -2016,7 +2019,7 @@ DEFINE_IC(Typeof, 1, {
 DEFINE_IC(GetName, 1, {
   IC_LOAD_OBJ(obj0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoGetNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
+  if (!DoGetNameFallback(cx, frame, fallback, obj0, &state.res)) {
     goto error;
   }
 });
@@ -2055,7 +2058,7 @@ DEFINE_IC(Call, 1, {
 DEFINE_IC(UnaryArith, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoUnaryArithFallback(cx, frame, fallback, state.value0, &state.res)) {
+  if (!DoUnaryArithFallback(cx, frame, fallback, value0, &state.res)) {
     goto error;
   }
 });
@@ -2064,8 +2067,7 @@ DEFINE_IC(BinaryArith, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoBinaryArithFallback(cx, frame, fallback, state.value0, state.value1,
-                             &state.res)) {
+  if (!DoBinaryArithFallback(cx, frame, fallback, value0, value1, &state.res)) {
     goto error;
   }
 });
@@ -2073,7 +2075,7 @@ DEFINE_IC(BinaryArith, 2, {
 DEFINE_IC(ToBool, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoToBoolFallback(cx, frame, fallback, state.value0, &state.res)) {
+  if (!DoToBoolFallback(cx, frame, fallback, value0, &state.res)) {
     goto error;
   }
 });
@@ -2082,8 +2084,7 @@ DEFINE_IC(Compare, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoCompareFallback(cx, frame, fallback, state.value0, state.value1,
-                         &state.res)) {
+  if (!DoCompareFallback(cx, frame, fallback, value0, value1, &state.res)) {
     goto error;
   }
 });
@@ -2092,8 +2093,7 @@ DEFINE_IC(InstanceOf, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoInstanceOfFallback(cx, frame, fallback, state.value0, state.value1,
-                            &state.res)) {
+  if (!DoInstanceOfFallback(cx, frame, fallback, value0, value1, &state.res)) {
     goto error;
   }
 });
@@ -2102,8 +2102,7 @@ DEFINE_IC(In, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoInFallback(cx, frame, fallback, state.value0, state.value1,
-                    &state.res)) {
+  if (!DoInFallback(cx, frame, fallback, value0, value1, &state.res)) {
     goto error;
   }
 });
@@ -2111,7 +2110,7 @@ DEFINE_IC(In, 2, {
 DEFINE_IC(BindName, 1, {
   IC_LOAD_OBJ(obj0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoBindNameFallback(cx, frame, fallback, state.obj0, &state.res)) {
+  if (!DoBindNameFallback(cx, frame, fallback, obj0, &state.res)) {
     goto error;
   }
 });
@@ -2120,8 +2119,7 @@ DEFINE_IC(SetProp, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoSetPropFallback(cx, frame, fallback, nullptr, state.value0,
-                         state.value1)) {
+  if (!DoSetPropFallback(cx, frame, fallback, nullptr, value0, value1)) {
     goto error;
   }
 });
@@ -2136,7 +2134,7 @@ DEFINE_IC(NewObject, 0, {
 DEFINE_IC(GetProp, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoGetPropFallback(cx, frame, fallback, &state.value0, &state.res)) {
+  if (!DoGetPropFallback(cx, frame, fallback, &value0, &state.res)) {
     goto error;
   }
 });
@@ -2145,7 +2143,7 @@ DEFINE_IC(GetPropSuper, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoGetPropSuperFallback(cx, frame, fallback, state.value0, &state.value1,
+  if (!DoGetPropSuperFallback(cx, frame, fallback, value0, &value1,
                               &state.res)) {
     goto error;
   }
@@ -2155,8 +2153,7 @@ DEFINE_IC(GetElem, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoGetElemFallback(cx, frame, fallback, state.value0, state.value1,
-                         &state.res)) {
+  if (!DoGetElemFallback(cx, frame, fallback, value0, value1, &state.res)) {
     goto error;
   }
 });
@@ -2166,8 +2163,8 @@ DEFINE_IC(GetElemSuper, 3, {
   IC_LOAD_VAL(value1, 1);  // obj (lhs)
   IC_LOAD_VAL(value2, 2);  // key (rhs)
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoGetElemSuperFallback(cx, frame, fallback, state.value1, state.value2,
-                              state.value0, &state.res)) {
+  if (!DoGetElemSuperFallback(cx, frame, fallback, value1, value2, value0,
+                              &state.res)) {
     goto error;
   }
 });
@@ -2191,8 +2188,8 @@ DEFINE_IC(SetElem, 3, {
   IC_LOAD_VAL(value1, 1);
   IC_LOAD_VAL(value2, 2);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoSetElemFallback(cx, frame, fallback, nullptr, state.value0,
-                         state.value1, state.value2)) {
+  if (!DoSetElemFallback(cx, frame, fallback, nullptr, value0, value1,
+                         value2)) {
     goto error;
   }
 });
@@ -2201,8 +2198,7 @@ DEFINE_IC(HasOwn, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoHasOwnFallback(cx, frame, fallback, state.value0, state.value1,
-                        &state.res)) {
+  if (!DoHasOwnFallback(cx, frame, fallback, value0, value1, &state.res)) {
     goto error;
   }
 });
@@ -2211,8 +2207,8 @@ DEFINE_IC(CheckPrivateField, 2, {
   IC_LOAD_VAL(value0, 0);
   IC_LOAD_VAL(value1, 1);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoCheckPrivateFieldFallback(cx, frame, fallback, state.value0,
-                                   state.value1, &state.res)) {
+  if (!DoCheckPrivateFieldFallback(cx, frame, fallback, value0, value1,
+                                   &state.res)) {
     goto error;
   }
 });
@@ -2220,7 +2216,7 @@ DEFINE_IC(CheckPrivateField, 2, {
 DEFINE_IC(GetIterator, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoGetIteratorFallback(cx, frame, fallback, state.value0, &state.res)) {
+  if (!DoGetIteratorFallback(cx, frame, fallback, value0, &state.res)) {
     goto error;
   }
 });
@@ -2228,7 +2224,7 @@ DEFINE_IC(GetIterator, 1, {
 DEFINE_IC(ToPropertyKey, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoToPropertyKeyFallback(cx, frame, fallback, state.value0, &state.res)) {
+  if (!DoToPropertyKeyFallback(cx, frame, fallback, value0, &state.res)) {
     goto error;
   }
 });
@@ -2236,8 +2232,7 @@ DEFINE_IC(ToPropertyKey, 1, {
 DEFINE_IC(OptimizeSpreadCall, 1, {
   IC_LOAD_VAL(value0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, state.value0,
-                                    &state.res)) {
+  if (!DoOptimizeSpreadCallFallback(cx, frame, fallback, value0, &state.res)) {
     goto error;
   }
 });
@@ -2252,7 +2247,7 @@ DEFINE_IC(Rest, 0, {
 DEFINE_IC(CloseIter, 1, {
   IC_LOAD_OBJ(obj0, 0);
   PUSH_FALLBACK_IC_FRAME();
-  if (!DoCloseIterFallback(cx, frame, fallback, state.obj0)) {
+  if (!DoCloseIterFallback(cx, frame, fallback, obj0)) {
     goto error;
   }
 });
@@ -2416,24 +2411,24 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     DEBUG_CHECK();
 
 #ifndef __wasi__
-  dispatch:
+  dispatch :
 #endif
 #ifdef DETERMINISTIC_TRACE
-    {
-      static int traceSeq = 1;
-      JSOp op = JSOp(*pc);
-      Value tos = (sp < reinterpret_cast<StackVal*>(frame) - script->nfixed())
-                      ? sp[0].asValue()
-                      : Value::fromRawBits(0);
-      printf("TRACE(%d): script %" PRIx64 " relPC %d op %s ", traceSeq++,
-             reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,
-             int(pc - script->code()), CodeName(op));
-      if (tos.isNumber() || tos.isBoolean()) {
-        printf("TOS %" PRIx64 "\n", tos.asRawBits());
-      } else {
-        printf("TOS tag %d\n", int(tos.asRawBits() >> 47));
-      }
+  {
+    static int traceSeq = 1;
+    JSOp op = JSOp(*pc);
+    Value tos = (sp < reinterpret_cast<StackVal*>(frame) - script->nfixed())
+                    ? sp[0].asValue()
+                    : Value::fromRawBits(0);
+    printf("TRACE(%d): script %" PRIx64 " relPC %d op %s ", traceSeq++,
+           reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,
+           int(pc - script->code()), CodeName(op));
+    if (tos.isNumber() || tos.isBoolean()) {
+      printf("TOS %" PRIx64 "\n", tos.asRawBits());
+    } else {
+      printf("TOS tag %d\n", int(tos.asRawBits() >> 47));
     }
+  }
 #endif
 
     goto* addresses[*pc];
@@ -3219,10 +3214,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
               ToStringSlow<NoGC>(frameMgr.cxForLocalUseOnly(), s)) {
         sp[0] = StackVal(StringValue(result));
       } else {
-        state.value0 = POP().asValue();
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
         {
           PUSH_EXIT_FRAME();
-          result = ToString<CanGC>(cx, state.value0);
+          result = ToString<CanGC>(cx, value0);
           if (!result) {
             goto error;
           }
@@ -3248,11 +3243,14 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(NonSyntacticGlobalThis) {
       {
-        PUSH_EXIT_FRAME();
-        state.obj0 = frame->environmentChain();
-        js::GetNonSyntacticGlobalThis(cx, state.obj0, &state.value0);
+        ReservedRooted<JSObject*> obj0(&state.obj0, frame->environmentChain());
+        ReservedRooted<Value> value0(&state.value0);
+        {
+          PUSH_EXIT_FRAME();
+          js::GetNonSyntacticGlobalThis(cx, obj0, &value0);
+        }
+        PUSH(StackVal(value0));
       }
-      PUSH(StackVal(state.value0));
       END_OP(NonSyntacticGlobalThis);
     }
 
@@ -3262,18 +3260,21 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(DynamicImport) {
-      state.value0 = POP().asValue();  // options
-      state.value1 = POP().asValue();  // specifier
-      JSObject* promise;
       {
-        PUSH_EXIT_FRAME();
-        promise =
-            StartDynamicModuleImport(cx, script, state.value1, state.value0);
-        if (!promise) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0,
+                                     POP().asValue());  // options
+        ReservedRooted<Value> value1(&state.value1,
+                                     POP().asValue());  // specifier
+        JSObject* promise;
+        {
+          PUSH_EXIT_FRAME();
+          promise = StartDynamicModuleImport(cx, script, value1, value0);
+          if (!promise) {
+            goto error;
+          }
         }
+        PUSH(StackVal(ObjectValue(*promise)));
       }
-      PUSH(StackVal(ObjectValue(*promise)));
       END_OP(DynamicImport);
     }
 
@@ -3333,13 +3334,15 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       END_OP(Object);
     }
     CASE(ObjWithProto) {
-      state.value0 = sp[0].asValue();
-      JSObject* obj;
       {
-        PUSH_EXIT_FRAME();
-        obj = ObjectWithProtoOperation(cx, state.value0);
+        ReservedRooted<Value> value0(&state.value0, sp[0].asValue());
+        JSObject* obj;
+        {
+          PUSH_EXIT_FRAME();
+          obj = ObjectWithProtoOperation(cx, value0);
+        }
+        sp[0] = StackVal(ObjectValue(*obj));
       }
-      sp[0] = StackVal(ObjectValue(*obj));
       END_OP(ObjWithProto);
     }
 
@@ -3378,14 +3381,17 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       static_assert(JSOpLength_InitPropGetter == JSOpLength_InitPropSetter);
       static_assert(JSOpLength_InitPropGetter ==
                     JSOpLength_InitHiddenPropSetter);
-      state.obj1 = &POP().asValue().toObject();  // val
-      state.obj0 = &sp[0].asValue().toObject();  // obj; leave on stack
-      state.name0 = script->getName(pc);
       {
-        PUSH_EXIT_FRAME();
-        if (!InitPropGetterSetterOperation(cx, pc, state.obj0, state.name0,
-                                           state.obj1)) {
-          goto error;
+        ReservedRooted<JSObject*> obj1(&state.obj1,
+                                       &POP().asValue().toObject());  // val
+        ReservedRooted<JSObject*> obj0(
+            &state.obj0, &sp[0].asValue().toObject());  // obj; leave on stack
+        ReservedRooted<PropertyName*> name0(&state.name0, script->getName(pc));
+        {
+          PUSH_EXIT_FRAME();
+          if (!InitPropGetterSetterOperation(cx, pc, obj0, name0, obj1)) {
+            goto error;
+          }
         }
       }
       END_OP(InitPropGetter);
@@ -3400,14 +3406,17 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       static_assert(JSOpLength_InitElemGetter == JSOpLength_InitElemSetter);
       static_assert(JSOpLength_InitElemGetter ==
                     JSOpLength_InitHiddenElemSetter);
-      state.obj1 = &POP().asValue().toObject();  // val
-      state.value0 = POP().asValue();            // idval
-      state.obj0 = &sp[0].asValue().toObject();  // obj; leave on stack
       {
-        PUSH_EXIT_FRAME();
-        if (!InitElemGetterSetterOperation(cx, pc, state.obj0, state.value0,
-                                           state.obj1)) {
-          goto error;
+        ReservedRooted<JSObject*> obj1(&state.obj1,
+                                       &POP().asValue().toObject());   // val
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());  // idval
+        ReservedRooted<JSObject*> obj0(
+            &state.obj0, &sp[0].asValue().toObject());  // obj; leave on stack
+        {
+          PUSH_EXIT_FRAME();
+          if (!InitElemGetterSetterOperation(cx, pc, obj0, value0, obj1)) {
+            goto error;
+          }
         }
       }
       END_OP(InitElemGetter);
@@ -3481,55 +3490,63 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(DelProp) {
-      state.value0 = POP().asValue();
-      state.name0 = script->getName(pc);
-      bool res = false;
       {
-        PUSH_EXIT_FRAME();
-        if (!DelPropOperation<false>(cx, state.value0, state.name0, &res)) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
+        ReservedRooted<PropertyName*> name0(&state.name0, script->getName(pc));
+        bool res = false;
+        {
+          PUSH_EXIT_FRAME();
+          if (!DelPropOperation<false>(cx, value0, name0, &res)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(BooleanValue(res)));
       }
-      PUSH(StackVal(BooleanValue(res)));
       END_OP(DelProp);
     }
     CASE(StrictDelProp) {
-      state.value0 = POP().asValue();
-      state.name0 = script->getName(pc);
-      bool res = false;
       {
-        PUSH_EXIT_FRAME();
-        if (!DelPropOperation<true>(cx, state.value0, state.name0, &res)) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
+        ReservedRooted<PropertyName*> name0(&state.name0, script->getName(pc));
+        bool res = false;
+        {
+          PUSH_EXIT_FRAME();
+          if (!DelPropOperation<true>(cx, value0, name0, &res)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(BooleanValue(res)));
       }
-      PUSH(StackVal(BooleanValue(res)));
       END_OP(StrictDelProp);
     }
     CASE(DelElem) {
-      state.value1 = POP().asValue();
-      state.value0 = POP().asValue();
-      bool res = false;
       {
-        PUSH_EXIT_FRAME();
-        if (!DelElemOperation<false>(cx, state.value0, state.value1, &res)) {
-          goto error;
+        ReservedRooted<Value> value1(&state.value1, POP().asValue());
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
+        bool res = false;
+        {
+          PUSH_EXIT_FRAME();
+          if (!DelElemOperation<false>(cx, value0, value1, &res)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(BooleanValue(res)));
       }
-      PUSH(StackVal(BooleanValue(res)));
       END_OP(DelElem);
     }
     CASE(StrictDelElem) {
-      state.value1 = POP().asValue();
-      state.value0 = POP().asValue();
-      bool res = false;
       {
-        PUSH_EXIT_FRAME();
-        if (!DelElemOperation<true>(cx, state.value0, state.value1, &res)) {
-          goto error;
+        ReservedRooted<Value> value1(&state.value1, POP().asValue());
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
+        bool res = false;
+        {
+          PUSH_EXIT_FRAME();
+          if (!DelElemOperation<true>(cx, value0, value1, &res)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(BooleanValue(res)));
       }
-      PUSH(StackVal(BooleanValue(res)));
       END_OP(StrictDelElem);
     }
 
@@ -3550,16 +3567,18 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(NewPrivateName) {
-      state.atom0 = script->getAtom(pc);
-      JS::Symbol* symbol;
       {
-        PUSH_EXIT_FRAME();
-        symbol = NewPrivateName(cx, state.atom0);
-        if (!symbol) {
-          goto error;
+        ReservedRooted<JSAtom*> atom0(&state.atom0, script->getAtom(pc));
+        JS::Symbol* symbol;
+        {
+          PUSH_EXIT_FRAME();
+          symbol = NewPrivateName(cx, atom0);
+          if (!symbol) {
+            goto error;
+          }
         }
+        PUSH(StackVal(SymbolValue(symbol)));
       }
-      PUSH(StackVal(SymbolValue(symbol)));
       END_OP(NewPrivateName);
     }
 
@@ -3582,20 +3601,22 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       // stack signature: receiver, lval, rval => rval
       static_assert(JSOpLength_SetPropSuper == JSOpLength_StrictSetPropSuper);
       bool strict = JSOp(*pc) == JSOp::StrictSetPropSuper;
-      state.value2 = POP().asValue();  // rval
-      state.value1 = POP().asValue();  // lval
-      state.value0 = POP().asValue();  // receiver
-      state.name0 = script->getName(pc);
       {
-        PUSH_EXIT_FRAME();
-        // SetPropertySuper(cx, lval, receiver, name, rval, strict)
-        // (N.B.: lval and receiver are transposed!)
-        if (!SetPropertySuper(cx, state.value1, state.value0, state.name0,
-                              state.value2, strict)) {
-          goto error;
+        ReservedRooted<Value> value2(&state.value2, POP().asValue());  // rval
+        ReservedRooted<Value> value1(&state.value1, POP().asValue());  // lval
+        ReservedRooted<Value> value0(&state.value0,
+                                     POP().asValue());  // recevier
+        ReservedRooted<PropertyName*> name0(&state.name0, script->getName(pc));
+        {
+          PUSH_EXIT_FRAME();
+          // SetPropertySuper(cx, lval, receiver, name, rval, strict)
+          // (N.B.: lval and receiver are transposed!)
+          if (!SetPropertySuper(cx, value1, value0, name0, value2, strict)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(value2));
       }
-      PUSH(StackVal(state.value2));
       END_OP(SetPropSuper);
     }
 
@@ -3604,20 +3625,22 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       // stack signature: receiver, key, lval, rval => rval
       static_assert(JSOpLength_SetElemSuper == JSOpLength_StrictSetElemSuper);
       bool strict = JSOp(*pc) == JSOp::StrictSetElemSuper;
-      state.value3 = POP().asValue();  // rval
-      state.value2 = POP().asValue();  // lval
-      state.value1 = POP().asValue();  // index
-      state.value0 = POP().asValue();  // receiver
       {
-        PUSH_EXIT_FRAME();
-        // SetElementSuper(cx, lval, receiver, index, rval, strict)
-        // (N.B.: lval, receiver and index are rotated!)
-        if (!SetElementSuper(cx, state.value2, state.value0, state.value1,
-                             state.value3, strict)) {
-          goto error;
+        ReservedRooted<Value> value3(&state.value3, POP().asValue());  // rval
+        ReservedRooted<Value> value2(&state.value2, POP().asValue());  // lval
+        ReservedRooted<Value> value1(&state.value1, POP().asValue());  // index
+        ReservedRooted<Value> value0(&state.value0,
+                                     POP().asValue());  // receiver
+        {
+          PUSH_EXIT_FRAME();
+          // SetElementSuper(cx, lval, receiver, index, rval, strict)
+          // (N.B.: lval, receiver and index are rotated!)
+          if (!SetElementSuper(cx, value2, value0, value1, value3, strict)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(value2));  // value
       }
-      PUSH(StackVal(state.value2));  // value
       END_OP(SetElemSuper);
     }
 
@@ -3667,41 +3690,48 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(CheckObjCoercible) {
-      state.value0 = sp[0].asValue();
-      if (state.value0.isNullOrUndefined()) {
-        PUSH_EXIT_FRAME();
-        MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, state.value0));
-        /* abandon frame; error handler will re-establish sp */
-        goto error;
+      {
+        ReservedRooted<Value> value0(&state.value0, sp[0].asValue());
+        if (value0.isNullOrUndefined()) {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(ThrowObjectCoercible(cx, value0));
+          /* abandon frame; error handler will re-establish sp */
+          goto error;
+        }
       }
       END_OP(CheckObjCoercible);
     }
 
     CASE(ToAsyncIter) {
       // iter, next => asynciter
-      state.value0 = POP().asValue();            // next
-      state.obj0 = &POP().asValue().toObject();  // iter
-
-      JSObject* result;
       {
-        PUSH_EXIT_FRAME();
-        result = CreateAsyncFromSyncIterator(cx, state.obj0, state.value0);
-        if (!result) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());  // next
+        ReservedRooted<JSObject*> obj0(&state.obj0,
+                                       &POP().asValue().toObject());  // iter
+        JSObject* result;
+        {
+          PUSH_EXIT_FRAME();
+          result = CreateAsyncFromSyncIterator(cx, obj0, value0);
+          if (!result) {
+            goto error;
+          }
         }
+        PUSH(StackVal(ObjectValue(*result)));
       }
-      PUSH(StackVal(ObjectValue(*result)));
       END_OP(ToAsyncIter);
     }
 
     CASE(MutateProto) {
       // obj, protoVal => obj
-      state.value0 = POP().asValue();
-      state.obj0 = &sp[0].asValue().toObject();
       {
-        PUSH_EXIT_FRAME();
-        if (!MutatePrototype(cx, state.obj0.as<PlainObject>(), state.value0)) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
+        ReservedRooted<JSObject*> obj0(&state.obj0,
+                                       &sp[0].asValue().toObject());
+        {
+          PUSH_EXIT_FRAME();
+          if (!MutatePrototype(cx, obj0.as<PlainObject>(), value0)) {
+            goto error;
+          }
         }
       }
       END_OP(MutateProto);
@@ -3730,12 +3760,14 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(InitElemArray) {
       // array, val => array
-      state.value0 = POP().asValue();
-      state.obj0 = &sp[0].asValue().toObject();
       {
-        PUSH_EXIT_FRAME();
-        InitElemArrayOperation(cx, pc, state.obj0.as<ArrayObject>(),
-                               state.value0);
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
+        ReservedRooted<JSObject*> obj0(&state.obj0,
+                                       &sp[0].asValue().toObject());
+        {
+          PUSH_EXIT_FRAME();
+          InitElemArrayOperation(cx, pc, obj0.as<ArrayObject>(), value0);
+        }
       }
       END_OP(InitElemArray);
     }
@@ -3749,8 +3781,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       JSObject* obj;
       {
         PUSH_EXIT_FRAME();
-        state.obj0 = script->getRegExp(pc);
-        obj = CloneRegExpObject(cx, state.obj0.as<RegExpObject>());
+        ReservedRooted<JSObject*> obj0(&state.obj0, script->getRegExp(pc));
+        obj = CloneRegExpObject(cx, obj0.as<RegExpObject>());
         if (!obj) {
           goto error;
         }
@@ -3760,29 +3792,34 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(Lambda) {
-      state.fun0 = script->getFunction(pc);
-      state.obj0 = frame->environmentChain();
-      JSObject* res;
       {
-        PUSH_EXIT_FRAME();
-        res = js::Lambda(cx, state.fun0, state.obj0);
-        if (!res) {
-          goto error;
+        ReservedRooted<JSFunction*> fun0(&state.fun0, script->getFunction(pc));
+        ReservedRooted<JSObject*> obj0(&state.obj0, frame->environmentChain());
+        JSObject* res;
+        {
+          PUSH_EXIT_FRAME();
+          res = js::Lambda(cx, fun0, obj0);
+          if (!res) {
+            goto error;
+          }
         }
+        PUSH(StackVal(ObjectValue(*res)));
       }
-      PUSH(StackVal(ObjectValue(*res)));
       END_OP(Lambda);
     }
 
     CASE(SetFunName) {
       // fun, name => fun
-      state.value0 = POP().asValue();  // name
-      state.fun0 = &sp[0].asValue().toObject().as<JSFunction>();
-      FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc));
       {
-        PUSH_EXIT_FRAME();
-        if (!SetFunctionName(cx, state.fun0, state.value0, prefixKind)) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());  // name
+        ReservedRooted<JSFunction*> fun0(
+            &state.fun0, &sp[0].asValue().toObject().as<JSFunction>());
+        FunctionPrefixKind prefixKind = FunctionPrefixKind(GET_UINT8(pc));
+        {
+          PUSH_EXIT_FRAME();
+          if (!SetFunctionName(cx, fun0, value0, prefixKind)) {
+            goto error;
+          }
         }
       }
       END_OP(SetFunName);
@@ -3790,21 +3827,27 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(InitHomeObject) {
       // fun, homeObject => fun
-      state.obj0 = &POP().asValue().toObject();  // homeObject
-      state.fun0 = &sp[0].asValue().toObject().as<JSFunction>();
-      MOZ_ASSERT(state.fun0->allowSuperProperty());
-      MOZ_ASSERT(state.obj0->is<PlainObject>() || state.obj0->is<JSFunction>());
-      state.fun0->setExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT,
-                                  ObjectValue(*state.obj0));
+      {
+        ReservedRooted<JSObject*> obj0(
+            &state.obj0, &POP().asValue().toObject());  // homeObject
+        ReservedRooted<JSFunction*> fun0(
+            &state.fun0, &sp[0].asValue().toObject().as<JSFunction>());
+        MOZ_ASSERT(fun0->allowSuperProperty());
+        MOZ_ASSERT(obj0->is<PlainObject>() || obj0->is<JSFunction>());
+        fun0->setExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT,
+                              ObjectValue(*obj0));
+      }
       END_OP(InitHomeObject);
     }
 
     CASE(CheckClassHeritage) {
-      state.value0 = sp[0].asValue();
       {
-        PUSH_EXIT_FRAME();
-        if (!CheckClassHeritageOperation(cx, state.value0)) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0, sp[0].asValue());
+        {
+          PUSH_EXIT_FRAME();
+          if (!CheckClassHeritageOperation(cx, value0)) {
+            goto error;
+          }
         }
       }
       END_OP(CheckClassHeritage);
@@ -3812,18 +3855,21 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(FunWithProto) {
       // proto => obj
-      state.obj0 = &POP().asValue().toObject();  // proto
-      state.obj1 = frame->environmentChain();
-      state.fun0 = script->getFunction(pc);
-      JSObject* obj;
       {
-        PUSH_EXIT_FRAME();
-        obj = FunWithProtoOperation(cx, state.fun0, state.obj1, state.obj0);
-        if (!obj) {
-          goto error;
+        ReservedRooted<JSObject*> obj0(&state.obj0,
+                                       &POP().asValue().toObject());  // proto
+        ReservedRooted<JSObject*> obj1(&state.obj1, frame->environmentChain());
+        ReservedRooted<JSFunction*> fun0(&state.fun0, script->getFunction(pc));
+        JSObject* obj;
+        {
+          PUSH_EXIT_FRAME();
+          obj = FunWithProtoOperation(cx, fun0, obj1, obj0);
+          if (!obj) {
+            goto error;
+          }
         }
+        PUSH(StackVal(ObjectValue(*obj)));
       }
-      PUSH(StackVal(ObjectValue(*obj)));
       END_OP(FunWithProto);
     }
 
@@ -4039,15 +4085,16 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(ImplicitThis) {
-      state.obj0 = frame->environmentChain();
-      state.name0 = script->getName(pc);
       {
+        ReservedRooted<JSObject*> obj0(&state.obj0, frame->environmentChain());
+        ReservedRooted<PropertyName*> name0(&state.name0, script->getName(pc));
         PUSH_EXIT_FRAME();
-        if (!ImplicitThisOperation(cx, state.obj0, state.name0, &state.res)) {
+        if (!ImplicitThisOperation(cx, obj0, name0, &state.res)) {
           goto error;
         }
       }
       PUSH(StackVal(state.res));
+      state.res.setUndefined();
       END_OP(ImplicitThis);
     }
 
@@ -4105,11 +4152,11 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(InitialYield) {
       // gen => rval, gen, resumeKind
-      state.obj0 = &sp[0].asValue().toObject();
+      ReservedRooted<JSObject*> obj0(&state.obj0, &sp[0].asValue().toObject());
       uint32_t frameSize = stack.frameSize(sp, frame);
       {
         PUSH_EXIT_FRAME();
-        if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
+        if (!NormalSuspend(cx, obj0, frame, frameSize, pc)) {
           goto error;
         }
       }
@@ -4120,11 +4167,11 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     CASE(Await)
     CASE(Yield) {
       // rval1, gen => rval2, gen, resumeKind
-      state.obj0 = &POP().asValue().toObject();
+      ReservedRooted<JSObject*> obj0(&state.obj0, &POP().asValue().toObject());
       uint32_t frameSize = stack.frameSize(sp, frame);
       {
         PUSH_EXIT_FRAME();
-        if (!NormalSuspend(cx, state.obj0, frame, frameSize, pc)) {
+        if (!NormalSuspend(cx, obj0, frame, frameSize, pc)) {
           goto error;
         }
       }
@@ -4134,10 +4181,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(FinalYieldRval) {
       // gen =>
-      state.obj0 = &POP().asValue().toObject();
+      ReservedRooted<JSObject*> obj0(&state.obj0, &POP().asValue().toObject());
       {
         PUSH_EXIT_FRAME();
-        if (!FinalSuspend(cx, state.obj0, pc)) {
+        if (!FinalSuspend(cx, obj0, pc)) {
           goto error;
         }
       }
@@ -4151,13 +4198,14 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(AsyncAwait) {
       // value, gen => promise
-      state.obj0 = &POP().asValue().toObject();  // gen
-      state.value0 = POP().asValue();            // value
       JSObject* promise;
       {
+        ReservedRooted<JSObject*> obj0(&state.obj0,
+                                       &POP().asValue().toObject());   // gen
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());  // value
         PUSH_EXIT_FRAME();
         promise = AsyncFunctionAwait(
-            cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0);
+            cx, obj0.as<AsyncFunctionGeneratorObject>(), value0);
         if (!promise) {
           goto error;
         }
@@ -4168,15 +4216,16 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(AsyncResolve) {
       // valueOrReason, gen => promise
-      state.obj0 = &POP().asValue().toObject();  // gen
-      state.value0 = POP().asValue();            // valueOrReason
       auto resolveKind = AsyncFunctionResolveKind(GET_UINT8(pc));
       JSObject* promise;
       {
+        ReservedRooted<JSObject*> obj0(&state.obj0,
+                                       &POP().asValue().toObject());  // gen
+        ReservedRooted<Value> value0(&state.value0,
+                                     POP().asValue());  // valueOrReason
         PUSH_EXIT_FRAME();
         promise = AsyncFunctionResolve(
-            cx, state.obj0.as<AsyncFunctionGeneratorObject>(), state.value0,
-            resolveKind);
+            cx, obj0.as<AsyncFunctionGeneratorObject>(), value0, resolveKind);
         if (!promise) {
           goto error;
         }
@@ -4187,11 +4236,11 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(CanSkipAwait) {
       // value => value, can_skip
-      state.value0 = sp[0].asValue();
       bool result = false;
       {
+        ReservedRooted<Value> value0(&state.value0, sp[0].asValue());
         PUSH_EXIT_FRAME();
-        if (!CanSkipAwait(cx, state.value0, &result)) {
+        if (!CanSkipAwait(cx, value0, &result)) {
           goto error;
         }
       }
@@ -4201,16 +4250,18 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(MaybeExtractAwaitValue) {
       // value, can_skip => value_or_resolved, can_skip
-      state.value1 = POP().asValue();  // can_skip
-      state.value0 = POP().asValue();  // value
-      if (state.value1.toBoolean()) {
-        PUSH_EXIT_FRAME();
-        if (!ExtractAwaitValue(cx, state.value0, &state.value0)) {
-          goto error;
+      {
+        Value can_skip = POP().asValue();
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());  // value
+        if (can_skip.toBoolean()) {
+          PUSH_EXIT_FRAME();
+          if (!ExtractAwaitValue(cx, value0, &value0)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(value0));
+        PUSH(StackVal(can_skip));
       }
-      PUSH(StackVal(state.value0));
-      PUSH(StackVal(state.value1));
       END_OP(MaybeExtractAwaitValue);
     }
 
@@ -4222,33 +4273,39 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(CheckResumeKind) {
       // rval, gen, resumeKind => rval
-      GeneratorResumeKind resumeKind =
-          IntToResumeKind(POP().asValue().toInt32());
-      state.obj0 = &POP().asValue().toObject();  // gen
-      state.value0 = sp[0].asValue();            // rval
-      if (resumeKind != GeneratorResumeKind::Next) {
-        PUSH_EXIT_FRAME();
-        MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(
-            cx, frame, state.obj0.as<AbstractGeneratorObject>(), state.value0,
-            resumeKind));
-        goto error;
+      {
+        GeneratorResumeKind resumeKind =
+            IntToResumeKind(POP().asValue().toInt32());
+        ReservedRooted<JSObject*> obj0(&state.obj0,
+                                       &POP().asValue().toObject());   // gen
+        ReservedRooted<Value> value0(&state.value0, sp[0].asValue());  // rval
+        if (resumeKind != GeneratorResumeKind::Next) {
+          PUSH_EXIT_FRAME();
+          MOZ_ALWAYS_FALSE(GeneratorThrowOrReturn(
+              cx, frame, obj0.as<AbstractGeneratorObject>(), value0,
+              resumeKind));
+          goto error;
+        }
       }
       END_OP(CheckResumeKind);
     }
 
     CASE(Resume) {
       Value gen = sp[2].asValue();
-      state.obj0 = &gen.toObject();
       Value* callerSP = reinterpret_cast<Value*>(sp);
       {
-        PUSH_EXIT_FRAME();
-        TRACE_PRINTF("Going to C++ interp for Resume\n");
-        if (!InterpretResume(cx, state.obj0, callerSP, &state.value0)) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0);
+        ReservedRooted<JSObject*> obj0(&state.obj0, &gen.toObject());
+        {
+          PUSH_EXIT_FRAME();
+          TRACE_PRINTF("Going to C++ interp for Resume\n");
+          if (!InterpretResume(cx, obj0, callerSP, &value0)) {
+            goto error;
+          }
         }
+        POPN(2);
+        sp[0] = StackVal(value0);
       }
-      POPN(2);
-      sp[0] = StackVal(state.value0);
       END_OP(Resume);
     }
 
@@ -4426,10 +4483,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(Throw) {
-      state.value0 = POP().asValue();
       {
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
         PUSH_EXIT_FRAME();
-        MOZ_ALWAYS_FALSE(ThrowOperation(cx, state.value0));
+        MOZ_ALWAYS_FALSE(ThrowOperation(cx, value0));
         goto error;
       }
       END_OP(Throw);
@@ -4467,6 +4524,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         }
       }
       PUSH(StackVal(state.res));
+      state.res.setUndefined();
       END_OP(Exception);
     }
 
@@ -4518,7 +4576,6 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     CASE(BindGName) {
       IC_SET_OBJ_ARG(
           0, &frameMgr.cxForLocalUseOnly()->global()->lexicalEnvironment());
-      state.name0.set(script->getName(pc));
       INVOKE_IC(BindName);
       IC_PUSH_RESULT();
       END_OP(BindGName);
@@ -4588,14 +4645,17 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(GetImport) {
-      state.obj0 = frame->environmentChain();
       {
-        PUSH_EXIT_FRAME();
-        if (!GetImportOperation(cx, state.obj0, script, pc, &state.value0)) {
-          goto error;
+        ReservedRooted<JSObject*> obj0(&state.obj0, frame->environmentChain());
+        ReservedRooted<Value> value0(&state.value0);
+        {
+          PUSH_EXIT_FRAME();
+          if (!GetImportOperation(cx, obj0, script, pc, &value0)) {
+            goto error;
+          }
         }
+        PUSH(StackVal(value0));
       }
-      PUSH(StackVal(state.value0));
       END_OP(GetImport);
     }
 
@@ -4682,23 +4742,26 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(SetIntrinsic) {
-      state.value0 = sp[0].asValue();
       {
-        PUSH_EXIT_FRAME();
-        if (!SetIntrinsicOperation(cx, script, pc, state.value0)) {
-          goto error;
+        ReservedRooted<Value> value0(&state.value0, sp[0].asValue());
+        {
+          PUSH_EXIT_FRAME();
+          if (!SetIntrinsicOperation(cx, script, pc, value0)) {
+            goto error;
+          }
         }
       }
       END_OP(SetIntrinsic);
     }
 
     CASE(PushLexicalEnv) {
-      state.scope0 = script->getScope(pc);
       {
-        PUSH_EXIT_FRAME();
-        if (!frame->pushLexicalEnvironment(cx,
-                                           state.scope0.as<LexicalScope>())) {
-          goto error;
+        ReservedRooted<Scope*> scope0(&state.scope0, script->getScope(pc));
+        {
+          PUSH_EXIT_FRAME();
+          if (!frame->pushLexicalEnvironment(cx, scope0.as<LexicalScope>())) {
+            goto error;
+          }
         }
       }
       END_OP(PushLexicalEnv);
@@ -4760,33 +4823,31 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       END_OP(FreshenLexicalEnv);
     }
     CASE(PushClassBodyEnv) {
-      state.scope0 = script->getScope(pc);
       {
+        ReservedRooted<Scope*> scope0(&state.scope0, script->getScope(pc));
         PUSH_EXIT_FRAME();
-        if (!frame->pushClassBodyEnvironment(
-                cx, state.scope0.as<ClassBodyScope>())) {
+        if (!frame->pushClassBodyEnvironment(cx, scope0.as<ClassBodyScope>())) {
           goto error;
         }
       }
       END_OP(PushClassBodyEnv);
     }
     CASE(PushVarEnv) {
-      state.scope0 = script->getScope(pc);
       {
+        ReservedRooted<Scope*> scope0(&state.scope0, script->getScope(pc));
         PUSH_EXIT_FRAME();
-        if (!frame->pushVarEnvironment(cx, state.scope0)) {
+        if (!frame->pushVarEnvironment(cx, scope0)) {
           goto error;
         }
       }
       END_OP(PushVarEnv);
     }
     CASE(EnterWith) {
-      state.scope0 = script->getScope(pc);
-      state.value0 = POP().asValue();
       {
+        ReservedRooted<Scope*> scope0(&state.scope0, script->getScope(pc));
+        ReservedRooted<Value> value0(&state.value0, POP().asValue());
         PUSH_EXIT_FRAME();
-        if (!EnterWithOperation(cx, frame, state.value0,
-                                state.scope0.as<WithScope>())) {
+        if (!EnterWithOperation(cx, frame, value0, scope0.as<WithScope>())) {
           goto error;
         }
       }
@@ -4797,11 +4858,11 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       END_OP(LeaveWith);
     }
     CASE(BindVar) {
-      state.obj0 = frame->environmentChain();
       JSObject* varObj;
       {
+        ReservedRooted<JSObject*> obj0(&state.obj0, frame->environmentChain());
         PUSH_EXIT_FRAME();
-        varObj = BindVarOperation(cx, state.obj0);
+        varObj = BindVarOperation(cx, obj0);
       }
       PUSH(StackVal(ObjectValue(*varObj)));
       END_OP(BindVar);
@@ -4809,12 +4870,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
     CASE(GlobalOrEvalDeclInstantiation) {
       GCThingIndex lastFun = GET_GCTHING_INDEX(pc);
-      state.script0 = script;
-      state.obj0 = frame->environmentChain();
       {
+        ReservedRooted<JSObject*> obj0(&state.obj0, frame->environmentChain());
         PUSH_EXIT_FRAME();
-        if (!GlobalOrEvalDeclInstantiation(cx, state.obj0, state.script0,
-                                           lastFun)) {
+        if (!GlobalOrEvalDeclInstantiation(cx, obj0, script, lastFun)) {
           goto error;
         }
       }
@@ -4822,15 +4881,16 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     }
 
     CASE(DelName) {
-      state.name0 = script->getName(pc);
-      state.obj0 = frame->environmentChain();
       {
+        ReservedRooted<PropertyName*> name0(&state.name0, script->getName(pc));
+        ReservedRooted<JSObject*> obj0(&state.obj0, frame->environmentChain());
         PUSH_EXIT_FRAME();
-        if (!DeleteNameOperation(cx, state.name0, state.obj0, &state.res)) {
+        if (!DeleteNameOperation(cx, name0, obj0, &state.res)) {
           goto error;
         }
       }
       PUSH(StackVal(state.res));
+      state.res.setUndefined();
       END_OP(DelName);
     }
 
@@ -4842,6 +4902,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         }
       }
       PUSH(StackVal(state.res));
+      state.res.setUndefined();
       END_OP(Arguments);
     }
 
@@ -4859,6 +4920,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         }
       }
       PUSH(StackVal(state.res));
+      state.res.setUndefined();
       END_OP(FunctionThis);
     }
 
