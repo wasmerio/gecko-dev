@@ -337,11 +337,18 @@ class VMFrame {
 
 static EnvironmentObject& getEnvironmentFromCoordinate(
     BaselineFrame* frame, EnvironmentCoordinate ec) {
-  JSObject* env = &frame->environmentChain()->as<EnvironmentObject>();
+  JSObject* env = frame->environmentChain();
   for (unsigned i = ec.hops(); i; i--) {
-    env = &env->as<EnvironmentObject>().enclosingEnvironment();
+    if (env->is<EnvironmentObject>()) {
+      env = &env->as<EnvironmentObject>().enclosingEnvironment();
+    } else {
+      MOZ_ASSERT(env->is<DebugEnvironmentProxy>());
+      env = &env->as<DebugEnvironmentProxy>().enclosingEnvironment();
+    }
   }
-  return env->as<EnvironmentObject>();
+  return env->is<EnvironmentObject>()
+             ? env->as<EnvironmentObject>()
+             : env->as<DebugEnvironmentProxy>().environment();
 }
 
 enum class PBIResult {
