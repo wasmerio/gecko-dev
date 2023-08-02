@@ -2140,8 +2140,8 @@ DEFINE_IC(GetProp, 1, {
 });
 
 DEFINE_IC(GetPropSuper, 2, {
-  IC_LOAD_VAL(value0, 0);
-  IC_LOAD_VAL(value1, 1);
+  IC_LOAD_VAL(value0, 1);
+  IC_LOAD_VAL(value1, 0);
   PUSH_FALLBACK_IC_FRAME();
   if (!DoGetPropSuperFallback(cx, frame, fallback, value0, &value1,
                               &state.res)) {
@@ -3432,8 +3432,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       END_OP(GetProp);
     }
     CASE(GetPropSuper) {
-      IC_POP_ARG(1);
       IC_POP_ARG(0);
+      IC_POP_ARG(1);
       INVOKE_IC(GetPropSuper);
       IC_PUSH_RESULT();
       END_OP(GetPropSuper);
