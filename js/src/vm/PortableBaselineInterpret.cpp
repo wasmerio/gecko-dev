@@ -2392,43 +2392,44 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
                int(script->nfixed()));
 
   while (true) {
-#ifdef TRACE_INTERP
-    {
-      JSOp op = JSOp(*pc);
-      printf("sp[0] = %" PRIx64 " sp[1] = %" PRIx64 " sp[2] = %" PRIx64 "\n",
-             sp[0].asUInt64(), sp[1].asUInt64(), sp[2].asUInt64());
-      printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(), pc,
-             CodeName(op),
-             (int)(frame->interpreterICEntry() -
-                   script->jitScript()->icScript()->icEntries()),
-             frameMgr.cxForLocalUseOnly()->isExceptionPending());
-      printf("sp = %p fp = %p\n", sp, stack.fp);
-      printf("TOS tag: %d\n", int(sp[0].asValue().asRawBits() >> 47));
-      fflush(stdout);
-    }
-#endif
-
     DEBUG_CHECK();
 
 #ifndef __wasi__
   dispatch :
 #endif
-#ifdef DETERMINISTIC_TRACE
+
+#ifdef TRACE_INTERP
   {
-    static int traceSeq = 1;
     JSOp op = JSOp(*pc);
-    Value tos = (sp < reinterpret_cast<StackVal*>(frame) - script->nfixed())
-                    ? sp[0].asValue()
-                    : Value::fromRawBits(0);
-    printf("TRACE(%d): script %" PRIx64 " relPC %d op %s ", traceSeq++,
-           reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,
-           int(pc - script->code()), CodeName(op));
-    if (tos.isNumber() || tos.isBoolean()) {
-      printf("TOS %" PRIx64 "\n", tos.asRawBits());
-    } else {
-      printf("TOS tag %d\n", int(tos.asRawBits() >> 47));
-    }
+    printf("sp[0] = %" PRIx64 " sp[1] = %" PRIx64 " sp[2] = %" PRIx64 "\n",
+           sp[0].asUInt64(), sp[1].asUInt64(), sp[2].asUInt64());
+    printf("script = %p pc = %p: %s (ic %d) pending = %d\n", script.get(), pc,
+           CodeName(op),
+           (int)(frame->interpreterICEntry() -
+                 script->jitScript()->icScript()->icEntries()),
+           frameMgr.cxForLocalUseOnly()->isExceptionPending());
+    printf("sp = %p fp = %p\n", sp, stack.fp);
+    printf("TOS tag: %d\n", int(sp[0].asValue().asRawBits() >> 47));
+    fflush(stdout);
   }
+#endif
+
+#ifdef DETERMINISTIC_TRACE
+    {
+      static int traceSeq = 1;
+      JSOp op = JSOp(*pc);
+      Value tos = (sp < reinterpret_cast<StackVal*>(frame) - script->nfixed())
+                      ? sp[0].asValue()
+                      : Value::fromRawBits(0);
+      printf("TRACE(%d): script %" PRIx64 " relPC %d op %s ", traceSeq++,
+             reinterpret_cast<uintptr_t>(script.get()) & 0xfffff,
+             int(pc - script->code()), CodeName(op));
+      if (tos.isNumber() || tos.isBoolean()) {
+        printf("TOS %" PRIx64 "\n", tos.asRawBits());
+      } else {
+        printf("TOS tag %d\n", int(tos.asRawBits() >> 47));
+      }
+    }
 #endif
 
     goto* addresses[*pc];
