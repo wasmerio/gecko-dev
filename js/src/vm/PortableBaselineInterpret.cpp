@@ -3974,11 +3974,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
           }
 
           // 0. Save current PC in current frame, so we can retrieve
-          // it later. Update to next IC in this frame as well; we're
-          // skipping the IC-using slowpath.
-          ADVANCE(JSOpLength_Call);
+          // it later.
           frame->interpreterPC() = pc;
-          NEXT_IC();
 
           // 1. Push a baseline stub frame. Don't use the frame manager
           // -- we don't want the frame to be auto-freed when we leave
@@ -4506,6 +4503,10 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         if (!ok) {
           goto error;
         }
+
+        // Advance past call instruction, and advance past IC.
+        NEXT_IC();
+        ADVANCE(JSOpLength_Call);
 
         DISPATCH();
       }
