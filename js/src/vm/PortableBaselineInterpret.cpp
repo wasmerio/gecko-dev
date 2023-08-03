@@ -2316,6 +2316,18 @@ DEFINE_IC(CloseIter, 1, {
 #  define PREDICT_NEXT(op)
 #endif
 
+#define COUNT_COVERAGE_PC(PC)                        \
+  if (script->hasScriptCounts()) {                   \
+    PCCounts* counts = script->maybeGetPCCounts(PC); \
+    MOZ_ASSERT(counts);                              \
+    counts->numExec()++;                             \
+  }
+#define COUNT_COVERAGE_MAIN()                                        \
+  {                                                                  \
+    jsbytecode* main = script->main();                               \
+    if (!BytecodeIsJumpTarget(JSOp(*main))) COUNT_COVERAGE_PC(main); \
+  }
+
 static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
                                            Stack& stack, StackVal* sp,
                                            JSObject* envChain, Value* ret) {
@@ -2389,6 +2401,16 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       goto error;
     }
   }
+
+  if (!script->hasScriptCounts()) {
+    if (frameMgr.cxForLocalUseOnly()->realm()->collectCoverageForDebug()) {
+      PUSH_EXIT_FRAME();
+      if (!script->initScriptCounts(cx)) {
+        goto error;
+      }
+    }
+  }
+  COUNT_COVERAGE_MAIN();
 
 #ifndef __wasi__
   if (frameMgr.cxForLocalUseOnly()->hasAnyPendingInterrupt()) {
@@ -4034,6 +4056,18 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
             }
           }
 #endif
+          // 12. Initialize coverage tables, if needed.
+          if (!script->hasScriptCounts()) {
+            if (frameMgr.cxForLocalUseOnly()
+                    ->realm()
+                    ->collectCoverageForDebug()) {
+              PUSH_EXIT_FRAME();
+              if (!script->initScriptCounts(cx)) {
+                goto error;
+              }
+            }
+          }
+          COUNT_COVERAGE_MAIN();
 
           // Everything is switched to callee context now -- dispatch!
           DISPATCH();
@@ -4326,6 +4360,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     CASE(JumpTarget) {
       int32_t icIndex = GET_INT32(pc);
       frame->interpreterICEntry() = frame->icScript()->icEntries() + icIndex;
+      COUNT_COVERAGE_PC(pc);
       END_OP(JumpTarget);
     }
     CASE(LoopHead) {
@@ -4339,6 +4374,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         }
       }
 #endif
+      COUNT_COVERAGE_PC(pc);
       END_OP(LoopHead);
     }
     CASE(AfterYield) {
@@ -4351,6 +4387,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
           goto error;
         }
       }
+      COUNT_COVERAGE_PC(pc);
       END_OP(AfterYield);
     }
 
