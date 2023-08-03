@@ -5214,6 +5214,9 @@ MethodStatus js::CanEnterPortableBaselineInterpreter(JSContext* cx,
   if (state.script()->hasForceInterpreterOp()) {
     return MethodStatus::Method_CantCompile;
   }
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    return MethodStatus::Method_CantCompile;
+  }
 
   if (state.isInvoke()) {
     InvokeState& invoke = *state.asInvoke();
