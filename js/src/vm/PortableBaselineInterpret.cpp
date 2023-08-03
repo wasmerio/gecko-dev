@@ -370,7 +370,9 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
 #define PUSH_EXIT_FRAME_OR_RET(value)                           \
   VMFrame cx(frameMgr, stack, sp, pc);                          \
-  MOZ_ASSERT(cx.success());         /* safety: stack margin */  \
+  if (!cx.success()) {                                          \
+    return value;                                               \
+  }                                                             \
   StackVal* sp = cx.spBelowFrame(); /* shadow the definition */ \
   (void)sp;                         /* avoid unused-variable warnings */
 
