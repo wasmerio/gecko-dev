@@ -1,0 +1,29 @@
+- Correctness/completeness
+  - (X) implement await/resume
+  - pass all jit-tests
+
+- Performance
+  - (X) PBL-hybrid for all "slower than baseline" ops
+    - unary, binary ops
+    - GetElem/SetElem? Or at least fastpaths
+    - monomorphize the interpreter on a bool template param and select
+      at entry which option to take
+  - implement a faster debug-check: separate dispatch table if
+    debuggee; branch to potentially "switch lanes" only when restoring
+    from exit frame?
+  - implement PBL-native resume (don't downgrade to C++ interp)
+  - implement CallScriptedFunction for ctors
+  - implement as many CacheIR ops as needed to completely cover markdown renderer
+  - OSR (on-stack replacement)
+  - implement direct-threaded opts in Wasmtime/Cranelift
+
+- Wasm
+  - on wasm and other 32-bit platforms: make StackVal properly push
+    32-bit values? stick to 64-bit layout for BaselineFrame,
+    JitFrameLayout, etc?
+  - weval the IC interp and PBL interp loops
+    - memory-rename the stack and icVals too
+
+- Tests
+  - markdown
+  - Octane

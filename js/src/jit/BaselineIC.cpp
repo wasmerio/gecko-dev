@@ -323,7 +323,8 @@ static constexpr OpToFallbackKindTable FallbackKindTable;
 
 void ICScript::initICEntries(JSContext* cx, JSScript* script) {
   MOZ_ASSERT(cx->realm()->jitRealm());
-  MOZ_ASSERT(jit::IsBaselineInterpreterEnabled());
+  MOZ_ASSERT(jit::IsBaselineInterpreterEnabled() ||
+             jit::IsPortableBaselineInterpreterEnabled());
 
   MOZ_ASSERT(numICEntries() == script->numICEntries());
 
@@ -352,7 +353,9 @@ void ICScript::initICEntries(JSContext* cx, JSScript* script) {
                "Unexpected fallback kind for non-JOF_IC op");
 
     BaselineICFallbackKind kind = BaselineICFallbackKind(tableValue);
-    TrampolinePtr stubCode = fallbackCode.addr(kind);
+    TrampolinePtr stubCode = jit::IsBaselineInterpreterEnabled()
+                                 ? fallbackCode.addr(kind)
+                                 : TrampolinePtr();
 
     // Initialize the ICEntry and ICFallbackStub.
     uint32_t offset = loc.bytecodeToOffset(script);
@@ -395,8 +398,12 @@ static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
 }
 
 void ICCacheIRStub::trace(JSTracer* trc) {
-  JitCode* stubJitCode = jitCode();
-  TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
+  if (hasJitCode()) {
+    JitCode* stubJitCode = jitCode();
+    if (stubJitCode) {
+      TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
+    }
+  }
 
   TraceCacheIRStub(trc, this, stubInfo());
 }
@@ -832,9 +839,12 @@ bool DoSetElemFallback(JSContext* cx, BaselineFrame* frame,
     }
   }
 
-  // Overwrite the object on the stack (pushed for the decompiler) with the rhs.
-  MOZ_ASSERT(stack[2] == objv);
-  stack[2] = rhs;
+  if (stack) {
+    // Overwrite the object on the stack (pushed for the decompiler) with the
+    // rhs.
+    MOZ_ASSERT(stack[2] == objv);
+    stack[2] = rhs;
+  }
 
   if (attached) {
     return true;
@@ -1339,7 +1349,7 @@ bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
   Rooted<PropertyName*> name(cx, script->getName(pc));
   RootedId id(cx, NameToId(name));
 
-  int lhsIndex = -2;
+  int lhsIndex = stack ? -2 : JSDVG_IGNORE_STACK;
   RootedObject obj(cx,
                    ToObjectFromStackForPropertyAccess(cx, lhs, lhsIndex, id));
   if (!obj) {
@@ -1407,9 +1417,11 @@ bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
     }
   }
 
-  // Overwrite the LHS on the stack (pushed for the decompiler) with the RHS.
-  MOZ_ASSERT(stack[1] == lhs);
-  stack[1] = rhs;
+  if (stack) {
+    // Overwrite the LHS on the stack (pushed for the decompiler) with the RHS.
+    MOZ_ASSERT(stack[1] == lhs);
+    stack[1] = rhs;
+  }
 
   if (attached) {
     return true;
@@ -1581,7 +1593,13 @@ bool DoCallFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
     if ((op == JSOp::CallIter || op == JSOp::CallContentIter) &&
         callee.isPrimitive()) {
       MOZ_ASSERT(argc == 0, "thisv must be on top of the stack");
-      ReportValueError(cx, JSMSG_NOT_ITERABLE, -1, callArgs.thisv(), nullptr);
+      //#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+      int spindex = -1;
+      //#else
+      //      int spindex = JSDVG_IGNORE_STACK;
+      //#endif
+      ReportValueError(cx, JSMSG_NOT_ITERABLE, spindex, callArgs.thisv(),
+                       nullptr);
       return false;
     }
 
@@ -1912,7 +1930,12 @@ bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
   FallbackICSpew(cx, stub, "InstanceOf");
 
   if (!rhs.isObject()) {
-    ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, -1, rhs, nullptr);
+    //#ifndef ENABLE_PORTABLE_BASELINE_INTERP
+    int spindex = -1;
+    //#else
+    //    int spindex = JSDVG_IGNORE_STACK;
+    //#endif
+    ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS, spindex, rhs, nullptr);
     return false;
   }
 

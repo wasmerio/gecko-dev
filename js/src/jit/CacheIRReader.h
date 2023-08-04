@@ -44,6 +44,7 @@ class MOZ_RAII CacheIRReader {
  public:
   CacheIRReader(const uint8_t* start, const uint8_t* end)
       : buffer_(start, end) {}
+  explicit CacheIRReader(const uint8_t* start) : buffer_(start) {}
   explicit CacheIRReader(const CacheIRWriter& writer)
       : CacheIRReader(writer.codeStart(), writer.codeEnd()) {}
   explicit CacheIRReader(const CacheIRStubInfo* stubInfo);
@@ -51,6 +52,7 @@ class MOZ_RAII CacheIRReader {
   bool more() const { return buffer_.more(); }
 
   CacheOp readOp() { return CacheOp(buffer_.readUnsigned15Bit()); }
+  CacheOp peekOp() { return CacheOp(buffer_.peekUnsigned15Bit()); }
 
   // Skip data not currently used.
   void skip() { buffer_.readByte(); }
