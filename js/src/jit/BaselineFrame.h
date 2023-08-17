@@ -123,6 +123,17 @@ class BaselineFrame {
     return frameSize / sizeof(Value);
   }
 
+  Value newTarget() const {
+    MOZ_ASSERT(isFunctionFrame());
+    MOZ_ASSERT(!callee()->isArrow());
+
+    if (isConstructing()) {
+      unsigned pushedArgs = std::max(numFormalArgs(), numActualArgs());
+      return argv()[pushedArgs];
+    }
+    return UndefinedValue();
+  }
+
 #ifdef DEBUG
   size_t debugNumValueSlots() const { return numValueSlots(debugFrameSize()); }
 #endif
@@ -224,6 +235,19 @@ class BaselineFrame {
   jsbytecode* interpreterPC() const {
     MOZ_ASSERT(runningInInterpreter());
     return interpreterPC_;
+  }
+  jsbytecode*& interpreterPC() {
+    MOZ_ASSERT(runningInInterpreter());
+    return interpreterPC_;
+  }
+
+  ICEntry* interpreterICEntry() const {
+    MOZ_ASSERT(runningInInterpreter());
+    return interpreterICEntry_;
+  }
+  ICEntry*& interpreterICEntry() {
+    MOZ_ASSERT(runningInInterpreter());
+    return interpreterICEntry_;
   }
 
   void setInterpreterFields(JSScript* script, jsbytecode* pc);
