@@ -191,11 +191,23 @@ def enable_js_streams(value):
 set_config("MOZ_JS_STREAMS", enable_js_streams)
 set_define("MOZ_JS_STREAMS", enable_js_streams)
 
+# Portable Baseline Inteprreter
+# =======================================================
+option(
+    "--enable-portable-baseline-interp",
+    default=False,
+    help="{Enable|Disable} the portable baseline interpreter.",
+)
+set_define("ENABLE_PORTABLE_BASELINE_INTERP", depends_if("--enable-portable-baseline-interp")(lambda _: True))
+set_config("ENABLE_PORTABLE_BASELINE_INTERP", depends_if("--enable-portable-baseline-interp")(lambda _: True))
+
 # JIT support
 # =======================================================
-@depends(target, "--enable-record-tuple")
-def jit_default(target, enable_record_tuple):
+@depends(target, "--enable-record-tuple", "--enable-portable-baseline-interp")
+def jit_default(target, enable_record_tuple, enable_portable_baseline_interp):
     if enable_record_tuple:
+        return False
+    if enable_portable_baseline_interp:
         return False
     if target.cpu in (
         "x86",
