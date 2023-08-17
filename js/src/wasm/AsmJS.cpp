@@ -7108,13 +7108,13 @@ static bool TypeFailureWarning(frontend::ParserBase& parser, const char* str) {
 // asm.js requires Ion to be available on the current hardware/OS and to be
 // enabled for wasm, since asm.js compilation goes via wasm.
 static bool IsAsmJSCompilerAvailable(JSContext* cx) {
-  return HasPlatformSupport(cx) && WasmCompilerForAsmJSAvailable(cx);
+  return cx && HasPlatformSupport(cx) && WasmCompilerForAsmJSAvailable(cx);
 }
 
 static bool EstablishPreconditions(JSContext* cx,
                                    frontend::ParserBase& parser) {
   if (!IsAsmJSCompilerAvailable(cx)) {
-    if (cx->realm() && cx->realm()->debuggerObservesAsmJS()) {
+    if (cx && cx->realm() && cx->realm()->debuggerObservesAsmJS()) {
       return TypeFailureWarning(
           parser, "Asm.js optimizer disabled because debugger is active");
     }
