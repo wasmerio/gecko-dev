@@ -84,6 +84,11 @@ class CompactBufferReader {
     uint32_t b1 = readByte();
     return b0 | (b1 << 8);
   }
+  uint16_t peekFixedUint16_t() {
+    uint32_t b0 = buffer_[0];
+    uint32_t b1 = buffer_[1];
+    return b0 | (b1 << 8);
+  }
   uint32_t readNativeEndianUint32_t() {
     // Must be at 4-byte boundary
     MOZ_ASSERT(uintptr_t(buffer_) % sizeof(uint32_t) == 0);
