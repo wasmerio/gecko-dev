@@ -4081,6 +4081,20 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
                                                  uint32_t value) {
   JSRuntime* rt = cx->runtime();
   switch (opt) {
+    case JSJITCOMPILER_PORTABLE_BASELINE_ENABLE:
+      if (value == 1) {
+        jit::JitOptions.portableBaselineInterpreter = true;
+      } else if (value == 0) {
+        jit::JitOptions.portableBaselineInterpreter = false;
+      }
+      break;
+    case JSJITCOMPILER_PORTABLE_BASELINE_WARMUP_THRESHOLD:
+      if (value == uint32_t(-1)) {
+        jit::DefaultJitOptions defaultValues;
+        value = defaultValues.portableBaselineInterpreterWarmUpThreshold;
+      }
+      jit::JitOptions.portableBaselineInterpreterWarmUpThreshold = value;
+      break;
     case JSJITCOMPILER_BASELINE_INTERPRETER_WARMUP_TRIGGER:
       if (value == uint32_t(-1)) {
         jit::DefaultJitOptions defaultValues;
@@ -4303,6 +4317,12 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
       break;
     case JSJITCOMPILER_BASELINE_INTERPRETER_ENABLE:
       *valueOut = jit::JitOptions.baselineInterpreter;
+      break;
+    case JSJITCOMPILER_PORTABLE_BASELINE_ENABLE:
+      *valueOut = jit::JitOptions.portableBaselineInterpreter;
+      break;
+    case JSJITCOMPILER_PORTABLE_BASELINE_WARMUP_THRESHOLD:
+      *valueOut = jit::JitOptions.portableBaselineInterpreterWarmUpThreshold;
       break;
     case JSJITCOMPILER_BASELINE_ENABLE:
       *valueOut = jit::JitOptions.baselineJit;
