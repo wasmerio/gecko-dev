@@ -575,7 +575,9 @@ void JS::Zone::checkUniqueIdTableAfterMovingGC() {
 
 js::jit::JitZone* Zone::createJitZone(JSContext* cx) {
   MOZ_ASSERT(!jitZone_);
+#ifndef ENABLE_PORTABLE_BASELINE_INTERP
   MOZ_ASSERT(cx->runtime()->hasJitRuntime());
+#endif
 
   UniquePtr<jit::JitZone> jitZone(cx->new_<js::jit::JitZone>());
   if (!jitZone) {

@@ -19,6 +19,7 @@
 #include "frontend/FrontendContext.h"
 #include "frontend/ScopeBindingCache.h"  // frontend::ScopeBindingCache
 #include "gc/GC.h"
+#include "jit/Ion.h"
 #include "jit/IonCompileTask.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitScript.h"
@@ -422,14 +423,16 @@ static void CancelOffThreadIonCompileLocked(const CompilationSelector& selector,
 
   /* Cancel lazy linking for pending tasks (attached to the ionScript). */
   JSRuntime* runtime = GetSelectorRuntime(selector);
-  jit::IonCompileTask* task =
-      runtime->jitRuntime()->ionLazyLinkList(runtime).getFirst();
-  while (task) {
-    jit::IonCompileTask* next = task->getNext();
-    if (IonCompileTaskMatches(selector, task)) {
-      jit::FinishOffThreadTask(runtime, task, lock);
+  if (runtime->jitRuntime()) {
+    jit::IonCompileTask* task =
+        runtime->jitRuntime()->ionLazyLinkList(runtime).getFirst();
+    while (task) {
+      jit::IonCompileTask* next = task->getNext();
+      if (IonCompileTaskMatches(selector, task)) {
+        jit::FinishOffThreadTask(runtime, task, lock);
+      }
+      task = next;
     }
-    task = next;
   }
 }
 
@@ -444,6 +447,9 @@ void js::CancelOffThreadIonCompile(const CompilationSelector& selector) {
 
 #ifdef DEBUG
 bool js::HasOffThreadIonCompile(Realm* realm) {
+#  ifdef ENABLE_PORTABLE_BASELINE_INTERP
+  return false;
+#  else
   AutoLockHelperThreadState lock;
 
   if (!HelperThreadState().isInitialized(lock)) {
@@ -485,6 +491,7 @@ bool js::HasOffThreadIonCompile(Realm* realm) {
   }
 
   return false;
+#  endif  //   !ENABLE_PORTABLE_BASELINE_INTERP
 }
 #endif
 
