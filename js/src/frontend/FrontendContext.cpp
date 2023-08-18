@@ -215,6 +215,8 @@ void FrontendContext::linkWithJSContext(JSContext* cx) {
 static size_t GetTid() {
 #  if defined(_WIN32)
   return size_t(GetCurrentThreadId());
+#  elif defined (__wasm__)
+  return 1;
 #  else
   return size_t(pthread_self());
 #  endif
