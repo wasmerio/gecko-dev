@@ -48,6 +48,7 @@
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
+#include "vm/PlainObject-inl.h"
 
 // #define TRACE_INTERP
 // #define DETERMINISTIC_TRACE
@@ -3936,40 +3937,81 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
     CASE(CallIter)
     CASE(CallContentIter)
     CASE(Eval)
-    CASE(StrictEval) {
+    CASE(StrictEval)
+    CASE(SuperCall)
+    CASE(New)
+    CASE(NewContent) {
       static_assert(JSOpLength_Call == JSOpLength_CallIgnoresRv);
       static_assert(JSOpLength_Call == JSOpLength_CallContent);
       static_assert(JSOpLength_Call == JSOpLength_CallIter);
       static_assert(JSOpLength_Call == JSOpLength_CallContentIter);
       static_assert(JSOpLength_Call == JSOpLength_Eval);
       static_assert(JSOpLength_Call == JSOpLength_StrictEval);
+      static_assert(JSOpLength_Call == JSOpLength_SuperCall);
+      static_assert(JSOpLength_Call == JSOpLength_New);
+      static_assert(JSOpLength_Call == JSOpLength_NewContent);
+      JSOp op = JSOp(*pc);
+      bool constructing =
+          (op == JSOp::New || op == JSOp::NewContent || op == JSOp::SuperCall);
       uint32_t argc = GET_ARGC(pc);
       do {
-        HandleValue callee = Stack::handle(sp + argc + 1);
-        if (callee.isObject() && callee.toObject().is<JSFunction>()) {
-          JSFunction* func = &callee.toObject().as<JSFunction>();
-          if (!func->hasBaseScript() || !func->isInterpreted() ||
-              func->isClassConstructor()) {
+        {
+          // CallArgsFromSp would be called with
+          // - numValues = argc + 2 + constructing
+          // - stackSlots = argc + constructing
+          // - sp = vp + numValues
+          // CallArgs::create then gets
+          // - argc_ = stackSlots - constructing = argc
+          // - argv_ = sp - stackSlots = vp + 2
+          // our arguments are in reverse order compared to what CallArgs expects
+          // so we should subtract any array subscripts from (sp + stackSlots - 1)
+          StackVal *firstArg = sp + argc + constructing - 1;
+
+          // callee is argv_[-2] -> sp + argc + constructing + 1
+          // this is   argv_[-1] -> sp + argc + constructing
+          // newTarget is argv_[argc_] -> sp + constructing - 1
+          // but this/newTarget are only used when constructing is 1 so we can simplify
+          // this is   argv_[-1] -> sp + argc + 1
+          // newTarget is argv_[argc_] -> sp
+
+          HandleValue callee = Stack::handle(firstArg + 2);
+          if (!callee.isObject() || !callee.toObject().is<JSFunction>()) {
+            TRACE_PRINTF("missed fastpath: not a function\n");
+            break;
+          }
+          ReservedRooted<JSFunction*> func(&state.fun0, &callee.toObject().as<JSFunction>());
+          if (!func->hasBaseScript() || !func->isInterpreted()) {
+            TRACE_PRINTF("missed fastpath: not an interpreted script\n");
+            break;
+          }
+          if (!constructing && func->isClassConstructor()) {
+            TRACE_PRINTF("missed fastpath: constructor called without `new`\n");
             break;
           }
           if (!func->baseScript()->hasBytecode()) {
+            TRACE_PRINTF("missed fastpath: no bytecode\n");
             break;
           }
-          JSScript* calleeScript = func->baseScript()->asJSScript();
+          ReservedRooted<JSScript*> calleeScript(
+              &state.script0, func->baseScript()->asJSScript());
           if (!calleeScript->hasJitScript()) {
+            TRACE_PRINTF("missed fastpath: no jit-script\n");
             break;
           }
           if (frameMgr.cxForLocalUseOnly()->realm() != calleeScript->realm()) {
+            TRACE_PRINTF("missed fastpath: mismatched realm\n");
             break;
           }
           if (argc < func->nargs()) {
+            TRACE_PRINTF("missed fastpath: not enough arguments\n");
             break;
           }
 
-          // Fast-path: function, interpreted, has JitScript, not a
-          // class constructor, same realm, no argument underflow.
+          // Fast-path: function, interpreted, has JitScript, same realm, no
+          // argument underflow.
 
-          uint32_t totalArgs = argc + 1;
+          // Include newTarget in the args if it exists; exclude callee
+          uint32_t totalArgs = argc + 1 + constructing;
           StackVal* origArgs = sp;
 
           TRACE_PRINTF(
@@ -3977,7 +4019,26 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
               argc, origArgs, callee.get().asRawBits());
 
           if (!stack.check(sp, sizeof(StackVal) * (totalArgs + 3))) {
+            TRACE_PRINTF("missed fastpath: would cause stack overrun\n");
             break;
+          }
+
+          if (constructing) {
+            MutableHandleValue thisv = Stack::handleMut(firstArg + 1);
+            if (!thisv.isObject()) {
+              HandleValue newTarget = Stack::handle(firstArg - argc);
+              ReservedRooted<JSObject*> obj0(&state.obj0, &newTarget.toObject());
+
+              PUSH_EXIT_FRAME();
+              // CreateThis might discard the JitScript but we're counting on it
+              // continuing to exist while we evaluate the fastpath.
+              AutoKeepJitScripts keepJitScript(cx);
+              if (!CreateThis(cx, func, obj0, GenericObject, thisv)) {
+                goto error;
+              }
+
+              TRACE_PRINTF("created %" PRIx64 "\n", thisv.get().asRawBits());
+            }
           }
 
           // 0. Save current PC in current frame, so we can retrieve
@@ -4005,8 +4066,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
 
           // 4. Push inter-frame content: callee token, descriptor for
           // above.
-          PUSHNATIVE(StackValNative(
-              CalleeToToken(func, /* isConstructing = */ false)));
+          PUSHNATIVE(StackValNative(CalleeToToken(func, constructing)));
           PUSHNATIVE(StackValNative(
               MakeFrameDescriptorForJitCall(FrameType::BaselineStub, argc)));
 
@@ -4072,35 +4132,20 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
             }
           }
           COUNT_COVERAGE_MAIN();
-
-          // Everything is switched to callee context now -- dispatch!
-          DISPATCH();
         }
+
+        // Everything is switched to callee context now -- dispatch!
+        DISPATCH();
       } while (0);
 
       // Slow path: use the IC!
       icregs.icVals[0] = argc;
-      icregs.extraArgs = 2;
+      icregs.extraArgs = 2 + constructing;
       icregs.spreadCall = false;
       INVOKE_IC(Call);
-      POPN(argc + 2);
+      POPN(argc + 2 + constructing);
       PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
       END_OP(Call);
-    }
-
-    CASE(SuperCall)
-    CASE(New)
-    CASE(NewContent) {
-      static_assert(JSOpLength_SuperCall == JSOpLength_New);
-      static_assert(JSOpLength_SuperCall == JSOpLength_NewContent);
-      uint32_t argc = GET_ARGC(pc);
-      icregs.icVals[0] = argc;
-      icregs.extraArgs = 3;
-      icregs.spreadCall = false;
-      INVOKE_IC(Call);
-      POPN(argc + 3);
-      PUSH(StackVal(Value::fromRawBits(icregs.icResult)));
-      END_OP(SuperCall);
     }
 
     CASE(SpreadCall)
@@ -4490,21 +4535,17 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       // do an inline state update.
       if (stack.fp > entryFrame) {
         *ret = frame->returnValue();
+        TRACE_PRINTF("ret = %" PRIx64 "\n", ret->asRawBits());
         return ok ? PBIResult::Ok : PBIResult::Error;
       } else {
         TRACE_PRINTF("Return fastpath\n");
         Value ret = frame->returnValue();
+        TRACE_PRINTF("ret = %" PRIx64 "\n", ret.asRawBits());
 
         // Pop exit frame as well.
         sp = stack.popFrame();
         // Pop fake return address and descriptor.
         POPNNATIVE(2);
-        // Pop args -- this is always `argc + 2` because we only do
-        // this optimization for ordinary calls, not constructing
-        // calls or spread calls.
-        POPN(argc + 2);
-        // Push return value.
-        PUSH(StackVal(ret));
 
         // Set PC, frame, and current script.
         frame = reinterpret_cast<BaselineFrame*>(
@@ -4513,6 +4554,23 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         frameMgr.switchToFrame(frame);
         pc = frame->interpreterPC();
         script.set(frame->script());
+
+        // Adjust caller's stack to complete the call op that PC still points to
+        // in that frame (pop args, push return value).
+        JSOp op = JSOp(*pc);
+        bool constructing =
+            (op == JSOp::New || op == JSOp::NewContent || op == JSOp::SuperCall);
+        // Fix-up return value; EnterJit would do this if we hadn't bypassed it.
+        if (constructing && ret.isPrimitive()) {
+          ret = sp[argc + constructing].asValue();
+          TRACE_PRINTF("updated ret = %" PRIx64 "\n", ret.asRawBits());
+        }
+        // Pop args -- this is 1 more than how many are pushed in the
+        // `totalArgs` count during the call fastpath because it includes
+        // the callee.
+        POPN(argc + 2 + constructing);
+        // Push return value.
+        PUSH(StackVal(ret));
 
         if (!ok) {
           goto error;
@@ -5242,7 +5300,7 @@ bool js::PortableBaselineTrampoline(JSContext* cx, size_t argc, Value* argv,
   switch (PortableBaselineInterpret(cx, state, stack, sp, envChain, result)) {
     case PBIResult::Ok:
     case PBIResult::UnwindRet:
-      TRACE_PRINTF("PBI returned Ok/UnwindRet\n");
+      TRACE_PRINTF("PBI returned Ok/UnwindRet with result %" PRIx64 "\n", result->asRawBits());
       break;
     case PBIResult::Error:
     case PBIResult::UnwindError:
