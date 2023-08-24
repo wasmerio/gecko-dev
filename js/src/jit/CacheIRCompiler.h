@@ -1325,7 +1325,7 @@ inline uintptr_t CacheIRStubInfo::getStubRawWord(ICCacheIRStub* stub,
 
 inline int32_t CacheIRStubInfo::getStubRawInt32(const uint8_t* stubData,
                                                 uint32_t offset) const {
-  MOZ_ASSERT(uintptr_t(stubData + offset) % sizeof(int64_t) == 0);
+  MOZ_ASSERT(uintptr_t(stubData + offset) % sizeof(int32_t) == 0);
   return *reinterpret_cast<const int32_t*>(stubData + offset);
 }
 
