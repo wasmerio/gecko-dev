@@ -1,4 +1,4 @@
-// |jit-test| skip-if: !('interruptRegexp' in this)
+// |jit-test| skip-if: !('interruptRegexp' in this) || getBuildConfiguration()['pbl']
 var s0 = "A".repeat(10*1024);
 var interrupted = false;
 gczeal(0);
