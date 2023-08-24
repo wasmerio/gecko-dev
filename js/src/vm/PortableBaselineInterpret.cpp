@@ -1605,7 +1605,8 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
       return ICInterpretOpResult::NextIC;
     }
     Value val = Value::fromRawBits(icregs.icVals[valId.id()]);
-    slot->set(nobj, HeapSlot::Element, index, val);
+    slot->set(nobj, HeapSlot::Element, index + elems->numShiftedElements(),
+              val);
     PREDICT_NEXT(ReturnFromIC);
     DISPATCH_CACHEOP();
   }
