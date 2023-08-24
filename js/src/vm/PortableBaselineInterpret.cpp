@@ -3380,6 +3380,9 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
         {
           PUSH_EXIT_FRAME();
           obj = ObjectWithProtoOperation(cx, value0);
+          if (!obj) {
+            goto error;
+          }
         }
         sp[0] = StackVal(ObjectValue(*obj));
       }
