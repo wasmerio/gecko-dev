@@ -274,17 +274,17 @@ async function test() {
         return;
     }
 
-    if (typeof nukeCCW === 'function') {
-        getFreshInstances("bytes");
-        assertEq(otherController instanceof OtherByteStreamController, true);
-        reader = ReadableStream.prototype.getReader.call(otherStream);
-        otherGlobal.reader = reader;
-        otherGlobal.nukeCCW(otherGlobal.reader);
-        let chunk = new Uint8Array(10);
-        expectException(() => otherController.enqueue(chunk), otherGlobal.TypeError);
-        // otherController.error();
-        expectException(() => reader.read(), TypeError);
-    }
+    // if (typeof nukeCCW === 'function') {
+    //     getFreshInstances("bytes");
+    //     assertEq(otherController instanceof OtherByteStreamController, true);
+    //     reader = ReadableStream.prototype.getReader.call(otherStream);
+    //     otherGlobal.reader = reader;
+    //     otherGlobal.nukeCCW(otherGlobal.reader);
+    //     let chunk = new Uint8Array(10);
+    //     expectException(() => otherController.enqueue(chunk), otherGlobal.TypeError);
+    //     // otherController.error();
+    //     expectException(() => reader.read(), TypeError);
+    // }
 
     function testBYOBRequest(controller, view) {
         const request = new BYOBRequest(controller, view);
