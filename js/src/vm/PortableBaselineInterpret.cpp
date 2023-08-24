@@ -18,6 +18,7 @@
 
 #include "builtin/DataViewObject.h"
 #include "builtin/MapObject.h"
+#include "debugger/DebugAPI.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -41,6 +42,7 @@
 #include "vm/PlainObject.h"
 #include "vm/Shape.h"
 
+#include "debugger/DebugAPI-inl.h"
 #include "jit/BaselineFrame-inl.h"
 #include "jit/JitScript-inl.h"
 #include "vm/EnvironmentObject-inl.h"
@@ -4490,7 +4492,8 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
       if (script->isDebuggee()) {
         TRACE_PRINTF("doing DebugAfterYield\n");
         PUSH_EXIT_FRAME();
-        if (!HandleDebugTrap(cx, frame, pc)) {
+        if (DebugAPI::hasAnyBreakpointsOrStepMode(script) &&
+            !HandleDebugTrap(cx, frame, pc)) {
           TRACE_PRINTF("HandleDebugTrap returned error\n");
           goto error;
         }
@@ -5290,11 +5293,13 @@ unwind_ret:
 debug : {
   TRACE_PRINTF("hit debug point\n");
   PUSH_EXIT_FRAME();
-  if (!HandleDebugTrap(cx, frame, pc)) {
-    TRACE_PRINTF("HandleDebugTrap returned error\n");
-    goto error;
+  if (DebugAPI::hasAnyBreakpointsOrStepMode(script)) {
+    if (!HandleDebugTrap(cx, frame, pc)) {
+      TRACE_PRINTF("HandleDebugTrap returned error\n");
+      goto error;
+    }
+    pc = frame->interpreterPC();
   }
-  pc = frame->interpreterPC();
   TRACE_PRINTF("HandleDebugTrap done\n");
 }
   goto dispatch;
