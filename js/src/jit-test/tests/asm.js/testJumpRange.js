@@ -2,6 +2,8 @@ load(libdir + "asm.js");
 load(libdir + "asserts.js");
 
 var fatFunc = USE_ASM + '\n';
+// Recursion depth reduced to allow PBL with debug build (hence larger
+// frames) to work.
 for (var i = 0; i < 75; i++)
     fatFunc += "function f" + i + "() { return ((f" + (i+1) + "()|0)+1)|0 }\n";
 fatFunc += "function f75() { return 42 }\n";
