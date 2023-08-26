@@ -5296,13 +5296,11 @@ unwind_ret:
 debug : {
   TRACE_PRINTF("hit debug point\n");
   PUSH_EXIT_FRAME();
-  if (DebugAPI::hasAnyBreakpointsOrStepMode(script)) {
-    if (!HandleDebugTrap(cx, frame, pc)) {
-      TRACE_PRINTF("HandleDebugTrap returned error\n");
-      goto error;
-    }
-    pc = frame->interpreterPC();
+  if (!HandleDebugTrap(cx, frame, pc)) {
+    TRACE_PRINTF("HandleDebugTrap returned error\n");
+    goto error;
   }
+  pc = frame->interpreterPC();
   TRACE_PRINTF("HandleDebugTrap done\n");
 }
   goto dispatch;
