@@ -3682,7 +3682,7 @@ static PBIResult PortableBaselineInterpret(JSContext* cx_, State& state,
             goto error;
           }
         }
-        PUSH(StackVal(value2));  // value
+        PUSH(StackVal(value3));  // value
       }
       END_OP(SetElemSuper);
     }
