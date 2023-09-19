@@ -496,6 +496,26 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(GuardIsNumber) {
+    ValOperandId inputId = icregs.cacheIRReader.valOperandId();
+    Value v = Value::fromRawBits(icregs.icVals[inputId.id()]);
+    if (!v.isNumber()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardBooleanToInt32) {
+    ValOperandId inputId = icregs.cacheIRReader.valOperandId();
+    Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    Value v = Value::fromRawBits(icregs.icVals[inputId.id()]);
+    if (!v.isBoolean()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    icregs.icVals[resultId.id()] = v.toBoolean() ? 1 : 0;
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(GuardToBoolean) {
     ValOperandId inputId = icregs.cacheIRReader.valOperandId();
     Value v = Value::fromRawBits(icregs.icVals[inputId.id()]);
@@ -1614,7 +1634,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
-  CACHEOP_CASE_UNIMPL(GuardNoAllocationMetadataBuilder) {
+  CACHEOP_CASE(GuardNoAllocationMetadataBuilder) {
     uint32_t builderAddrOffset = icregs.cacheIRReader.stubOffset();
     uintptr_t builderAddr =
         cstub->stubInfo()->getStubRawWord(cstub, builderAddrOffset);
@@ -1624,9 +1644,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
-  CACHEOP_CASE_UNIMPL(GuardIsNumber)
   CACHEOP_CASE_UNIMPL(GuardToNonGCThing)
-  CACHEOP_CASE_UNIMPL(GuardBooleanToInt32)
   CACHEOP_CASE_UNIMPL(Int32ToIntPtr)
   CACHEOP_CASE_UNIMPL(GuardNumberToIntPtrIndex)
   CACHEOP_CASE_UNIMPL(GuardToInt32ModUint32)
