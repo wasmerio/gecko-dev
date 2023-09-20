@@ -416,6 +416,12 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   cacheop = icregs.cacheIRReader.readOp(); \
   goto* addresses[long(cacheop)];
 
+// We set a fixed bound on the number of icVals which is smaller than what IC
+// generators may use. As a result we can't evaluate an IC if it defines too
+// many values. Note that we don't need to check this when reading from icVals
+// because we should have bailed out before the earlier write which defined the
+// same value. Similarly, we don't need to check writes to locations which we've
+// just read from.
 #define BOUNDSCHECK(resultId) \
   if (resultId.id() >= ICRegs::kMaxICVals) return ICInterpretOpResult::NextIC;
 
@@ -508,6 +514,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE(GuardBooleanToInt32) {
     ValOperandId inputId = icregs.cacheIRReader.valOperandId();
     Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    BOUNDSCHECK(resultId);
     Value v = Value::fromRawBits(icregs.icVals[inputId.id()]);
     if (!v.isBoolean()) {
       return ICInterpretOpResult::NextIC;
