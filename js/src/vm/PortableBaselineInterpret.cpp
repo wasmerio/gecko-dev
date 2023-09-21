@@ -798,10 +798,8 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
 
   CACHEOP_CASE(GuardSpecificInt32) {
     Int32OperandId int32Id = icregs.cacheIRReader.int32OperandId();
-    uint32_t expectedOffset = icregs.cacheIRReader.stubOffset();
-    uint32_t expected =
-        cstub->stubInfo()->getStubRawInt32(cstub, expectedOffset);
-    if (expected != uint32_t(icregs.icVals[int32Id.id()])) {
+    int32_t expected = icregs.cacheIRReader.int32Immediate();
+    if (expected != int32_t(icregs.icVals[int32Id.id()])) {
       return ICInterpretOpResult::NextIC;
     }
     DISPATCH_CACHEOP();
