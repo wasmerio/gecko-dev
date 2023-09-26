@@ -809,13 +809,13 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     ObjOperandId expectedId = icregs.cacheIRReader.objOperandId();
     uint32_t slotOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* expected = reinterpret_cast<JSObject*>(icregs.icVals[expectedId.id()]);
     uintptr_t offset = cstub->stubInfo()->getStubRawInt32(cstub, slotOffset);
     NativeObject* nobj =
         reinterpret_cast<NativeObject*>(icregs.icVals[objId.id()]);
     HeapSlot* slots = nobj->getSlotsUnchecked();
-    uintptr_t actual = slots[offset / sizeof(Value)].get().asRawBits();
-    uintptr_t expected = icregs.icVals[expectedId.id()];
-    if (actual != expected) {
+    Value actual = slots[offset / sizeof(Value)];
+    if (actual != ObjectValue(*expected)) {
       return ICInterpretOpResult::NextIC;
     }
     DISPATCH_CACHEOP();
