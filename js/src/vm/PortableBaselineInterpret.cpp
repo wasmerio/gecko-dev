@@ -29,6 +29,8 @@
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
 #include "jit/VMFunctions.h"
+#include "proxy/DeadObjectProxy.h"
+#include "proxy/DOMProxy.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/EnvironmentObject.h"
@@ -481,6 +483,15 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(GuardIsNotUninitializedLexical) {
+    ValOperandId valId = icregs.cacheIRReader.valOperandId();
+    Value val = Value::fromRawBits(icregs.icVals[valId.id()]);
+    if (val == MagicValue(JS_UNINITIALIZED_LEXICAL)) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(GuardToBoolean) {
     ValOperandId inputId = icregs.cacheIRReader.valOperandId();
     Value v = Value::fromRawBits(icregs.icVals[inputId.id()]);
@@ -548,6 +559,15 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(GuardToNonGCThing) {
+    ValOperandId inputId = icregs.cacheIRReader.valOperandId();
+    Value input = Value::fromRawBits(icregs.icVals[inputId.id()]);
+    if (input.isGCThing()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(GuardBooleanToInt32) {
     ValOperandId inputId = icregs.cacheIRReader.valOperandId();
     Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
@@ -576,6 +596,16 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
       }
     }
     return ICInterpretOpResult::NextIC;
+  }
+
+  CACHEOP_CASE(Int32ToIntPtr) {
+    Int32OperandId inputId = icregs.cacheIRReader.int32OperandId();
+    IntPtrOperandId resultId = icregs.cacheIRReader.intPtrOperandId();
+    BOUNDSCHECK(resultId);
+    int32_t input = int32_t(icregs.icVals[inputId.id()]);
+    // Note that this must sign-extend to pointer width:
+    icregs.icVals[resultId.id()] = intptr_t(input);
+    DISPATCH_CACHEOP();
   }
 
   CACHEOP_CASE(GuardNonDoubleType) {
@@ -640,12 +670,21 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     uint32_t protoOffset = icregs.cacheIRReader.stubOffset();
     JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
-    uintptr_t expectedProto =
-        cstub->stubInfo()->getStubRawWord(cstub, protoOffset);
-    if (reinterpret_cast<uintptr_t>(obj->staticPrototype()) != expectedProto) {
+    JSObject* proto = reinterpret_cast<JSObject*>(
+        cstub->stubInfo()->getStubRawWord(cstub, protoOffset));
+    if (obj->staticPrototype() != proto) {
       return ICInterpretOpResult::NextIC;
     }
     PREDICT_NEXT(LoadProto);
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardNullProto) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (obj->staticPrototype()) {
+      return ICInterpretOpResult::NextIC;
+    }
     DISPATCH_CACHEOP();
   }
 
@@ -719,6 +758,18 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(GuardAnyClass) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t claspOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    JSClass* clasp = reinterpret_cast<JSClass*>(
+        cstub->stubInfo()->getStubRawWord(cstub, claspOffset));
+    if (obj->getClass() != clasp) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(GuardGlobalGeneration) {
     uint32_t expectedOffset = icregs.cacheIRReader.stubOffset();
     uint32_t generationAddrOffset = icregs.cacheIRReader.stubOffset();
@@ -732,12 +783,130 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(HasClassResult) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t claspOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    JSClass* clasp = reinterpret_cast<JSClass*>(
+        cstub->stubInfo()->getStubRawWord(cstub, claspOffset));
+    icregs.icResult = BooleanValue(obj->getClass() == clasp).asRawBits();
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardCompartment) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t globalOffset = icregs.cacheIRReader.stubOffset();
+    uint32_t compartmentOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    JSObject* global = reinterpret_cast<JSObject*>(
+        cstub->stubInfo()->getStubRawWord(cstub, globalOffset));
+    JS::Compartment* compartment = reinterpret_cast<JS::Compartment*>(
+        cstub->stubInfo()->getStubRawWord(cstub, compartmentOffset));
+    if (IsDeadProxyObject(global)) {
+      return ICInterpretOpResult::NextIC;
+    }
+    if (obj->compartment() != compartment) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardIsExtensible) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (obj->nonProxyIsExtensible()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardIsNativeObject) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (!obj->shape()->isNative()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardIsProxy) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (!obj->shape()->isProxy()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardIsNotProxy) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (obj->shape()->isProxy()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardIsNotArrayBufferMaybeShared) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    const JSClass* clasp = obj->getClass();
+    if (clasp == &ArrayBufferObject::class_ ||
+        clasp == &SharedArrayBufferObject::class_) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardIsTypedArray) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (!IsTypedArrayClass(obj->getClass())) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardHasProxyHandler) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t handlerOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    BaseProxyHandler* handler = reinterpret_cast<BaseProxyHandler*>(
+        cstub->stubInfo()->getStubRawWord(cstub, handlerOffset));
+    if (obj->as<ProxyObject>().handler() != handler) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardIsNotDOMProxy) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (obj->as<ProxyObject>().handler()->family() ==
+        GetDOMProxyHandlerFamily()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(GuardSpecificObject) {
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     uint32_t expectedOffset = icregs.cacheIRReader.stubOffset();
-    uintptr_t expected =
-        cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
-    if (expected != icregs.icVals[objId.id()]) {
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    JSObject* expected = reinterpret_cast<JSObject*>(
+        cstub->stubInfo()->getStubRawWord(cstub, expectedOffset));
+    if (obj != expected) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardObjectIdentity) {
+    ObjOperandId obj1Id = icregs.cacheIRReader.objOperandId();
+    ObjOperandId obj2Id = icregs.cacheIRReader.objOperandId();
+    JSObject* obj1 = reinterpret_cast<JSObject*>(icregs.icVals[obj1Id.id()]);
+    JSObject* obj2 = reinterpret_cast<JSObject*>(icregs.icVals[obj2Id.id()]);
+    if (obj1 != obj2) {
       return ICInterpretOpResult::NextIC;
     }
     DISPATCH_CACHEOP();
@@ -780,6 +949,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     uintptr_t expected =
         cstub->stubInfo()->getStubRawWord(cstub, expectedOffset);
     if (expected != icregs.icVals[strId.id()]) {
+      // TODO: BaselineCacheIRCompiler also checks for equal strings
       return ICInterpretOpResult::NextIC;
     }
     DISPATCH_CACHEOP();
@@ -800,6 +970,111 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     Int32OperandId numId = icregs.cacheIRReader.int32OperandId();
     int32_t expected = icregs.cacheIRReader.int32Immediate();
     if (expected != int32_t(icregs.icVals[numId.id()])) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardNoDenseElements) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (obj->as<NativeObject>().getDenseInitializedLength() != 0) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardStringToIndex) {
+    StringOperandId strId = icregs.cacheIRReader.stringOperandId();
+    Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    BOUNDSCHECK(resultId);
+    JSString* str = reinterpret_cast<JSString*>(icregs.icVals[strId.id()]);
+    int32_t result;
+    if (str->hasIndexValue()) {
+      uint32_t index = str->getIndexValue();
+      MOZ_ASSERT(index <= INT32_MAX);
+      result = index;
+    } else {
+      result = GetIndexFromString(str);
+      if (result < 0) {
+        return ICInterpretOpResult::NextIC;
+      }
+    }
+    icregs.icVals[resultId.id()] = result;
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardStringToInt32) {
+    StringOperandId strId = icregs.cacheIRReader.stringOperandId();
+    Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    BOUNDSCHECK(resultId);
+    JSString* str = reinterpret_cast<JSString*>(icregs.icVals[strId.id()]);
+    int32_t result;
+    // Use indexed value as fast path if possible.
+    if (str->hasIndexValue()) {
+      uint32_t index = str->getIndexValue();
+      MOZ_ASSERT(index <= INT32_MAX);
+      result = index;
+    } else {
+      if (!GetInt32FromStringPure(frameMgr.cxForLocalUseOnly(), str, &result)) {
+        return ICInterpretOpResult::NextIC;
+      }
+    }
+    icregs.icVals[resultId.id()] = result;
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardStringToNumber) {
+    StringOperandId strId = icregs.cacheIRReader.stringOperandId();
+    NumberOperandId resultId = icregs.cacheIRReader.numberOperandId();
+    BOUNDSCHECK(resultId);
+    JSString* str = reinterpret_cast<JSString*>(icregs.icVals[strId.id()]);
+    Value result;
+    // Use indexed value as fast path if possible.
+    if (str->hasIndexValue()) {
+      uint32_t index = str->getIndexValue();
+      MOZ_ASSERT(index <= INT32_MAX);
+      result = Int32Value(index);
+    } else {
+      double value;
+      if (!StringToNumberPure(frameMgr.cxForLocalUseOnly(), str, &value)) {
+        return ICInterpretOpResult::NextIC;
+      }
+      result = DoubleValue(value);
+    }
+    icregs.icVals[resultId.id()] = result.asRawBits();
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(BooleanToNumber) {
+    BooleanOperandId booleanId = icregs.cacheIRReader.booleanOperandId();
+    NumberOperandId resultId = icregs.cacheIRReader.numberOperandId();
+    BOUNDSCHECK(resultId);
+    uint64_t boolean = icregs.icVals[booleanId.id()];
+    MOZ_ASSERT((boolean & ~1) == 0);
+    icregs.icVals[resultId.id()] = Int32Value(boolean).asRawBits();
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardHasGetterSetter) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t idOffset = icregs.cacheIRReader.stubOffset();
+    uint32_t getterSetterOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    jsid id =
+        jsid::fromRawBits(cstub->stubInfo()->getStubRawWord(cstub, idOffset));
+    GetterSetter* getterSetter = reinterpret_cast<GetterSetter*>(
+        cstub->stubInfo()->getStubRawWord(cstub, getterSetterOffset));
+    if (!ObjectHasGetterSetterPure(frameMgr.cxForLocalUseOnly(), obj, id, getterSetter)) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardInt32IsNonNegative) {
+    Int32OperandId indexId = icregs.cacheIRReader.int32OperandId();
+    int32_t index = int32_t(icregs.icVals[indexId.id()]);
+    if (index < 0) {
       return ICInterpretOpResult::NextIC;
     }
     DISPATCH_CACHEOP();
@@ -1651,15 +1926,10 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
-  CACHEOP_CASE_UNIMPL(GuardToNonGCThing)
-  CACHEOP_CASE_UNIMPL(Int32ToIntPtr)
   CACHEOP_CASE_UNIMPL(GuardNumberToIntPtrIndex)
   CACHEOP_CASE_UNIMPL(GuardToInt32ModUint32)
   CACHEOP_CASE_UNIMPL(GuardToUint8Clamped)
   CACHEOP_CASE_UNIMPL(GuardMultipleShapes)
-  CACHEOP_CASE_UNIMPL(GuardNullProto)
-  CACHEOP_CASE_UNIMPL(GuardAnyClass)
-  CACHEOP_CASE_UNIMPL(HasClassResult)
   CACHEOP_CASE_UNIMPL(CallRegExpMatcherResult)
   CACHEOP_CASE_UNIMPL(CallRegExpSearcherResult)
   CACHEOP_CASE_UNIMPL(RegExpBuiltinExecMatchResult)
@@ -1671,23 +1941,6 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE_UNIMPL(RegExpPrototypeOptimizableResult)
   CACHEOP_CASE_UNIMPL(RegExpInstanceOptimizableResult)
   CACHEOP_CASE_UNIMPL(GetFirstDollarIndexResult)
-  CACHEOP_CASE_UNIMPL(GuardCompartment)
-  CACHEOP_CASE_UNIMPL(GuardIsExtensible)
-  CACHEOP_CASE_UNIMPL(GuardIsNativeObject)
-  CACHEOP_CASE_UNIMPL(GuardIsProxy)
-  CACHEOP_CASE_UNIMPL(GuardIsNotProxy)
-  CACHEOP_CASE_UNIMPL(GuardIsNotArrayBufferMaybeShared)
-  CACHEOP_CASE_UNIMPL(GuardIsTypedArray)
-  CACHEOP_CASE_UNIMPL(GuardHasProxyHandler)
-  CACHEOP_CASE_UNIMPL(GuardIsNotDOMProxy)
-  CACHEOP_CASE_UNIMPL(GuardObjectIdentity)
-  CACHEOP_CASE_UNIMPL(GuardNoDenseElements)
-  CACHEOP_CASE_UNIMPL(GuardStringToIndex)
-  CACHEOP_CASE_UNIMPL(GuardStringToInt32)
-  CACHEOP_CASE_UNIMPL(GuardStringToNumber)
-  CACHEOP_CASE_UNIMPL(BooleanToNumber)
-  CACHEOP_CASE_UNIMPL(GuardHasGetterSetter)
-  CACHEOP_CASE_UNIMPL(GuardInt32IsNonNegative)
   CACHEOP_CASE_UNIMPL(GuardIndexIsValidUpdateOrAdd)
   CACHEOP_CASE_UNIMPL(GuardIndexIsNotDenseElement)
   CACHEOP_CASE_UNIMPL(GuardTagNotEqual)
@@ -1939,8 +2192,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE_UNIMPL(Breakpoint)
   CACHEOP_CASE_UNIMPL(WrapResult)
   CACHEOP_CASE_UNIMPL(Bailout)
-  CACHEOP_CASE_UNIMPL(AssertRecoveredOnBailoutResult)
-  CACHEOP_CASE_UNIMPL(GuardIsNotUninitializedLexical) {
+  CACHEOP_CASE_UNIMPL(AssertRecoveredOnBailoutResult) {
     TRACE_PRINTF("unknown CacheOp: %s\n", CacheIROpNames[int(cacheop)]);
     return ICInterpretOpResult::NextIC;
   }
