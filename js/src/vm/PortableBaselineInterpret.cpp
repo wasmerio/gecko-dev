@@ -1139,6 +1139,35 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(LoadEnclosingEnvironment) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    ObjOperandId resultId = icregs.cacheIRReader.objOperandId();
+    BOUNDSCHECK(resultId);
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    JSObject* env = &obj->as<EnvironmentObject>().enclosingEnvironment();
+    icregs.icVals[resultId.id()] = reinterpret_cast<uintptr_t>(env);
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(LoadWrapperTarget) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    ObjOperandId resultId = icregs.cacheIRReader.objOperandId();
+    BOUNDSCHECK(resultId);
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    JSObject* target = &obj->as<ProxyObject>().private_().toObject();
+    icregs.icVals[resultId.id()] = reinterpret_cast<uintptr_t>(target);
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(LoadValueTag) {
+    ValOperandId valId = icregs.cacheIRReader.valOperandId();
+    ValueTagOperandId resultId = icregs.cacheIRReader.valueTagOperandId();
+    BOUNDSCHECK(resultId);
+    Value val = Value::fromRawBits(icregs.icVals[valId.id()]);
+    icregs.icVals[resultId.id()] = val.extractNonDoubleType();
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(LoadArgumentFixedSlot) {
     ValOperandId resultId = icregs.cacheIRReader.valOperandId();
     BOUNDSCHECK(resultId);
@@ -1158,6 +1187,15 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     int32_t argc = int32_t(icregs.icVals[argcId.id()]);
     Value val = sp[slotIndex + argc].asValue();
     icregs.icVals[resultId.id()] = val.asRawBits();
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(TruncateDoubleToUInt32) {
+    NumberOperandId inputId = icregs.cacheIRReader.numberOperandId();
+    Int32OperandId resultId = icregs.cacheIRReader.int32OperandId();
+    BOUNDSCHECK(resultId);
+    Value input = Value::fromRawBits(icregs.icVals[inputId.id()]);
+    icregs.icVals[resultId.id()] = JS::ToInt32(input.toNumber());
     DISPATCH_CACHEOP();
   }
 
@@ -1734,6 +1772,7 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     }
   });
   INT32_OP(BitOr, |, {});
+  INT32_OP(BitXor, ^, {});
   INT32_OP(BitAnd, &, {});
 
   CACHEOP_CASE(Int32PowResult) {
@@ -2021,10 +2060,6 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE_UNIMPL(GuardNotClassConstructor)
   CACHEOP_CASE_UNIMPL(GuardArrayIsPacked)
   CACHEOP_CASE_UNIMPL(GuardArgumentsObjectFlags)
-  CACHEOP_CASE_UNIMPL(LoadEnclosingEnvironment)
-  CACHEOP_CASE_UNIMPL(LoadWrapperTarget)
-  CACHEOP_CASE_UNIMPL(LoadValueTag)
-  CACHEOP_CASE_UNIMPL(TruncateDoubleToUInt32)
   CACHEOP_CASE_UNIMPL(MegamorphicLoadSlotResult)
   CACHEOP_CASE_UNIMPL(MegamorphicLoadSlotByValueResult)
   CACHEOP_CASE_UNIMPL(MegamorphicStoreSlot)
@@ -2188,7 +2223,6 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE_UNIMPL(BigIntDivResult)
   CACHEOP_CASE_UNIMPL(BigIntModResult)
   CACHEOP_CASE_UNIMPL(BigIntPowResult)
-  CACHEOP_CASE_UNIMPL(Int32BitXorResult)
   CACHEOP_CASE_UNIMPL(Int32LeftShiftResult)
   CACHEOP_CASE_UNIMPL(Int32RightShiftResult)
   CACHEOP_CASE_UNIMPL(Int32URightShiftResult)
