@@ -917,6 +917,69 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(AddAndStoreFixedSlot) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t offsetOffset = icregs.cacheIRReader.stubOffset();
+    ValOperandId rhsId = icregs.cacheIRReader.valOperandId();
+    uint32_t newShapeOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    int32_t offset = cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+    Value rhs = Value::fromRawBits(icregs.icVals[rhsId.id()]);
+    Shape* newShape = reinterpret_cast<Shape*>(
+        cstub->stubInfo()->getStubRawWord(cstub, newShapeOffset));
+    obj->setShape(newShape);
+    GCPtr<Value>* slot = reinterpret_cast<GCPtr<Value>*>(
+        reinterpret_cast<uintptr_t>(obj) + offset);
+    slot->init(rhs);
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(AddAndStoreDynamicSlot) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t offsetOffset = icregs.cacheIRReader.stubOffset();
+    ValOperandId rhsId = icregs.cacheIRReader.valOperandId();
+    uint32_t newShapeOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    int32_t offset = cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+    Value rhs = Value::fromRawBits(icregs.icVals[rhsId.id()]);
+    Shape* newShape = reinterpret_cast<Shape*>(
+        cstub->stubInfo()->getStubRawWord(cstub, newShapeOffset));
+    NativeObject *nobj = &obj->as<NativeObject>();
+    obj->setShape(newShape);
+    HeapSlot* slots = nobj->getSlotsUnchecked();
+    size_t dynSlot = offset / sizeof(Value);
+    size_t slot = dynSlot + nobj->numFixedSlots();
+    slots[dynSlot].init(nobj, HeapSlot::Slot, slot, rhs);
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(AllocateAndStoreDynamicSlot) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t offsetOffset = icregs.cacheIRReader.stubOffset();
+    ValOperandId rhsId = icregs.cacheIRReader.valOperandId();
+    uint32_t newShapeOffset = icregs.cacheIRReader.stubOffset();
+    uint32_t numNewSlotsOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    int32_t offset = cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+    Value rhs = Value::fromRawBits(icregs.icVals[rhsId.id()]);
+    Shape* newShape = reinterpret_cast<Shape*>(
+        cstub->stubInfo()->getStubRawWord(cstub, newShapeOffset));
+    int32_t numNewSlots = cstub->stubInfo()->getStubRawInt32(cstub, numNewSlotsOffset);
+    NativeObject *nobj = &obj->as<NativeObject>();
+    // We have to (re)allocate dynamic slots. Do this first, as it's the
+    // only fallible operation here. Note that growSlotsPure is fallible but
+    // does not GC. Otherwise this is the same as AddAndStoreDynamicSlot above.
+    if (!NativeObject::growSlotsPure(frameMgr.cxForLocalUseOnly(), nobj, numNewSlots)) {
+      return ICInterpretOpResult::NextIC;
+    }
+    obj->setShape(newShape);
+    HeapSlot* slots = nobj->getSlotsUnchecked();
+    size_t dynSlot = offset / sizeof(Value);
+    size_t slot = dynSlot + nobj->numFixedSlots();
+    slots[dynSlot].init(nobj, HeapSlot::Slot, slot, rhs);
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(StoreDenseElement) {
     ObjOperandId objId = icregs.cacheIRReader.objOperandId();
     Int32OperandId indexId = icregs.cacheIRReader.int32OperandId();
@@ -1720,9 +1783,6 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE_UNIMPL(LoadDOMExpandoValueGuardGeneration)
   CACHEOP_CASE_UNIMPL(LoadDOMExpandoValueIgnoreGeneration)
   CACHEOP_CASE_UNIMPL(GuardDOMExpandoMissingOrGuardShape)
-  CACHEOP_CASE_UNIMPL(AddAndStoreFixedSlot)
-  CACHEOP_CASE_UNIMPL(AddAndStoreDynamicSlot)
-  CACHEOP_CASE_UNIMPL(AllocateAndStoreDynamicSlot)
   CACHEOP_CASE_UNIMPL(AddSlotAndCallAddPropHook)
   CACHEOP_CASE_UNIMPL(StoreDenseElementHole)
   CACHEOP_CASE_UNIMPL(ArrayPush)
