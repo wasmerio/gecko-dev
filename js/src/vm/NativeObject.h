@@ -409,6 +409,7 @@ class ObjectElements {
   bool isPacked() const { return !(flags & NON_PACKED); }
 
   uint32_t getLength() const { return length; }
+  void setLength(uint32_t len) { length = len; }
   uint32_t getInitializedLength() const { return initializedLength; }
 
   JS::PropertyAttributes elementAttributes() const {
