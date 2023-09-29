@@ -1315,6 +1315,70 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(StoreDenseElementHole) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    Int32OperandId indexId = icregs.cacheIRReader.int32OperandId();
+    ValOperandId rhsId = icregs.cacheIRReader.valOperandId();
+    bool handleAdd = icregs.cacheIRReader.readBool();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    uint32_t index = uint32_t(icregs.icVals[indexId.id()]);
+    Value rhs = Value::fromRawBits(icregs.icVals[rhsId.id()]);
+    NativeObject* nobj = &obj->as<NativeObject>();
+    uint32_t initLength = nobj->getDenseInitializedLength();
+    if (index < initLength) {
+      nobj->setDenseElement(index, rhs);
+    } else if (!handleAdd || index > initLength) {
+      return ICInterpretOpResult::NextIC;
+    } else {
+      if (index >= nobj->getDenseCapacity()) {
+        if (!NativeObject::addDenseElementPure(frameMgr.cxForLocalUseOnly(),
+                                               nobj)) {
+          return ICInterpretOpResult::NextIC;
+        }
+      }
+      nobj->setDenseInitializedLength(initLength + 1);
+
+      // Baseline always updates the length field by directly accessing its
+      // offset in ObjectElements. If the object is not an ArrayObject then the
+      // only place this field is read is when NativeObjects::growElements uses
+      // it as a heuristic to pick the allocation size for the element array.
+      // Leaving it untouched for non-arrays would still give correct results
+      // but may allocate more heap than necessary. We've added public getter
+      // and setter methods in order to match the behavior of other tiers but
+      // there are probably other reasonable alternatives.
+      uint32_t len = nobj->getElementsHeader()->getLength();
+      if (len <= index) {
+        nobj->getElementsHeader()->setLength(len + 1);
+      }
+
+      nobj->initDenseElement(index, rhs);
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(ArrayPush) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    ValOperandId rhsId = icregs.cacheIRReader.valOperandId();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    Value rhs = Value::fromRawBits(icregs.icVals[rhsId.id()]);
+    ArrayObject* aobj = &obj->as<ArrayObject>();
+    uint32_t initLength = aobj->getDenseInitializedLength();
+    if (aobj->length() != initLength) {
+      return ICInterpretOpResult::NextIC;
+    }
+    if (initLength >= aobj->getDenseCapacity()) {
+      if (!NativeObject::addDenseElementPure(frameMgr.cxForLocalUseOnly(),
+                                             aobj)) {
+        return ICInterpretOpResult::NextIC;
+      }
+    }
+    aobj->setDenseInitializedLength(initLength + 1);
+    aobj->setLength(initLength + 1);
+    aobj->initDenseElement(initLength, rhs);
+    icregs.icResult = Int32Value(initLength + 1).asRawBits();
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(IsObjectResult) {
     ValOperandId inputId = icregs.cacheIRReader.valOperandId();
     Value val = Value::fromRawBits(icregs.icVals[inputId.id()]);
@@ -2072,8 +2136,6 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE_UNIMPL(LoadDOMExpandoValueIgnoreGeneration)
   CACHEOP_CASE_UNIMPL(GuardDOMExpandoMissingOrGuardShape)
   CACHEOP_CASE_UNIMPL(AddSlotAndCallAddPropHook)
-  CACHEOP_CASE_UNIMPL(StoreDenseElementHole)
-  CACHEOP_CASE_UNIMPL(ArrayPush)
   CACHEOP_CASE_UNIMPL(ArrayJoinResult)
   CACHEOP_CASE_UNIMPL(PackedArrayPopResult)
   CACHEOP_CASE_UNIMPL(PackedArrayShiftResult)
