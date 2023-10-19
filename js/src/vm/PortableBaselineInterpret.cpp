@@ -1123,6 +1123,86 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     DISPATCH_CACHEOP();
   }
 
+  CACHEOP_CASE(GuardDynamicSlotIsNotObject) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t slotOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    uint32_t slot = cstub->stubInfo()->getStubRawInt32(cstub, slotOffset);
+    NativeObject* nobj = &obj->as<NativeObject>();
+    HeapSlot* slots = nobj->getSlotsUnchecked();
+    // Note that unlike similar opcodes, GuardDynamicSlotIsNotObject takes a
+    // slot index rather than a byte offset.
+    Value actual = slots[slot];
+    if (actual.isObject()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardFixedSlotValue) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t offsetOffset = icregs.cacheIRReader.stubOffset();
+    uint32_t valOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    uint32_t offset = cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+    Value val = Value::fromRawBits(
+        cstub->stubInfo()->getStubRawInt64(cstub, valOffset));
+    GCPtr<Value>* slot = reinterpret_cast<GCPtr<Value>*>(
+        reinterpret_cast<uintptr_t>(obj) + offset);
+    Value actual = slot->get();
+    if (actual != val) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardDynamicSlotValue) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t offsetOffset = icregs.cacheIRReader.stubOffset();
+    uint32_t valOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    uint32_t offset = cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+    Value val = Value::fromRawBits(
+        cstub->stubInfo()->getStubRawInt64(cstub, valOffset));
+    NativeObject* nobj = &obj->as<NativeObject>();
+    HeapSlot* slots = nobj->getSlotsUnchecked();
+    Value actual = slots[offset / sizeof(Value)];
+    if (actual != val) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(LoadFixedSlot) {
+    ValOperandId resultId = icregs.cacheIRReader.valOperandId();
+    BOUNDSCHECK(resultId);
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t offsetOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    uint32_t offset = cstub->stubInfo()->getStubRawInt32(cstub, offsetOffset);
+    GCPtr<Value>* slot = reinterpret_cast<GCPtr<Value>*>(
+        reinterpret_cast<uintptr_t>(obj) + offset);
+    Value actual = slot->get();
+    icregs.icVals[resultId.id()] = actual.asRawBits();
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(LoadDynamicSlot) {
+    ValOperandId resultId = icregs.cacheIRReader.valOperandId();
+    BOUNDSCHECK(resultId);
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint32_t slotOffset = icregs.cacheIRReader.stubOffset();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    uint32_t slot = cstub->stubInfo()->getStubRawInt32(cstub, slotOffset);
+    NativeObject* nobj = &obj->as<NativeObject>();
+    HeapSlot* slots = nobj->getSlotsUnchecked();
+    // Note that unlike similar opcodes, LoadDynamicSlot takes a slot index
+    // rather than a byte offset.
+    Value actual = slots[slot];
+    icregs.icVals[resultId.id()] = actual.asRawBits();
+    DISPATCH_CACHEOP();
+  }
+
   CACHEOP_CASE(GuardNoAllocationMetadataBuilder) {
     uint32_t builderAddrOffset = icregs.cacheIRReader.stubOffset();
     uintptr_t builderAddr =
@@ -1176,6 +1256,25 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
     ObjOperandId funId = icregs.cacheIRReader.objOperandId();
     JSObject* fun = reinterpret_cast<JSObject*>(icregs.icVals[funId.id()]);
     if (fun->as<JSFunction>().isClassConstructor()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardArrayIsPacked) {
+    ObjOperandId arrayId = icregs.cacheIRReader.objOperandId();
+    JSObject* array = reinterpret_cast<JSObject*>(icregs.icVals[arrayId.id()]);
+    if (!array->as<NativeObject>().getElementsHeader()->isPacked()) {
+      return ICInterpretOpResult::NextIC;
+    }
+    DISPATCH_CACHEOP();
+  }
+
+  CACHEOP_CASE(GuardArgumentsObjectFlags) {
+    ObjOperandId objId = icregs.cacheIRReader.objOperandId();
+    uint8_t flags = icregs.cacheIRReader.readByte();
+    JSObject* obj = reinterpret_cast<JSObject*>(icregs.icVals[objId.id()]);
+    if (obj->as<ArgumentsObject>().hasFlags(flags)) {
       return ICInterpretOpResult::NextIC;
     }
     DISPATCH_CACHEOP();
@@ -2320,13 +2419,6 @@ ICInterpretOps(BaselineFrame* frame, VMFrameManager& frameMgr, State& state,
   CACHEOP_CASE_UNIMPL(GuardTagNotEqual)
   CACHEOP_CASE_UNIMPL(GuardXrayExpandoShapeAndDefaultProto)
   CACHEOP_CASE_UNIMPL(GuardXrayNoExpando)
-  CACHEOP_CASE_UNIMPL(GuardDynamicSlotIsNotObject)
-  CACHEOP_CASE_UNIMPL(GuardFixedSlotValue)
-  CACHEOP_CASE_UNIMPL(GuardDynamicSlotValue)
-  CACHEOP_CASE_UNIMPL(LoadFixedSlot)
-  CACHEOP_CASE_UNIMPL(LoadDynamicSlot)
-  CACHEOP_CASE_UNIMPL(GuardArrayIsPacked)
-  CACHEOP_CASE_UNIMPL(GuardArgumentsObjectFlags)
   CACHEOP_CASE_UNIMPL(MegamorphicStoreSlot)
   CACHEOP_CASE_UNIMPL(MegamorphicHasPropResult)
   CACHEOP_CASE_UNIMPL(ObjectToIteratorResult)
