@@ -3015,7 +3015,7 @@ def make_shared_library(target, compiler):
     flags = ["$(PGO_CFLAGS)", "$(DSO_LDOPTS)"]
     output = ["-o", "$@"]
 
-    if target.kernel == "Darwin":
+    if target.kernel == "Darwin" or target.kernel == "WASI":
         soname = []
     elif target.os == "NetBSD":
         soname = ["-Wl,-soname,$(DSO_SONAME)"]
