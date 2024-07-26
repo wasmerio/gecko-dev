@@ -78,6 +78,22 @@ def js_disable_shell(value):
 
 set_config("JS_DISABLE_SHELL", js_disable_shell)
 
+option(
+    "--enable-js-shell-wizer",
+    default=False,
+    when=js_standalone,
+    help="{Support|Do not support} wizening of the JS shell",
+)
+
+
+@depends("--enable-js-shell-wizer", when=js_standalone)
+def js_shell_wizer(value):
+    if value:
+        return True
+
+
+set_define("JS_SHELL_WIZER", js_shell_wizer)
+
 set_define("JS_64BIT", depends(target)(lambda t: t.bitness == 64 or None))
 
 set_define("JS_PUNBOX64", depends(target)(lambda t: t.bitness == 64 or None))
@@ -236,6 +252,68 @@ set_config(
     depends_if("--enable-portable-baseline-interp-force")(lambda _: True),
 )
 
+# weval support (ahead-of-time interpreter compilation in Wasm) for PBL.
+option(
+    "--enable-pbl-weval",
+    default=False,
+    help="{Support|Do not support} wevaling the PBL interpreter",
+)
+
+@depends("--enable-portable-baseline-interp", "--enable-pbl-weval")
+def js_pbl_weval(pbl, weval):
+    if pbl and weval:
+        return True
+
+set_define("ENABLE_JS_PBL_WEVAL", js_pbl_weval)
+set_config("ENABLE_JS_PBL_WEVAL", js_pbl_weval)
+
+# Enable ahead-of-time-known preloaded IC bodies.
+option(
+    "--enable-aot-ics",
+    default=False,
+    help="{Enable|Disable} including ahead-of-time corpus of CacheIR IC bodies",
+)
+
+set_define(
+    "ENABLE_JS_AOT_ICS",
+    depends_if("--enable-aot-ics")(lambda _: True),
+)
+set_config(
+    "ENABLE_JS_AOT_ICS",
+    depends_if("--enable-aot-ics")(lambda _: True),
+)
+
+# Force-on the option for AOT ICs.
+option(
+    "--enable-aot-ics-force",
+    default=False,
+    help="{Enable|Disable} forcing the AOT ICs option on without additional configuration",
+)
+
+set_define(
+    "ENABLE_JS_AOT_ICS_FORCE",
+    depends_if("--enable-aot-ics-force")(lambda _: True),
+)
+set_config(
+    "ENABLE_JS_AOT_ICS_FORCE",
+    depends_if("--enable-aot-ics-force")(lambda _: True),
+)
+
+# Enforce AOT ICs (testing only): abort if a new IC (not in AOT corpus) is encountered.
+option(
+    "--enable-aot-ics-enforce",
+    default=False,
+    help="{Enable|Disable} enforcing that only AOT IC corpus is used, crashing otherwise (TEST ONLY)",
+)
+
+set_define(
+    "ENABLE_JS_AOT_ICS_ENFORCE",
+    depends_if("--enable-aot-ics-enforce")(lambda _: True),
+)
+set_config(
+    "ENABLE_JS_AOT_ICS_ENFORCE",
+    depends_if("--enable-aot-ics-enforce")(lambda _: True),
+)
 
 # Enable JS Streams
 # ===================================================

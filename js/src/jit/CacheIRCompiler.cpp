@@ -46,6 +46,7 @@
 #include "vm/Interpreter.h"
 #include "vm/TypeofEqOperand.h"  // TypeofEqOperand
 #include "vm/Uint8Clamped.h"
+#include "vm/Weval.h"
 
 #include "builtin/Boolean-inl.h"
 #include "jit/MacroAssembler-inl.h"
@@ -1030,6 +1031,20 @@ void CacheRegisterAllocator::restoreInputState(MacroAssembler& masm,
   }
 }
 
+CacheIRStubInfo::CacheIRStubInfo(CacheKind kind, ICStubEngine engine,
+                                 bool makesGCCalls, uint32_t stubDataOffset,
+                                 uint32_t codeLength)
+    : codeLength_(codeLength),
+      kind_(kind),
+      engine_(engine),
+      stubDataOffset_(stubDataOffset),
+      makesGCCalls_(makesGCCalls) {
+  MOZ_ASSERT(kind_ == kind, "Kind must fit in bitfield");
+  MOZ_ASSERT(engine_ == engine, "Engine must fit in bitfield");
+  MOZ_ASSERT(stubDataOffset_ == stubDataOffset,
+             "stubDataOffset must fit in uint8_t");
+}
+
 size_t CacheIRStubInfo::stubDataSize() const {
   size_t field = 0;
   size_t size = 0;
@@ -1254,6 +1269,15 @@ ICCacheIRStub* ICCacheIRStub::clone(JSRuntime* rt, ICStubSpace& newSpace) {
 
   return newStub;
 }
+
+#ifdef ENABLE_JS_PBL_WEVAL
+Weval& CacheIRStubInfo::weval() {
+  if (!weval_) {
+    weval_ = MakeUnique<Weval>();
+  }
+  return *weval_;
+}
+#endif
 
 template <typename T>
 static inline bool ShouldTraceWeakEdgeInStub(JSTracer* trc) {

@@ -105,6 +105,7 @@ struct DefaultJitOptions {
   uint32_t regexpWarmUpThreshold;
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   uint32_t portableBaselineInterpreterWarmUpThreshold;
+  uint32_t portableBaselineInterpreterAttachThreshold;
 #endif
   uint32_t exceptionBailoutThreshold;
   uint32_t frequentBailoutThreshold;
@@ -125,6 +126,10 @@ struct DefaultJitOptions {
   uint32_t wasmBatchBaselineThreshold;
   uint32_t wasmBatchIonThreshold;
   mozilla::Maybe<IonRegisterAllocator> forcedRegisterAllocator;
+#ifdef ENABLE_JS_AOT_ICS
+  bool enableAOTICs;
+  bool enableAOTICEnforce;
+#endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to
   // measure the effectiveness of each mitigation with various proof of

@@ -68,7 +68,7 @@ class CompactBufferReader {
       : buffer_(start), end_(end) {}
   inline explicit CompactBufferReader(const CompactBufferWriter& writer);
   uint8_t readByte() {
-    MOZ_ASSERT(buffer_ < end_);
+    MOZ_ASSERT_IF(end_, buffer_ < end_);
     return *buffer_++;
   }
   uint32_t readFixedUint32_t() {
@@ -117,14 +117,14 @@ class CompactBufferReader {
   }
 
   bool more() const {
-    MOZ_ASSERT(buffer_ <= end_);
+    MOZ_ASSERT_IF(end_, buffer_ <= end_);
     return buffer_ < end_;
   }
 
   void seek(const uint8_t* start, uint32_t offset) {
     buffer_ = start + offset;
-    MOZ_ASSERT(start < end_);
-    MOZ_ASSERT(buffer_ <= end_);
+    MOZ_ASSERT_IF(end_, start < end_);
+    MOZ_ASSERT_IF(end_, buffer_ <= end_);
   }
 
   const uint8_t* currentPosition() const { return buffer_; }
@@ -214,6 +214,11 @@ class CompactBufferWriter {
     uintptr_t ptrWord = reinterpret_cast<uintptr_t>(ptr);
     for (unsigned i = 0; i < sizeof(uintptr_t); i++) {
       writeByte((ptrWord >> (i * 8)) & 0xFF);
+    }
+  }
+  void writeBytes(const uint8_t* data, size_t len) {
+    if (!buffer_.append(data, len)) {
+      enoughMemory_ = false;
     }
   }
   size_t length() const { return buffer_.length(); }

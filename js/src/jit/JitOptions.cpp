@@ -137,11 +137,6 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(portableBaselineInterpreter, false);
 #endif
 
-#ifdef ENABLE_PORTABLE_BASELINE_INTERP_FORCE
-  SET_DEFAULT(portableBaselineInterpreter, true);
-  SET_DEFAULT(portableBaselineInterpreterWarmUpThreshold, 0);
-#endif
-
   // emitInterpreterEntryTrampoline and enableICFramePointers are used in
   // combination with perf jitdump profiling.  The first will enable
   // trampolines for interpreter and baseline interpreter frames to
@@ -184,6 +179,20 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether to enable extra code to perform dynamic validations.
   SET_DEFAULT(runExtraChecks, false);
 
+#ifdef ENABLE_JS_AOT_ICS
+  SET_DEFAULT(enableAOTICs, false);
+  SET_DEFAULT(enableAOTICEnforce, false);
+#endif
+
+#ifdef ENABLE_JS_AOT_ICS_FORCE
+  SET_DEFAULT(enableAOTICs, true);
+#endif
+
+#ifdef ENABLE_JS_AOT_ICS_ENFORCE
+  SET_DEFAULT(enableAOTICs, true);
+  SET_DEFAULT(enableAOTICEnforce, true);
+#endif
+
   // How many invocations or loop iterations are needed before functions
   // enter the Baseline Interpreter.
   SET_DEFAULT(baselineInterpreterWarmUpThreshold, 10);
@@ -192,6 +201,13 @@ DefaultJitOptions::DefaultJitOptions() {
   // How many invocations are needed before functions enter the
   // Portable Baseline Interpreter.
   SET_DEFAULT(portableBaselineInterpreterWarmUpThreshold, 10);
+  SET_DEFAULT(portableBaselineInterpreterAttachThreshold, 10);
+#endif
+
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP_FORCE
+  SET_DEFAULT(portableBaselineInterpreter, true);
+  SET_DEFAULT(portableBaselineInterpreterWarmUpThreshold, 0);
+  SET_DEFAULT(portableBaselineInterpreterAttachThreshold, 0);
 #endif
 
   // How many invocations or loop iterations are needed before functions
