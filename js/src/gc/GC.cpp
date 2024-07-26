@@ -5013,6 +5013,16 @@ Realm* js::NewRealm(JSContext* cx, JSPrincipals* principals,
     zone->compartments().infallibleAppend(compHolder.release());
   }
 
+#ifdef ENABLE_JS_AOT_ICS
+  if (zone) {
+      // This is where the AOT IC corpus is loaded. If we do not eagerly force
+      // this, it may not be created when initializing then snapshotting the
+      // engine, because its creation is only otherwise triggered lazily by
+      // execution.
+      zone->ensureJitZoneExists(cx);
+  }
+#endif
+
   if (zoneHolder) {
     rt->gc.zones().infallibleAppend(zoneHolder.release());
 
