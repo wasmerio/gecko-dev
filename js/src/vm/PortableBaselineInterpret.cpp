@@ -6350,7 +6350,8 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
           result = Value::fromRawBits(ic_ret).toBoolean();
         }
         int32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (!result) {
+        int choice = PBL_SPECIALIZE_VALUE(uint32_t(result), 0, 1);
+        if (!choice) {
           ADVANCE(jumpOffset);
           PREDICT_NEXT(JumpTarget);
           PREDICT_NEXT(LoopHead);
@@ -6376,7 +6377,8 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
           result = Value::fromRawBits(ic_ret).toBoolean();
         }
         int32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (result) {
+        int choice = PBL_SPECIALIZE_VALUE(uint32_t(result), 0, 1);
+        if (choice) {
           ADVANCE(jumpOffset);
           PREDICT_NEXT(JumpTarget);
           PREDICT_NEXT(LoopHead);
@@ -6404,7 +6406,8 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
           result = Value::fromRawBits(ic_ret).toBoolean();
         }
         int32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (result) {
+        int choice = PBL_SPECIALIZE_VALUE(uint32_t(result), 0, 1);
+        if (choice) {
           ADVANCE(jumpOffset);
           PREDICT_NEXT(JumpTarget);
           PREDICT_NEXT(LoopHead);
@@ -6432,7 +6435,8 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
           result = Value::fromRawBits(ic_ret).toBoolean();
         }
         int32_t jumpOffset = GET_JUMP_OFFSET(pc);
-        if (!result) {
+        int choice = PBL_SPECIALIZE_VALUE(uint32_t(result), 0, 1);
+        if (!choice) {
           ADVANCE(jumpOffset);
           PREDICT_NEXT(JumpTarget);
           PREDICT_NEXT(LoopHead);
