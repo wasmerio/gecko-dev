@@ -5821,9 +5821,7 @@ static MOZ_ALWAYS_INLINE EnvironmentObject& getEnvironmentFromCoordinate(
       reinterpret_cast<uintptr_t>(spbase) - reinterpret_cast<uintptr_t>(sp);
 
 #define INVOKE_IC(kind, hasarg2)                                        \
-  if (!Specialized) {                                                   \
-    frame->interpreterPC() = pc;                                        \
-  }                                                                     \
+  frame->interpreterPC() = pc;                                          \
   SYNCSP();                                                             \
   UPDATE_SPOFF();                                                       \
   PBL_CALL_IC(icEntry->rawJitCode(), ctx, icEntry->firstStub(), ic_ret, \
