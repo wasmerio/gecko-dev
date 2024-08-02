@@ -5895,7 +5895,8 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
   ctx.entryPC = entryPC;                                       \
   argsObjAliasesFormals = new_script->argsObjAliasesFormals(); \
   isd = new_script->immutableScriptData();                     \
-  ctx.isd = isd;
+  ctx.isd = isd;                                               \
+  resumeOffsets = isd->resumeOffsets().data();
 
 #define OPCODE_LABEL(op, ...) LABEL(op),
 #define TRAILING_LABEL(v) LABEL(default),
@@ -5955,6 +5956,7 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
   ICCtx ctx(cx_, frame, state, stack);
   auto* icEntries = frame->icScript()->icEntries();
   auto* icEntry = icEntries;
+  const uint32_t* resumeOffsets = isd->resumeOffsets().data();
   StackVal* spbase;
   RESET_SP(sp);
   ctx.envChain = envChain;
@@ -8331,7 +8333,9 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
       }
 
       CASE(Coalesce) {
-        if (!VIRTSP(0).asValue().isNullOrUndefined()) {
+        bool cond = !VIRTSP(0).asValue().isNullOrUndefined();
+        int choice = PBL_SPECIALIZE_VALUE(int(cond), 0, 1);
+        if (choice) {
           ADVANCE(GET_JUMP_OFFSET(pc));
           DISPATCH();
         } else {
@@ -8341,7 +8345,8 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
 
       CASE(Case) {
         bool cond = VIRTPOP().asValue().toBoolean();
-        if (cond) {
+        int choice = PBL_SPECIALIZE_VALUE(int(cond), 0, 1);
+        if (choice) {
           VIRTPOP();
           ADVANCE(GET_JUMP_OFFSET(pc));
           DISPATCH();
@@ -8373,8 +8378,8 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
         i = PBL_SPECIALIZE_VALUE(i - low, low, high);
 
         if ((uint32_t(i) < uint32_t(high - low + 1))) {
-          len = isd->tableSwitchCaseOffset(pc, uint32_t(i)) - (pc - entryPC);
-          ADVANCE(len);
+          uint32_t firstResumeIndex = GET_RESUMEINDEX(pc + 3 * JUMP_OFFSET_LEN);
+          pc = entryPC + resumeOffsets[firstResumeIndex + i];
           DISPATCH();
         }
         ADVANCE(len);
