@@ -70,7 +70,8 @@
 
 #define PBL_PUSH_CTX(ctx) weval::push_context(reinterpret_cast<uint32_t>(ctx));
 
-#define PBL_UPDATE_CTX(ctx) \
+#define PBL_UPDATE_CTX(ctx)                                        \
+  weval_assert_const32(reinterpret_cast<uint32_t>(ctx), __LINE__); \
   weval::update_context(reinterpret_cast<uint32_t>(ctx));
 
 #define PBL_POP_CTX() \
@@ -125,7 +126,7 @@
                        : frame->script()->nfixed();
 
 #define PBL_SPECIALIZE_VALUE(i, low, high) \
-  int32_t(weval_specialize_value(uint32_t(i), 0, uint32_t(high - low + 1)));
+  int32_t(weval_specialize_value(uint32_t(i), low, high))
 
 #define PBL_SCRIPT_HAS_SPECIALIZATION(script) \
     (script->hasWeval() && script->weval().func)
