@@ -8375,11 +8375,11 @@ PBIResult PortableBaselineInterpret(JSContext* cx_, State& state, Stack& stack,
           DISPATCH();
         }
 
-        i = PBL_SPECIALIZE_VALUE(i - low, low, high);
-
-        if ((uint32_t(i) < uint32_t(high - low + 1))) {
+        if (i >= low && i <= high) {
+          uint32_t idx =
+            PBL_SPECIALIZE_VALUE(uint32_t(i) - uint32_t(low), 0, uint32_t(high - low + 1));
           uint32_t firstResumeIndex = GET_RESUMEINDEX(pc + 3 * JUMP_OFFSET_LEN);
-          pc = entryPC + resumeOffsets[firstResumeIndex + i];
+          pc = entryPC + resumeOffsets[firstResumeIndex + idx];
           DISPATCH();
         }
         ADVANCE(len);
